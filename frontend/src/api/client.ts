@@ -71,6 +71,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const coreApi = {
   health: () => request<{ status: string }>("/health"),
 
+  voiceIceServers: () => request<{ ice_servers: RTCIceServer[]; expires_at: number }>("/voice/ice-servers"),
+
   login: (username: string, password: string) => {
     const body = new URLSearchParams({ username, password });
     return request<LoginResponse>("/auth/login", { method: "POST", body });

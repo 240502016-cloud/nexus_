@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core import schemas
 from app.core.auth import get_current_user
+from app.core.authz import ensure_server_member
 from app.core.models import Role, Server, ServerMember, User
 from app.core.permissions import Permission
 from app.database import get_db
@@ -42,8 +43,13 @@ def list_my_servers(current_user: User = Depends(get_current_user)):
 
 
 @router.get("/{server_id}", response_model=schemas.ServerRead)
-def get_server(server_id: int, db: Session = Depends(get_db)):
+def get_server(
+    server_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     server = db.get(Server, server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Sunucu bulunamadı")
+    ensure_server_member(db, server, current_user)
     return server

@@ -4,6 +4,8 @@ import { defineConfig } from "vite";
 export default defineConfig({
   plugins: [react()],
   server: {
+    // Allow other devices on the LAN to open the dev client.
+    host: "0.0.0.0",
     port: 5173,
     proxy: {
       "/api": {

@@ -17,7 +17,11 @@ router = APIRouter(prefix="/bots", tags=["bots"])
 
 
 @router.post("", response_model=schemas.BotRead, status_code=201)
-def create_bot(payload: schemas.BotCreate, db: Session = Depends(get_db)):
+def create_bot(
+    payload: schemas.BotCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     if db.query(Bot).filter(Bot.name == payload.name).first():
         raise HTTPException(status_code=409, detail="Bu isimde bir bot zaten var")
 
@@ -41,7 +45,7 @@ def create_bot(payload: schemas.BotCreate, db: Session = Depends(get_db)):
 
 
 @router.get("", response_model=list[schemas.BotRead])
-def list_bots(db: Session = Depends(get_db)):
+def list_bots(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return db.query(Bot).all()
 
 

@@ -10,11 +10,48 @@ her zaman doğrudur.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import ceil
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.services.ollama.models import AiTokenUsage
+
+
+def estimate_tokens(text: str) -> int:
+    """Conservative model-agnostic estimate used before Ollama returns real token counts.
+
+    Different local models have different tokenizers, so this is intentionally an estimate
+    (roughly four Unicode characters per token), not a billing number. Real usage is still
+    recorded from Ollama's prompt_eval_count/eval_count response fields.
+    """
+    return max(1, ceil(len(text) / 4))
+
+
+def estimate_message_tokens(message: dict) -> int:
+    return 4 + estimate_tokens(str(message.get("content", "")))
+
+
+def build_token_limited_context(
+    history: list[dict], *, system_prompt: str, token_budget: int
+) -> list[dict]:
+    """Keep the newest complete messages that fit the prompt token budget."""
+    budget = max(128, token_budget)
+    system = {"role": "system", "content": system_prompt}
+    used = estimate_message_tokens(system)
+    selected: list[dict] = []
+    for message in reversed(history):
+        cost = estimate_message_tokens(message)
+        if selected and used + cost > budget:
+            break
+        if not selected and used + cost > budget:
+            # Always retain the latest user message, even when it alone exceeds the budget.
+            selected.append(message)
+            break
+        selected.append(message)
+        used += cost
+    selected.reverse()
+    return [system, *selected]
 
 
 @dataclass

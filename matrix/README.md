@@ -1,40 +1,32 @@
-# Matrix
+# Matrix Synapse
 
-Matrix Synapse konfigürasyonu. Sadece iletişim motoru (mesajlaşma/ses/video/dosya) olarak kullanılır;
-platforma özgü mantık burada değil `backend/core` içinde yaşar.
+Matrix, Nexus'un metin odaları ve mesaj geçmişi için iletişim motorudur. Platform kullanıcı,
+sunucu, kanal, bot ve yetki mantığı backend'de kalır.
 
-`matrix/synapse/` içeriği (`homeserver.yaml`, signing key, veritabanı) `docker compose ... generate`
-ile üretilir ve **secret içerdiği için git'e girmez** (bkz. `.gitignore`).
+## Production düzeni
 
-## Kurulum (ilk sefer)
+TASK-004 ile Matrix şu şekilde containerize edilmiştir:
 
-```bash
-cd nexus-communication-platform
-docker run --rm \
-  -v "$(pwd)/matrix/synapse:/data" \
-  -e SYNAPSE_SERVER_NAME=nexus.local \
-  -e SYNAPSE_REPORT_STATS=no \
-  matrixdotorg/synapse:latest generate
+- Image: `matrixdotorg/synapse:v1.153.0` tabanlı [Dockerfile](./Dockerfile)
+- Runtime config: `docker/matrix/render_config.py` tarafından environment'tan üretilir
+- Kalıcı config/signing key/media: `matrix_data` Docker volume'u
+- Veritabanı: PostgreSQL içindeki ayrı `synapse` kullanıcı/veritabanı
+- Dahili adres: `http://matrix:8008`
+- Public istemci/federasyon adresi: `https://<NEXUS_DOMAIN>/_matrix/*`
+- `/_synapse/admin/*` public reverse proxy üzerinden yayınlanmaz
+- Genel kayıt kapalı; Core API shared-secret admin kayıt API'sini dahili ağdan kullanır
 
-docker compose up -d synapse
-```
+Detaylı kurulum ve eski SQLite verisi için migration uyarısı:
+[../docs/deployment/DOCKER_PRODUCTION.md](../docs/deployment/DOCKER_PRODUCTION.md).
 
-Üretilen `homeserver.yaml` içindeki `registration_shared_secret` değerini kopyalayıp proje
-kökündeki `.env` dosyasına `MATRIX_REGISTRATION_SHARED_SECRET` olarak yapıştırın — Core API,
-kullanıcı hesaplarını bu secret ile arka planda (admin API üzerinden) provision eder; genel
-kayıt (`enable_registration`) kapalı kalır.
+## Eski geliştirme verisi
 
-Doğrulama: `curl http://localhost:8008/_matrix/client/versions`
+`matrix/synapse/` dizini önceki geliştirme kurulumunda üretilmiş SQLite config/verisini içerir
+ve `.gitignore` kapsamındadır. Yeni production Compose bu dizini mount etmez. Bu veriler gerekli
+ise PostgreSQL'e açık bir migration yapılmadan dizini silmeyin.
 
 ## Core API entegrasyonu
 
-`backend/app/core/matrix_client.py` şu anda: `register_user`, `create_room`, `invite_user`,
-`join_room`, `send_message`, `get_messages`. Bunlar `backend/app/core/routers/` altındaki REST
-uç noktalarından kullanılıyor (bkz. [../backend/README.md](../backend/README.md)).
-
-Bu akış gerçek Synapse + Postgres'e karşı uçtan uca test edildi: iki gerçek kullanıcı REST API
-üzerinden oluşturuldu, bir sunucu/kanal açıldı, ikinci kullanıcı kanala eklendi (davet+katılma)
-ve iki kullanıcı gerçek bir Matrix odasında karşılıklı mesajlaştı.
-
-Henüz eklenmedi: sesli kanal (VoIP) sinyalleşmesi, ekran paylaşımı, dosya paylaşımı — bkz.
-[../ROADMAP.md](../ROADMAP.md) Aşama 2'nin devamı.
+`backend/app/core/matrix_client.py`: shared-secret kullanıcı kaydı, oda oluşturma, davet,
+katılım, mesaj gönderme/okuma ve redaction işlemlerini gerçekleştirir. Compose backend'e
+`MATRIX_HOMESERVER_URL=http://matrix:8008` değerini zorunlu olarak uygular.

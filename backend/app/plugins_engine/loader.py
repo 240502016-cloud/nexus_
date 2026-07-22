@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 from pathlib import Path
 from types import ModuleType
 from typing import Callable
 
+from app.config import settings
 from app.plugins_engine.manifest import PluginManifest
+from app.plugins_engine.sandbox import execute_in_sandbox
 
 # backend/app/plugins_engine/loader.py -> proje kökü/plugins
 PLUGINS_DIR = Path(__file__).resolve().parents[3] / "plugins"
@@ -14,6 +17,9 @@ PLUGINS_DIR = Path(__file__).resolve().parents[3] / "plugins"
 
 class PluginLoadError(RuntimeError):
     pass
+
+
+_ENTRY_POINT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*:[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def discover_manifests() -> dict[str, PluginManifest]:
@@ -58,6 +64,22 @@ def load_handler(manifest: PluginManifest) -> Callable:
     return handler
 
 
+def _validate_manifest_entry_point(manifest: PluginManifest) -> None:
+    if not _ENTRY_POINT_RE.fullmatch(manifest.entry_point):
+        raise PluginLoadError(
+            f"Geçersiz entry_point: {manifest.entry_point!r} (beklenen: 'modül:fonksiyon')"
+        )
+
+
+def _sandbox_handler(manifest: PluginManifest) -> Callable:
+    _validate_manifest_entry_point(manifest)
+
+    def run(context: object) -> object:
+        return execute_in_sandbox(manifest, context)
+
+    return run
+
+
 class PluginRegistry:
     """Etkinleştirilmiş plugin'lerin bellekteki kayıt defteri.
 
@@ -71,7 +93,13 @@ class PluginRegistry:
         self._loaded_plugins: set[str] = set()
 
     def load(self, manifest: PluginManifest) -> None:
-        handler = load_handler(manifest)
+        # Production never imports third-party plugin code into the Core API process.
+        # The local path remains available only when explicitly selected for development.
+        handler = (
+            load_handler(manifest)
+            if settings.plugin_execution_mode == "local"
+            else _sandbox_handler(manifest)
+        )
         for command in manifest.commands:
             self._handlers[command] = (manifest.name, handler)
         self._loaded_plugins.add(manifest.name)

@@ -1,4 +1,3 @@
-# ai_assistant plugin'ine özgü ayarlar.
-# Şu anki main.py bunu henüz okumuyor (URL/model kodda sabit); ileride buradan okunacak.
-ollama_url: http://localhost:11434/api/chat
-model: qwen2.5:7b
+# ai_assistant ayrı bir Ollama adresi kullanmaz. Backend'in kök .env dosyasındaki
+# OLLAMA_BASE_URL (AI Gateway), OLLAMA_API_KEY ve OLLAMA_DEFAULT_MODEL ayarlarını kullanır.
+# Bu dosya gelecekte plugine özgü prompt/davranış seçenekleri için ayrılmıştır.

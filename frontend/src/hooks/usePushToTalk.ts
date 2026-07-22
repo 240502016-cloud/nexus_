@@ -20,6 +20,15 @@ export function usePushToTalk(enabled: boolean, combo: KeyCombo, onChange: (acti
     const pressed = new Set<string>();
     let active = false;
 
+    function isComboKey(event: KeyboardEvent): boolean {
+      return (
+        event.code === combo.code ||
+        (combo.ctrl && event.code.startsWith("Control")) ||
+        (combo.shift && event.code.startsWith("Shift")) ||
+        (combo.alt && event.code.startsWith("Alt"))
+      );
+    }
+
     function evaluate() {
       const ctrlOk = !combo.ctrl || [...pressed].some((code) => code.startsWith("Control"));
       const shiftOk = !combo.shift || [...pressed].some((code) => code.startsWith("Shift"));
@@ -33,10 +42,12 @@ export function usePushToTalk(enabled: boolean, combo: KeyCombo, onChange: (acti
     }
 
     function handleKeyDown(event: KeyboardEvent) {
+      if (isComboKey(event)) event.preventDefault();
       pressed.add(event.code);
       evaluate();
     }
     function handleKeyUp(event: KeyboardEvent) {
+      if (isComboKey(event)) event.preventDefault();
       pressed.delete(event.code);
       evaluate();
     }
@@ -51,11 +62,13 @@ export function usePushToTalk(enabled: boolean, combo: KeyCombo, onChange: (acti
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
     window.addEventListener("blur", reset);
+    document.addEventListener("visibilitychange", reset);
 
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("blur", reset);
+      document.removeEventListener("visibilitychange", reset);
       if (active) onChangeRef.current(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

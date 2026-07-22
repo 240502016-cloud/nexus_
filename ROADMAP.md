@@ -134,6 +134,39 @@ sunucusu"), Ollama connector servisi, Discord tarzı bas-konuş (push-to-talk) v
   bilgiyi hatırladı), token kullanımı doğru toplandı.
 - **Gerçek iki-makine hibrit kurulum** — henüz yapılmadı (bu makineden ikinci bir fiziksel
   makineye bağlanılamıyor; kod hazır, gerçek dağıtım kullanıcı tarafında yapılmalı)
+- **TASK-001/002 — AI Gateway + Tailscale güvenlik katmanı** ✅ (repo tarafı) — bağımsız
+  `ai-gateway/` servisi; Bearer API key, CIDR whitelist, güvenilir proxy kontrolü,
+  `/ai/health`, `/api/tags` ve `/api/chat` proxy uçları. İki Windows bilgisayar için Tailscale
+  Grants/Firewall kurulumu `docs/deployment/TAILSCALE_SETUP.md` altında hazırlandı. Gerçek
+  100.x adresleriyle fiziksel iki-makine kurulumu hâlâ kullanıcı tarafında yapılmalı.
+- **TASK-003 — Backend → AI Gateway → Ollama yönlendirmesi** ✅ — Backend OllamaClient artık
+  gateway `/ai/health` üzerinden model doğrular; bağlantı/geçici `429/502/503` hatalarında
+  sınırlı exponential-backoff retry uygular; chat read-timeout/504 sonrasında çift üretimi
+  önlemek için retry yapmaz. Model/auth/unavailable/timeout hataları Core API'de sırasıyla
+  `422/502/503/504` olarak ayrıştırılır. Yerel gerçek gateway+Ollama zincirinde uçtan uca test edildi.
+- **TASK-004 — Production Docker düzeni** ✅ (config/build doğrulaması) — `frontend`, `backend`,
+  `postgres`, `matrix`, `reverse-proxy` servisleri; frontend/backend multi-stage image'ları,
+  Caddy otomatik HTTPS ve aynı-origin `/api`/WebSocket/Matrix proxy, healthcheck/depends_on,
+  internal data ağı ve kalıcı volume'lar eklendi. Synapse SQLite yerine aynı PostgreSQL
+  container'ındaki ayrı kullanıcı/veritabanını kullanacak şekilde yapılandırıldı. Compose
+  config ve frontend production build doğrulandı; Docker daemon kapalı olduğu için image'lar
+  bu makinede henüz build edilip topluca ayağa kaldırılmadı. Eski SQLite/Postgres verisi için
+  otomatik migration yapılmaz; production geçişinden önce yedek/migration gerekir.
+- **TASK-005 — HTTPS / Reverse Proxy** ✅ (repo tarafı) — Caddy için zorunlu domain ve ACME
+  e-postası, otomatik public HTTPS/HTTP yönlendirmesi, TLS 1.2–1.3, aynı-origin WSS proxy,
+  Matrix `.well-known` discovery yanıtları ve dış doğrulama scripti eklendi. Gerçek domain/DNS
+  henüz verilmediği ve Docker daemon kapalı olduğu için public sertifika alımı ile internetten
+  HTTPS/WSS testi kullanıcı tarafında yapılmalıdır.
+- **TASK-006 — Database güvenliği** ✅ (repo tarafı) — PostgreSQL host portu yayınlanmıyor ve
+  internal data ağında kalıyor; tek-seferlik Alembic `migrate` servisi, PostgreSQL/Synapse
+  custom-format dump + globals backup'ı, SHA-256 manifesti, onaylı restore scripti ve operasyon
+  dokümantasyonu eklendi. Gerçek production backup/restore tatbikatı Docker/PostgreSQL çalışan
+  ortamda kullanıcı tarafında yapılmalıdır.
+- **TASK-007 — AI Worker sistemi** ✅ (repo tarafı) — AI sohbet mesajları artık 202 ile kalıcı
+  `ai_jobs` kuyruğuna, kanal içi `/sor` bot komutları `ai_bot_jobs` kuyruğuna alınır; ayrı
+  `ai-worker` process'i lease/timeout/retry mantığıyla Ollama üretimini yapar. API process'i model
+  üretiminde bloke olmaz; canlı çoklu kullanıcı/worker ölçek testi Docker ortamında ayrıca
+  yapılmalıdır.
 - **Sesli kanal (WebRTC)** ✅ — Matrix'in karmaşık grup çağrı protokolü (MSC3401) yerine,
   Core API üzerinde kendi hafif WebSocket signaling'imiz (`backend/app/core/routers/voice.py`):
   offer/answer/ICE candidate relay, mesh topoloji (yeni katılan herkese offer gönderir),
@@ -179,3 +212,24 @@ sunucusu"), Ollama connector servisi, Discord tarzı bas-konuş (push-to-talk) v
   Docker gerektirdiği için) ayrıca uçtan uca denenmedi.
 
 Not: Her aşama bir öncekinin üzerine inşa edilir; bir aşama tamamlanmadan bir sonrakine geçilmez.
+- **TASK-008 — AI geliştirmeleri** ✅ (repo tarafı) — Token bütçeli context seçimi, Ollama
+  streaming çıktısının kalıcı job alanına flush edilmesi, SSE ile istemci akışı, cooperative
+  kullanıcı iptali ve konuşma oluştururken kurulu model doğrulaması eklendi.
+- **TASK-009 — Auth açıkları** ✅ (repo tarafı) — Kaynak endpoint'lerindeki eksik Bearer
+  doğrulaması kapatıldı; sunucu ayrıntısı üyelik kontrolüne alındı ve pasif kullanıcıların
+  token'ları hem login hem de mevcut oturum doğrulamasında reddediliyor. Login/kayıt/health
+  endpoint'leri bilerek public bırakıldı.
+- **TASK-010 — Plugin sandbox** ✅ (altyapı) — Production plugin çağrıları artık Core API
+  process'ine import edilmeden internal `plugin-sandbox` container'ına yönlendiriliyor;
+  subprocess timeout, read-only filesystem, network izolasyonu, capability/PID/RAM/CPU
+  sınırları ve shared-secret doğrulaması eklendi. `local` modu yalnızca geliştirme içindir.
+- **TASK-011 — TURN Server** ✅ (repo tarafı) — Coturn servisi, public relay port aralığı,
+  internal signaling ile kısa ömürlü HMAC credential endpoint'i ve frontend ICE yapılandırması
+  eklendi. Gerçek NAT/CGNAT bağlantı testi production public IP ve DNS ile ayrıca yapılmalıdır.
+- **TASK-012 — WebRTC tamamlanması** ✅ (repo tarafı) — ICE credential'larının bağlantı öncesi
+  alınması, erken gelen ICE adaylarının kuyruğa alınması, TURN/firewall hata geri bildirimi
+  ve LAN geliştirme erişimi eklendi. Gerçek iki tarayıcı/NAT testi deployment sırasında yapılmalıdır.
+- **TASK-013 — Push To Talk** ✅ (repo tarafı) — Bas-konuş modu, özelleştirilebilir Ctrl/Shift/Alt+
+  tuş kombinasyonu, localStorage kalıcılığı, kayıt sırasında varsayılan davranış engelleme ve
+  sekme görünürlüğü değişince güvenli mikrofon sıfırlaması eklendi. Global hotkey desteği tarayıcı
+  güvenlik modeli nedeniyle kapsam dışıdır.

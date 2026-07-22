@@ -17,6 +17,11 @@ vite.config.d.ts
 # Env
 .env
 .env.local
+ai-gateway/.env
+ai-gateway/*.log
+
+# PostgreSQL backup artifacts (contain database contents and role password hashes)
+backups/
 
 # Matrix Synapse - `docker compose ... generate` ile üretilir, secret içerir (bkz. matrix/README.md)
 matrix/synapse/*

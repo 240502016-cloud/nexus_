@@ -1,5 +1,6 @@
 from app.config import settings
 from app.services.ollama.client import DEFAULT_SYSTEM_PROMPT, OllamaError, ollama_client
+from app.services.ollama.worker import QueuedAiResponse, enqueue_bot_question
 
 
 def handle_command(context):
@@ -13,6 +14,10 @@ def handle_command(context):
     question = (context.args or "").strip()
     if not question:
         return "Kullanım: /sor <soru>"
+
+    queued = enqueue_bot_question(context)
+    if queued is not None:
+        return queued
 
     try:
         response = ollama_client.chat(

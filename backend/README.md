@@ -61,8 +61,9 @@ içindeki `registration_shared_secret` ile aynı olmalı (bkz. [../matrix/README
 
 - `POST /auth/login` — `username`/`password` (form-encoded, OAuth2 password flow) alır,
   JWT (`access_token`) döner. Parolalar `security.py::hash_password` (pbkdf2) ile saklanır.
-- Diğer tüm uç noktalar `Authorization: Bearer <token>` bekler; `auth.py::get_current_user`
-  token'ı çözüp `User` nesnesini enjekte eder.
+- `/users` kayıt, `/auth/login` ve `/health` bilerek public'tir; kaynak ve işlem uç noktalarının
+  tamamı `Authorization: Bearer <token>` bekler. `auth.py::get_current_user` token'ı çözüp
+  kullanıcıyı yükler ve `is_active=false` hesapları reddeder.
 - `authz.py`: `ensure_server_owner` (sadece sahip kanal/üye ekleyebilir),
   `ensure_server_member` (sadece üyeler mesaj okuyup yazabilir). İhlalde `403` döner.
 
@@ -87,6 +88,9 @@ oluştur → üye ekle → iki kullanıcı karşılıklı mesajlaşır).
 
 `plugins/<isim>/plugin.json` + `main.py` sözleşimi ve REST akışı için
 [../plugins/README.md](../plugins/README.md)'ye bakın. Kısaca:
+
+Production'da plugin komutları `plugin-sandbox` container'ına gönderilir; backend'e plugin
+modülü import edilmez. `PLUGIN_EXECUTION_MODE=local` sadece geliştirme/test içindir.
 
 ```
 GET  /plugins                    -> plugins/ altında keşfedilenler + kurulu/etkin durumu
@@ -129,25 +133,64 @@ doğru çalışıyor).
 
 ## AI (Ollama) servisi
 
-`app/services/ollama/` — hibrit mimariye hazır bir Ollama connector: `OllamaClient`'ın
-`base_url`/`api_key`'i `.env` üzerinden yapılandırılabilir (`OLLAMA_BASE_URL`), yani ileride
-ayrı bir "AI işlem sunucusu"na (başka bir makine) işaret edebilir. `plugins/ai_assistant`
-de artık kendi HTTP çağrısını yapmıyor, bu paylaşılan client'ı kullanıyor.
+`app/services/ollama/` artık doğrudan Ollama'ya bağlanmaz. `OLLAMA_BASE_URL`, Tailscale
+üzerindeki TASK-001 AI Gateway'i (`http://<AI_TAILSCALE_IP>:8090`) gösterir; Bearer anahtarı
+`OLLAMA_API_KEY` ile gönderilir. Gateway de yalnızca kendi bilgisayarındaki
+`127.0.0.1:11434` Ollama servisine proxy olur. `plugins/ai_assistant` aynı paylaşılan client'ı
+kullandığı için bot komutları da otomatik olarak bu zincirden geçer.
 
 ```
+GET  /ai/health                              -> Gateway/Ollama durumu + kurulu model adları
 GET  /ai/models                              -> Ollama'daki kurulu modelleri listeler
 POST /ai/conversations                        -> yeni sohbet oluşturur (model seçimi opsiyonel)
 GET  /ai/conversations                         -> current_user'ın sohbetlerini listeler
 GET  /ai/conversations/{id}/messages            -> sohbet geçmişini okur
-POST /ai/conversations/{id}/messages             -> mesaj gönderir; son 20 mesaj context
-                                                     olarak Ollama'ya gönderilir, cevap +
-                                                     her iki mesaj da Postgres'e yazılır
+POST /ai/conversations/{id}/messages             -> kullanıcı mesajını ve queued AI job'ını
+                                                     kısa transaction'da kaydeder (202); cevap
+                                                     ayrı ai-worker tarafından yazılır
+GET  /ai/jobs/{id}                                -> queued/running/succeeded/failed/cancelled job durumu
+GET  /ai/jobs/{id}/stream                         -> Bearer-authenticated SSE token/status akışı
+POST /ai/jobs/{id}/cancel                         -> queued/running job için cooperative iptal
 GET  /ai/usage                                    -> modele göre gruplanmış token kullanımı
 ```
+
+Her sohbetten önce seçilen model gateway'in `/ai/health` yanıtındaki kurulu model listesinde
+doğrulanır. Liste kısa süreli cache'lenir (`OLLAMA_MODEL_CACHE_SECONDS`, varsayılan 30 saniye).
+Kurulu olmayan model konuşma oluşturulurken veya eski bir konuşmadan mesaj gönderilirken
+`422` döndürür.
+
+Bağlantı davranışı `.env` üzerinden ayarlanır:
+
+```dotenv
+OLLAMA_CONNECT_TIMEOUT_SECONDS=5
+OLLAMA_READ_TIMEOUT_SECONDS=120
+OLLAMA_MAX_RETRIES=2
+OLLAMA_RETRY_BACKOFF_SECONDS=0.5
+OLLAMA_MODEL_CACHE_SECONDS=30
+```
+
+Retry gecikmesi üstel artar (`0.5s`, `1s`, ...). Bağlantı hataları ile geçici
+`429/502/503` yanıtları yeniden denenir. Bir chat üretimi başlamış olabileceği için read timeout
+veya `504` sonrasında aynı üretim tekrar başlatılmaz.
+
+Core API hata eşlemesi:
+
+| Durum | Core API yanıtı |
+|---|---:|
+| Model kurulu değil | `422` |
+| Gateway API anahtarı/config hatası | `502` |
+| Gateway/Ollama kullanılamıyor | `503` |
+| Gateway/Ollama timeout | `504` |
+| Diğer upstream hatası | `502` |
 
 Token sayımı, Ollama'nın `/api/chat` yanıtındaki gerçek `prompt_eval_count`/`eval_count`
 değerlerinden alınır (ayrı bir tahmini tokenizer kütüphanesi kullanılmaz — farklı modellerin
 tokenizer'ları farklıdır, kaynağından okumak her zaman doğrudur).
+
+Context seçiminde `AI_CONTEXT_TOKEN_BUDGET` (yaklaşık karakter/4 hesabı) ve üretim üst
+sınırında `AI_MAX_OUTPUT_TOKENS` kullanılır. Worker çıktıyı periyodik olarak job'a flush
+ettiği için SSE bağlantısı kopup yeniden kurulabilir; tarayıcı istemcisi Bearer header
+gerektiğinden `EventSource` yerine `fetch`/`ReadableStream` kullanmalıdır.
 
 `DEFAULT_SYSTEM_PROMPT` (`client.py`) her istekte otomatik eklenir (DB'ye yazılmaz) - küçük
 yerel modelin (`qwen2.5:7b`) tutarsız/uydurma cevap verme eğilimini azaltır. Örnek: sistem
@@ -169,7 +212,13 @@ offer/answer/ICE candidate mesajlarını ilgili karşı tarafa relay eder.
 
 ```
 WS /channels/{id}/voice?token=<jwt>   -> sadece VOICE tipi kanallar, sadece üyeler/sahip
+GET /voice/ice-servers                   -> auth gerektirir; kısa ömürlü TURN ICE credential'ı
 ```
+
+Production Compose'ta coturn `TURN_DOMAIN` üzerinden `3478/tcp+udp` ve relay port aralığını
+(varsayılan `49160-49200`) yayınlar. `TURN_EXTERNAL_IP` coturn'un public IP'siyle aynı olmalıdır.
+Core API, `TURN_AUTH_SECRET` ile coturn REST authentication formatında kullanıcıya özel, süreli
+credential üretir; ortak secret tarayıcıya hiç gönderilmez.
 
 Protokol (JSON mesajlar): `peers` (katılınca mevcut listeyi alırsın), `peer-joined`/
 `peer-left` (broadcast), `offer`/`answer`/`ice-candidate` (`to` ile hedeflenir, sunucu
@@ -195,8 +244,12 @@ cp ../.env.example ../.env    # ve değerleri doldurun (özellikle MATRIX_REGIST
 uvicorn app.main:app --reload
 ```
 
-`GET /health` ile ayakta olduğunu doğrulayabilirsiniz. Uygulama açılışta (`startup` event)
-tabloları otomatik oluşturur — bu geçici bir kolaylıktır, ileride Alembic migration'larına
-geçilecektir. Postgres ve Synapse'in ayakta olması gerekir: proje kökünden `docker compose up -d`.
+`GET /health` ile ayakta olduğunu doğrulayabilirsiniz. AI generation API process'inde çalışmaz;
+`ai-worker` servisi PostgreSQL kuyruğunu tarar, blocking Ollama çağrısını kendi process'inde yapar
+ve sonucu `ai_messages`/`ai_token_usage` tablolarına yazar. Şema artık uygulama açılışında otomatik
+oluşturulmaz; production Compose'taki tek-seferlik `migrate` servisi `alembic upgrade head`
+çalıştırır. Lokal çalıştırmada önce proje kökünden `docker compose run --rm migrate` veya
+`backend` dizininden `alembic upgrade head` çalıştırılmalıdır. Postgres ve Synapse'in ayakta
+olması gerekir.
 
 Genel proje durumu için bkz. [ROADMAP.md](../ROADMAP.md).

@@ -1,43 +1,305 @@
-# Aşama 2'de doldurulacak altyapı iskeleti (Matrix Synapse + PostgreSQL + Core API).
-# Şu an sadece servis taslaklarını içerir, henüz çalıştırılabilir durumda değildir.
+name: nexus
 
 services:
   postgres:
-    image: postgres:16
-    env_file: .env
+    image: postgres:16.14-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER:?POSTGRES_ADMIN_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?POSTGRES_ADMIN_PASSWORD is required}
+      POSTGRES_DB: postgres
+      APP_POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      APP_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      APP_POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      SYNAPSE_POSTGRES_USER: ${SYNAPSE_POSTGRES_USER:?SYNAPSE_POSTGRES_USER is required}
+      SYNAPSE_POSTGRES_PASSWORD: ${SYNAPSE_POSTGRES_PASSWORD:?SYNAPSE_POSTGRES_PASSWORD is required}
+      SYNAPSE_POSTGRES_DB: ${SYNAPSE_POSTGRES_DB:?SYNAPSE_POSTGRES_DB is required}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 512M
+      # Backup çıktısı DB container'ından ayrı, host portu yayınlamayan Docker volume'undadır.
+      - postgres_backups:/backups
+      - ./docker/postgres/init-databases.sh:/docker-entrypoint-initdb.d/10-nexus-databases.sh:ro
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    cpus: 1.0
+    mem_limit: 768m
 
-  synapse:
-    image: matrixdotorg/synapse:latest
-    env_file: .env
-    volumes:
-      - ./matrix/synapse:/data
-    ports:
-      - "8008:8008"
+  migrate:
+    image: nexus-backend:0.1.0
+    restart: "no"
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      MATRIX_HOMESERVER_URL: http://matrix:8008
     depends_on:
-      - postgres
-    deploy:
-      resources:
-        limits:
-          cpus: "1.5"
-          memory: 1G
+      postgres:
+        condition: service_healthy
+    networks:
+      - app
+      - data
+    command: ["alembic", "upgrade", "head"]
+    security_opt:
+      - no-new-privileges:true
 
-  # core-api:
-  #   build: ./backend
-  #   env_file: .env
-  #   ports:
-  #     - "8000:8000"
-  #   depends_on:
-  #     - postgres
-  #     - synapse
+  plugin-sandbox:
+    image: nexus-backend:0.1.0
+    restart: unless-stopped
+    environment:
+      PLUGIN_SANDBOX_API_KEY: ${PLUGIN_SANDBOX_API_KEY:?PLUGIN_SANDBOX_API_KEY is required}
+      PLUGIN_SANDBOX_TIMEOUT_SECONDS: ${PLUGIN_SANDBOX_TIMEOUT_SECONDS:-10}
+      PLUGIN_SANDBOX_MAX_PAYLOAD_BYTES: ${PLUGIN_SANDBOX_MAX_PAYLOAD_BYTES:-65536}
+      PLUGIN_SANDBOX_MAX_OUTPUT_BYTES: ${PLUGIN_SANDBOX_MAX_OUTPUT_BYTES:-65536}
+      PLUGIN_ROOT: /srv/plugins
+    command: ["uvicorn", "app.plugins_sandbox.main:app", "--host", "0.0.0.0", "--port", "8091"]
+    networks:
+      - sandbox
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    cpus: 1.0
+    mem_limit: 512m
+
+  turn:
+    image: coturn/coturn:4.6.3
+    restart: unless-stopped
+    command:
+      - -n
+      - --log-file=stdout
+      - --fingerprint
+      - --lt-cred-mech
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_AUTH_SECRET:?TURN_AUTH_SECRET is required}
+      - --realm=${TURN_DOMAIN:?TURN_DOMAIN is required}
+      - --listening-port=3478
+      - --min-port=${TURN_MIN_PORT:-49160}
+      - --max-port=${TURN_MAX_PORT:-49200}
+      - --external-ip=${TURN_EXTERNAL_IP:?TURN_EXTERNAL_IP is required}
+      - --no-tls
+      - --no-dtls
+      - --no-cli
+    ports:
+      - "${TURN_PORT:-3478}:3478/tcp"
+      - "${TURN_PORT:-3478}:3478/udp"
+      - "${TURN_MIN_PORT:-49160}-${TURN_MAX_PORT:-49200}:${TURN_MIN_PORT:-49160}-${TURN_MAX_PORT:-49200}/tcp"
+      - "${TURN_MIN_PORT:-49160}-${TURN_MAX_PORT:-49200}:${TURN_MIN_PORT:-49160}-${TURN_MAX_PORT:-49200}/udp"
+    read_only: true
+    tmpfs:
+      - /var/lib/coturn:size=32m,mode=1777
+      - /tmp:size=32m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # coturn needs this capability even when listening on its standard 3478 port.
+    # Keep every other capability dropped.
+    cap_add:
+      - NET_BIND_SERVICE
+    cpus: 1.0
+    mem_limit: 512m
+
+  ai-worker:
+    image: nexus-backend:0.1.0
+    restart: unless-stopped
+    stop_grace_period: 2m30s
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      MATRIX_HOMESERVER_URL: http://matrix:8008
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - app
+      - data
+    command: ["python", "-m", "app.services.ollama.worker"]
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cpus: 1.0
+    mem_limit: 512m
+
+  matrix:
+    build:
+      context: .
+      dockerfile: matrix/Dockerfile
+    image: nexus-matrix:1.153.0
+    restart: unless-stopped
+    environment:
+      SYNAPSE_SERVER_NAME: ${MATRIX_SERVER_NAME:?MATRIX_SERVER_NAME is required}
+      SYNAPSE_REPORT_STATS: "no"
+      SYNAPSE_CONFIG_DIR: /data
+      SYNAPSE_CONFIG_PATH: /data/homeserver.yaml
+      SYNAPSE_DATA_DIR: /data
+      NEXUS_PUBLIC_BASEURL: https://${NEXUS_DOMAIN:?NEXUS_DOMAIN is required}/
+      SYNAPSE_POSTGRES_HOST: postgres
+      SYNAPSE_POSTGRES_PORT: 5432
+      SYNAPSE_POSTGRES_USER: ${SYNAPSE_POSTGRES_USER:?SYNAPSE_POSTGRES_USER is required}
+      SYNAPSE_POSTGRES_PASSWORD: ${SYNAPSE_POSTGRES_PASSWORD:?SYNAPSE_POSTGRES_PASSWORD is required}
+      SYNAPSE_POSTGRES_DB: ${SYNAPSE_POSTGRES_DB:?SYNAPSE_POSTGRES_DB is required}
+      MATRIX_REGISTRATION_SHARED_SECRET: ${MATRIX_REGISTRATION_SHARED_SECRET:?MATRIX_REGISTRATION_SHARED_SECRET is required}
+      MATRIX_MACAROON_SECRET_KEY: ${MATRIX_MACAROON_SECRET_KEY:?MATRIX_MACAROON_SECRET_KEY is required}
+      MATRIX_FORM_SECRET: ${MATRIX_FORM_SECRET:?MATRIX_FORM_SECRET is required}
+    volumes:
+      - matrix_data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - app
+      - data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8008/_matrix/client/versions', timeout=5)"
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    cpus: 1.5
+    mem_limit: 1g
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: nexus-backend:0.1.0
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      MATRIX_HOMESERVER_URL: http://matrix:8008
+      PLUGIN_EXECUTION_MODE: sandbox
+      PLUGIN_SANDBOX_URL: http://plugin-sandbox:8091
+    depends_on:
+      postgres:
+        condition: service_healthy
+      matrix:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      plugin-sandbox:
+        condition: service_healthy
+    networks:
+      - app
+      - data
+      - sandbox
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cpus: 2.0
+    mem_limit: 2g
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    image: nexus-frontend:0.1.0
+    restart: unless-stopped
+    networks:
+      - app
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    cpus: 0.5
+    mem_limit: 128m
+
+  reverse-proxy:
+    image: caddy:2.11.4-alpine
+    restart: unless-stopped
+    environment:
+      NEXUS_DOMAIN: ${NEXUS_DOMAIN:?NEXUS_DOMAIN is required}
+      NEXUS_ACME_EMAIL: ${NEXUS_ACME_EMAIL:?NEXUS_ACME_EMAIL is required}
+    ports:
+      - "${NEXUS_HTTP_PORT:-80}:80"
+      - "${NEXUS_HTTPS_PORT:-443}:443"
+      - "${NEXUS_HTTPS_PORT:-443}:443/udp"
+    volumes:
+      - ./docker/reverse-proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      frontend:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+      matrix:
+        condition: service_healthy
+    networks:
+      - app
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    cpus: 0.5
+    mem_limit: 256m
+
+networks:
+  app:
+    driver: bridge
+  data:
+    driver: bridge
+    internal: true
+  sandbox:
+    driver: bridge
+    internal: true
 
 volumes:
   postgres_data:
+  postgres_backups:
+  matrix_data:
+  caddy_data:
+  caddy_config:

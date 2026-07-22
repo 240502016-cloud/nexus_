@@ -7,6 +7,7 @@ from app.core.models import Plugin, User
 from app.database import get_db
 from app.plugins_engine.context import PluginContext
 from app.plugins_engine.loader import PluginLoadError, discover_manifests, plugin_registry
+from app.plugins_engine.sandbox import PluginSandboxError
 
 router = APIRouter(prefix="/plugins", tags=["plugins"])
 
@@ -15,7 +16,7 @@ router = APIRouter(prefix="/plugins", tags=["plugins"])
 
 
 @router.get("", response_model=list[schemas.PluginManifestRead])
-def list_plugins(db: Session = Depends(get_db)):
+def list_plugins(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     manifests = discover_manifests()
     installed = {p.name: p for p in db.query(Plugin).all()}
 
@@ -85,6 +86,8 @@ def run_command(payload: schemas.PluginCommandRequest, current_user: User = Depe
     )
     try:
         output = handler(context)
+    except PluginSandboxError as exc:
+        raise HTTPException(status_code=503, detail="Plugin sandbox kullanılamıyor") from exc
     except Exception as exc:  # plugin kodu güvenilmez; çökmesi Core API'yi düşürmemeli
         raise HTTPException(status_code=500, detail=f"Plugin çalıştırma hatası: {exc}") from exc
 

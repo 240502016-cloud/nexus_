@@ -9,6 +9,7 @@ from app.core.models import Bot, BotServerLink, Channel
 from app.core.rate_limit import RateLimiter
 from app.plugins_engine.context import PluginContext
 from app.plugins_engine.loader import plugin_registry
+from app.services.ollama.models import QueuedAiResponse
 
 # Kullanıcı başına 10 saniyede en fazla 5 komut - plugin'lerin (özellikle Ollama gibi
 # CPU/GPU maliyeti olanların) mesaj spam'iyle kötüye kullanılmasını önler.
@@ -25,9 +26,9 @@ class MessageEvent:
     """Bir kanala mesaj gönderildiğinde oluşan olay.
 
     Bot Engine'in şu an dinlediği tek olay tipi bu; katılma/ayrılma gibi diğer olaylar
-    (bkz. ARCHITECTURE.md) ileride eklenecek. Şu an senkron olarak mesaj gönderme uç
-    noktasından (routers/messages.py) tetikleniyor — gerçek bir event bus/kuyruk değil;
-    bu, ileride Matrix /sync akışına taşınacak bir MVP.
+    (bkz. ARCHITECTURE.md) ileride eklenecek. Mesaj gönderme uç noktasından (routers/messages.py)
+    tetiklenir; AI `/sor` komutu ayrı PostgreSQL worker kuyruğuna bırakılır, diğer plugin'ler
+    mevcut senkron MVP akışını kullanır.
     """
 
     channel: Channel
@@ -40,6 +41,7 @@ class MessageEvent:
 class BotReply:
     bot_name: str
     content: str
+    send_matrix: bool = True
 
 
 def parse_command(content: str, prefix: str) -> tuple[str, str] | None:
@@ -91,11 +93,18 @@ def _run_command(
             bot_name=bot.name,
         )
         try:
-            output = str(handler(context))
+            raw_output = handler(context)
+            if isinstance(raw_output, QueuedAiResponse):
+                return BotReply(
+                    bot_name=bot.name,
+                    content=f"AI isteği kuyruğa alındı (job_id={raw_output.job_id}).",
+                    send_matrix=False,
+                )
+            output = str(raw_output)
         except Exception as exc:  # plugin kodu güvenilmez; botun cevap veremediğini bildir
             output = f"({bot.name} hata: {exc})"
 
-    if bot.matrix_access_token and event.channel.matrix_room_id:
+    if bot.matrix_access_token and event.channel.matrix_room_id and not isinstance(output, QueuedAiResponse):
         try:
             matrix_client.send_message(bot.matrix_access_token, event.channel.matrix_room_id, output)
         except MatrixError:

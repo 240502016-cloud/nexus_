@@ -1,0 +1,21 @@
+// Tailscale Admin Console -> Access controls policy örneği.
+// Placeholder değerleri gerçek 100.x Tailscale IP'leriyle değiştirin.
+// Mevcut geniş allow-all grant/ACL varsa bu kuralı etkisiz bırakabileceğini unutmayın.
+{
+  "grants": [
+    {
+      "src": ["<NEXUS_TAILSCALE_IP>"],
+      "dst": ["<AI_TAILSCALE_IP>"],
+      "ip": ["tcp:8090"]
+    }
+  ],
+
+  "tests": [
+    {
+      "src": "<NEXUS_TAILSCALE_IP>",
+      "accept": ["<AI_TAILSCALE_IP>:8090"],
+      "deny": ["<AI_TAILSCALE_IP>:11434"]
+    }
+  ]
+}
+

@@ -84,9 +84,13 @@ class MatrixClient:
         if not response.ok:
             raise MatrixError(f"Odaya katılınamadı: {response.status_code} {response.text}")
 
-    def send_message(self, access_token: str, room_id: str, content: str) -> str:
-        """Odaya metin mesajı gönderir, event_id döner."""
-        txn_id = uuid.uuid4().hex
+    def send_message(self, access_token: str, room_id: str, content: str, txn_id: str | None = None) -> str:
+        """Odaya metin mesajı gönderir, event_id döner.
+
+        Worker retries can pass a stable transaction ID so Matrix de-duplicates a request that
+        timed out after the homeserver accepted it.
+        """
+        txn_id = txn_id or uuid.uuid4().hex
         response = requests.put(
             f"{self.base_url}/_matrix/client/v3/rooms/{room_id}/send/m.room.message/{txn_id}",
             headers={"Authorization": f"Bearer {access_token}"},

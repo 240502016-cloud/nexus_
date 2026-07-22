@@ -28,7 +28,7 @@ export function SettingsPanel({ settings: initialSettings, onClose, onChange }: 
         ctrl: maxCombo.ctrl || event.ctrlKey,
         shift: maxCombo.shift || event.shiftKey,
         alt: maxCombo.alt || event.altKey,
-        code: isModifierCode(event.code) ? maxCombo.code : event.code,
+        code: isModifierCode(event.code) ? maxCombo.code : maxCombo.code ?? event.code,
       };
     }
     function handleKeyUp(event: KeyboardEvent) {

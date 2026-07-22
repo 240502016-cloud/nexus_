@@ -23,6 +23,6 @@ def _enforce_login_rate_limit(request: Request) -> None:
 @router.post("/login", dependencies=[Depends(_enforce_login_rate_limit)])
 def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == form.username).first()
-    if not user or not verify_password(form.password, user.hashed_password):
+    if not user or not user.is_active or not verify_password(form.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Kullanıcı adı veya parola hatalı")
     return {"access_token": create_access_token(user.id), "token_type": "bearer"}

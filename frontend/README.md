@@ -39,9 +39,10 @@ mesaj gönderme çalıştı.
 `ChannelSidebar`'da `🔊` tipi bir kanala tıklamak (metin kanalından farklı olarak) o kanala
 **katılır** — `VoicePanel` açılır, `useVoiceChannel` hook'u:
 1. `getUserMedia({audio:true})` ile mikrofona erişir
-2. `WS /api/channels/{id}/voice?token=...`'a bağlanır (backend'deki signaling relay)
-3. Mevcut katılımcıların her birine `RTCPeerConnection` kurup offer gönderir (mesh topoloji)
-4. Web Audio `AnalyserNode` ile kendi ses seviyesini izler, eşiği geçince `speaking` bildirir
+2. Auth ile `/api/voice/ice-servers` endpoint'inden kısa ömürlü coturn credential'ı alır
+3. `WS /api/channels/{id}/voice?token=...`'a bağlanır (backend'deki signaling relay)
+4. Mevcut katılımcıların her birine `RTCPeerConnection` kurup offer gönderir (mesh topoloji)
+5. Web Audio `AnalyserNode` ile kendi ses seviyesini izler, eşiği geçince `speaking` bildirir
 
 Durum göstergeleri: 🟢 konuşuyor, 🔴 sessize alınmış, ⚪ boşta.
 
@@ -54,6 +55,14 @@ Signaling protokolünün kendisi (offer/answer/ICE relay/mute/leave) backend tar
 WebSocket istemcileriyle uçtan uca doğrulandı (bkz. [../backend/README.md](../backend/README.md)).
 Gerçek mikrofonlu bir tarayıcıda iki kullanıcıyla elle test edilmesi önerilir.
 
+### Push-to-talk (TASK-013)
+
+Ses ayarları panelinden `toggle` veya bas-konuş modu seçilebilir. Bas-konuş modunda varsayılan
+kombinasyon `Ctrl + Shift`'tir; kombinasyon değiştirilebilir ve `localStorage`'da saklanır.
+Kombinasyon yalnızca tarayıcı sekmesi odaktayken yakalanır. Sekme gizlenince basılı tuş durumu
+otomatik sıfırlanır ve mikrofon açık kalmaz. Tarayıcı güvenlik modeli nedeniyle oyun gibi arka
+plandaki uygulamalarda gerçek global hotkey desteği mümkün değildir.
+
 ## Çalıştırma
 
 ```bash
@@ -65,3 +74,7 @@ npm run dev
 `vite.config.ts` içindeki proxy, `/api/*` isteklerini `http://localhost:8000`'e (Core API)
 yönlendirir. Backend ve Postgres/Synapse'in ayakta olması gerekir (proje kökünden
 `docker compose up -d`, sonra `cd backend && uvicorn app.main:app --reload`).
+
+LAN geliştirme: Vite `0.0.0.0:5173` üzerinde dinlediği için aynı ağdaki cihazlardan
+`http://192.168.1.174:5173` adresiyle açılabilir. Gerçek WebRTC relay testi için TURN değişkenlerini
+`.env` içinde ayarlayın; `192.168.1.174` yalnızca LAN içi test adresidir.

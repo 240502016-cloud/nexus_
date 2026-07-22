@@ -12,11 +12,14 @@ arasında çift bağlantı kurulmaz.
 from __future__ import annotations
 
 import json
+import base64
+import hashlib
+import hmac
+import time
 
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
-from sqlalchemy.orm import Session
-
-from app.core.auth import decode_user_id
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from app.config import settings
+from app.core.auth import decode_user_id, get_current_user
 from app.core.models import Channel, ChannelType, ServerMember, User
 from app.database import SessionLocal
 
@@ -70,6 +73,32 @@ class VoiceConnectionManager:
 voice_manager = VoiceConnectionManager()
 
 router = APIRouter(tags=["voice"])
+
+
+@router.get("/voice/ice-servers")
+def voice_ice_servers(current_user: User = Depends(get_current_user)) -> dict:
+    """Return short-lived TURN credentials; the shared coturn secret never reaches browsers."""
+    if not settings.turn_domain or not settings.turn_auth_secret:
+        raise HTTPException(status_code=503, detail="TURN sunucusu yapılandırılmamış")
+
+    expires_at = int(time.time()) + max(60, settings.turn_credential_ttl_seconds)
+    username = f"{expires_at}:{current_user.id}"
+    digest = hmac.new(
+        settings.turn_auth_secret.encode("utf-8"), username.encode("utf-8"), hashlib.sha1
+    ).digest()
+    credential = base64.b64encode(digest).decode("ascii")
+    turn_host = settings.turn_domain
+    turn_urls = [
+        f"turn:{turn_host}:{settings.turn_port}?transport=udp",
+        f"turn:{turn_host}:{settings.turn_port}?transport=tcp",
+    ]
+    return {
+        "ice_servers": [
+            {"urls": f"stun:{turn_host}:{settings.turn_port}"},
+            {"urls": turn_urls, "username": username, "credential": credential},
+        ],
+        "expires_at": expires_at,
+    }
 
 
 @router.websocket("/channels/{channel_id}/voice")

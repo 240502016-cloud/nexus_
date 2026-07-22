@@ -23,7 +23,8 @@ nexus-communication-platform/
 │   └── bot_engine/    # Event tabanlı bot altyapısı, komut sistemi
 ├── plugins/           # Bağımsız plugin modülleri (ai_assistant, moderation, ...)
 ├── matrix/            # Matrix Synapse konfigürasyonu
-└── docs/architecture/ # Mimari diyagramlar ve notlar
+├── docker/            # PostgreSQL, Matrix ve Caddy production yapılandırması
+└── docs/              # Mimari ve deployment dokümantasyonu
 ```
 
 ## Teknoloji Yığını
@@ -39,5 +40,23 @@ nexus-communication-platform/
 
 ## Durum
 
-Şu an sadece mimari plan ve monorepo iskeleti oluşturuldu. Henüz özellik kodu yazılmadı
-(bkz. [ROADMAP.md](./ROADMAP.md) Aşama 1).
+Core platform, Matrix metin mesajlaşması, plugin/bot sistemi, AI Gateway, WebRTC sesli kanal
+ve production Docker topolojisi uygulanmış durumda. Güncel eksikler ve doğrulama notları için
+[ROADMAP.md](./ROADMAP.md) dosyasına bakın.
+
+## Production Docker
+
+Production düzeni `frontend`, `backend`, `postgres`, `matrix` ve `reverse-proxy` ana servislerine
+ek olarak tek-seferlik `migrate`, kalıcı `ai-worker` ve izole `plugin-sandbox` yardımcı servislerini içerir. Kurulumdan
+önce veri migration uyarılarını ve gerekli secret/domain ayarlarını okuyun:
+[docs/deployment/DOCKER_PRODUCTION.md](./docs/deployment/DOCKER_PRODUCTION.md).
+
+Domain, otomatik HTTPS, WSS, Matrix discovery ve dış doğrulama adımları için
+[docs/deployment/HTTPS_REVERSE_PROXY.md](./docs/deployment/HTTPS_REVERSE_PROXY.md) dosyasına bakın.
+
+PostgreSQL dış port güvenliği, Alembic migration, backup ve restore akışı için
+[docs/deployment/DATABASE_SECURITY.md](./docs/deployment/DATABASE_SECURITY.md) dosyasına bakın.
+
+AI isteklerinin PostgreSQL kuyruğu ve ayrı worker ile işlenmesi için
+[docs/deployment/AI_WORKER.md](./docs/deployment/AI_WORKER.md) dosyasına bakın.
+AI çıktısının token bütçesi, SSE akışı ve kullanıcı iptali için aynı dokümandaki TASK-008 bölümüne bakın.

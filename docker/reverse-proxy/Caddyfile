@@ -1,0 +1,62 @@
+{
+    email {$NEXUS_ACME_EMAIL}
+}
+
+{$NEXUS_DOMAIN} {
+    encode zstd gzip
+
+    # Bu sabitleme eski TLS sürümlerinin yanlışlıkla etkinleşmesini önler.
+    tls {
+        protocols tls1.2 tls1.3
+    }
+
+    log {
+        output stdout
+        format json
+    }
+
+    header {
+        -Server
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "camera=(self), microphone=(self), geolocation=()"
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    }
+
+    @health path /healthz
+    respond @health "ok" 200
+
+    # Matrix istemcilerinin public homeserver adresini aynı domain üzerinden keşfetmesi.
+    handle /.well-known/matrix/client {
+        header {
+            Content-Type "application/json"
+            Access-Control-Allow-Origin "*"
+        }
+        respond `{ "m.homeserver": { "base_url": "https://{$NEXUS_DOMAIN}" } }` 200
+    }
+
+    # Federasyon delegasyonu Matrix trafiğini public HTTPS portuna yönlendirir.
+    handle /.well-known/matrix/server {
+        header Content-Type "application/json"
+        respond `{ "m.server": "{$NEXUS_DOMAIN}:443" }` 200
+    }
+
+    # Core API + WSS signaling. Caddy WebSocket Upgrade isteğini otomatik tünele çevirir;
+    # handle_path /api önekini backend'e gitmeden siler.
+    handle_path /api/* {
+        reverse_proxy backend:8000 {
+            # Config reload sırasında tüm ses istemcilerinin aynı anda yeniden bağlanmasını azaltır.
+            stream_close_delay 5m
+        }
+    }
+
+    # Yalnızca Matrix istemci/federasyon yüzeyi yayınlanır; /_synapse/admin dışarı açılmaz.
+    @matrix path /_matrix/* /_synapse/client/*
+    handle @matrix {
+        reverse_proxy matrix:8008
+    }
+
+    handle {
+        reverse_proxy frontend:8080
+    }
+}

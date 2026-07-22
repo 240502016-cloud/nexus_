@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { getToken } from "../api/client";
+import { coreApi, getToken } from "../api/client";
 import type { VoiceSettings } from "../settings";
 import { usePushToTalk } from "./usePushToTalk";
 
@@ -16,7 +16,6 @@ interface SignalMessage {
   [key: string]: unknown;
 }
 
-const ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
 const SPEAKING_THRESHOLD = 12;
 
 export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSettings) {
@@ -28,6 +27,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
   const wsRef = useRef<WebSocket | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const peersRef = useRef<Map<number, RTCPeerConnection>>(new Map());
+  const pendingIceRef = useRef<Map<number, RTCIceCandidateInit[]>>(new Map());
   const audioElsRef = useRef<Map<number, HTMLAudioElement>>(new Map());
   const mutedRef = useRef(false);
   // connect() effect'i sadece channelId'ye bağlı çalışır; bağlantı anındaki modu okumak için ref kullanılır.
@@ -48,6 +48,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     wsRef.current = null;
     peersRef.current.forEach((pc) => pc.close());
     peersRef.current.clear();
+    pendingIceRef.current.clear();
     audioElsRef.current.forEach((el) => {
       el.srcObject = null;
     });
@@ -67,9 +68,10 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     }
 
     let cancelled = false;
+    let iceServers: RTCIceServer[] = [];
 
     function createPeerConnection(peerId: number, ws: WebSocket): RTCPeerConnection {
-      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      const pc = new RTCPeerConnection({ iceServers });
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((track) => {
           pc.addTrack(track, localStreamRef.current!);
@@ -97,12 +99,35 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         audioEl.srcObject = event.streams[0] ?? null;
       };
 
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === "failed") {
+          setError("WebRTC bağlantısı kurulamadı; TURN/firewall ayarlarını kontrol edin");
+        }
+      };
+
       peersRef.current.set(peerId, pc);
       return pc;
     }
 
+    async function addPendingIce(peerId: number, pc: RTCPeerConnection) {
+      const pending = pendingIceRef.current.get(peerId) ?? [];
+      pendingIceRef.current.delete(peerId);
+      for (const candidate of pending) {
+        await pc.addIceCandidate(candidate);
+      }
+    }
+
     async function connect() {
       setError(null);
+      try {
+        const ice = await coreApi.voiceIceServers();
+        if (cancelled) return;
+        iceServers = ice.ice_servers;
+      } catch (err) {
+        setError(`TURN sunucusuna bağlanılamadı: ${err instanceof Error ? err.message : String(err)}`);
+        return;
+      }
+
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         if (cancelled) {
@@ -134,9 +159,10 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       wsRef.current = ws;
 
       ws.onmessage = async (event) => {
-        const data = JSON.parse(event.data) as SignalMessage;
+        try {
+          const data = JSON.parse(event.data) as SignalMessage;
 
-        switch (data.type) {
+          switch (data.type) {
           case "peers": {
             const peers = (data.peers as Omit<VoiceParticipant, "speaking">[]).map((p) => ({
               ...p,
@@ -177,6 +203,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
             const fromId = data.from as number;
             const pc = createPeerConnection(fromId, ws);
             await pc.setRemoteDescription({ type: "offer", sdp: data.sdp as string });
+            await addPendingIce(fromId, pc);
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             ws.send(JSON.stringify({ type: "answer", to: fromId, sdp: answer.sdp }));
@@ -184,13 +211,24 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
           }
           case "answer": {
             const pc = peersRef.current.get(data.from as number);
-            await pc?.setRemoteDescription({ type: "answer", sdp: data.sdp as string });
+            if (pc) {
+              await pc.setRemoteDescription({ type: "answer", sdp: data.sdp as string });
+              await addPendingIce(data.from as number, pc);
+            }
             break;
           }
           case "ice-candidate": {
-            const pc = peersRef.current.get(data.from as number);
-            if (pc && data.candidate) {
-              await pc.addIceCandidate(data.candidate as RTCIceCandidateInit);
+            const fromId = data.from as number;
+            const candidate = data.candidate as RTCIceCandidateInit | undefined;
+            if (candidate) {
+              const pc = peersRef.current.get(fromId);
+              if (pc?.remoteDescription) {
+                await pc.addIceCandidate(candidate);
+              } else {
+                const pending = pendingIceRef.current.get(fromId) ?? [];
+                pending.push(candidate);
+                pendingIceRef.current.set(fromId, pending);
+              }
             }
             break;
           }
@@ -204,6 +242,9 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
               prev.map((p) => (p.user_id === data.user_id ? { ...p, speaking: data.speaking as boolean } : p)),
             );
             break;
+          }
+        } catch (err) {
+          setError(`WebRTC signaling hatası: ${err instanceof Error ? err.message : String(err)}`);
         }
       };
 
