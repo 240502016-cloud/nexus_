@@ -92,8 +92,8 @@ services:
       - --static-auth-secret=${TURN_AUTH_SECRET:?TURN_AUTH_SECRET is required}
       - --realm=${TURN_DOMAIN:?TURN_DOMAIN is required}
       - --listening-port=3478
-      - --min-port=${TURN_MIN_PORT:-49160}
-      - --max-port=${TURN_MAX_PORT:-49200}
+      - --min-port=${TURN_MIN_PORT:-50000}
+      - --max-port=${TURN_MAX_PORT:-50040}
       - --external-ip=${TURN_EXTERNAL_IP:?TURN_EXTERNAL_IP is required}
       - --no-tls
       - --no-dtls
@@ -101,8 +101,8 @@ services:
     ports:
       - "${TURN_PORT:-3478}:3478/tcp"
       - "${TURN_PORT:-3478}:3478/udp"
-      - "${TURN_MIN_PORT:-49160}-${TURN_MAX_PORT:-49200}:${TURN_MIN_PORT:-49160}-${TURN_MAX_PORT:-49200}/tcp"
-      - "${TURN_MIN_PORT:-49160}-${TURN_MAX_PORT:-49200}:${TURN_MIN_PORT:-49160}-${TURN_MAX_PORT:-49200}/udp"
+      - "${TURN_MIN_PORT:-50000}-${TURN_MAX_PORT:-50040}:${TURN_MIN_PORT:-50000}-${TURN_MAX_PORT:-50040}/tcp"
+      - "${TURN_MIN_PORT:-50000}-${TURN_MAX_PORT:-50040}:${TURN_MIN_PORT:-50000}-${TURN_MAX_PORT:-50040}/udp"
     read_only: true
     tmpfs:
       - /var/lib/coturn:size=32m,mode=1777

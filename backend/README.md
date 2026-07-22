@@ -216,7 +216,7 @@ GET /voice/ice-servers                   -> auth gerektirir; kısa ömürlü TUR
 ```
 
 Production Compose'ta coturn `TURN_DOMAIN` üzerinden `3478/tcp+udp` ve relay port aralığını
-(varsayılan `49160-49200`) yayınlar. `TURN_EXTERNAL_IP` coturn'un public IP'siyle aynı olmalıdır.
+(varsayılan `50000-50040`) yayınlar. `TURN_EXTERNAL_IP` coturn'un public IP'siyle aynı olmalıdır.
 Core API, `TURN_AUTH_SECRET` ile coturn REST authentication formatında kullanıcıya özel, süreli
 credential üretir; ortak secret tarayıcıya hiç gönderilmez.
 

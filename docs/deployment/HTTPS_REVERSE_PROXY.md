@@ -132,7 +132,7 @@ router/VPS'nin public IP'sine ayarlanmalıdır. Router arkasındaysa aşağıdak
 `192.168.1.174` adresine forward edin:
 
 - `3478/tcp` ve `3478/udp` (TURN signaling)
-- `49160-49200/tcp` ve `49160-49200/udp` (TURN relay)
+- `50000-50040/tcp` ve `50000-50040/udp` (TURN relay; Windows rezerve aralıklarından uzak)
 
 ## 6. Değişiklik ve sorun giderme
 
