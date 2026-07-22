@@ -6,6 +6,24 @@ adlı `internal: true` Docker ağı üzerinde `backend` ve `matrix` servislerine
 
 ## Migration akışı
 
+`postgres-bootstrap` servisi PostgreSQL sağlıklı olduktan sonra idempotent init scriptini her
+stack başlangıcında çalıştırır. Bu servis, kalıcı volume daha eski bir Compose sürümüyle
+oluşturulmuş olsa bile eksik `nexus`/`synapse` rollerini ve veritabanlarını veri silmeden oluşturur,
+parolaları `.env` ile eşitler ve veritabanı sahipliğini düzeltir. `migrate` ve `matrix`, bootstrap
+başarıyla tamamlanmadan başlamaz.
+
+Bootstrap yalnızca `postgres` ve `postgres-bootstrap` container'larının bağladığı yerel PostgreSQL
+socket volume'ünü kullanır; PostgreSQL portu host'a açılmaz. Eski volume'de admin adı değişmişse
+mevcut erişilebilir superuser (`POSTGRES_ADMIN_USER`, eski `POSTGRES_USER` veya `postgres`) yerel
+bağlantı üzerinden tespit edilir.
+
+Eski kurulumlarda PostgreSQL superuser'ı `POSTGRES_USER` ile oluşturulduğu için
+`POSTGRES_ADMIN_USER` ve `POSTGRES_ADMIN_PASSWORD` tanımlı değilse Compose geriye dönük olarak
+uygulama kullanıcısını kullanır. Yeni kurulumlarda `.env.example` dosyasındaki gibi ayrı ve güçlü
+admin bilgileri tanımlanmalıdır. Var olan bir volume'de admin adı sonradan yalnızca `.env`
+değiştirilerek değiştirilemez; değer volume ilk oluşturulurken kullanılan superuser ile aynı
+olmalıdır.
+
 Backend şeması artık uygulama startup'ında `create_all` ile sessizce değiştirilmez. `migrate`
 servisi aynı backend image'ından çalışır ve PostgreSQL sağlıklı olduktan sonra:
 
@@ -23,9 +41,28 @@ dahil değildir.
 
 ```powershell
 docker compose build backend
+docker compose up -d postgres
+docker compose run --rm postgres-bootstrap
 docker compose run --rm migrate
 docker compose ps
 ```
+
+Eski bir volume'de `role does not exist`, `database does not exist` veya Synapse parola hatası
+görülürse volume'ü silmeden şu onarım akışını çalıştırın:
+
+```powershell
+docker compose up -d postgres
+docker compose run --rm postgres-bootstrap
+docker compose run --rm migrate
+docker compose up -d
+docker compose ps
+```
+
+`postgres-bootstrap` kimlik doğrulama hatası verirse `.env` içindeki `POSTGRES_ADMIN_USER` ve
+`POSTGRES_ADMIN_PASSWORD`, volume ilk oluşturulurken kullanılan PostgreSQL superuser bilgileriyle
+eşleştirilmelidir. Eski Nexus kurulumlarında bunlar çoğunlukla `POSTGRES_USER` ve
+`POSTGRES_PASSWORD` değerleridir. `docker compose down -v` veri siler ve bu onarımın bir parçası
+değildir.
 
 Sonraki şema değişiklikleri için yeni, küçük ve geri alınabilir Alembic revision'ları ekleyin.
 `0001_initial_schema` dosyasını değiştirmeyin. `alembic downgrade` veri kaybına yol açabileceği

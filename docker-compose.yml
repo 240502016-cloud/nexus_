@@ -5,8 +5,10 @@ services:
     image: postgres:16.14-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_ADMIN_USER:?POSTGRES_ADMIN_USER is required}
-      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?POSTGRES_ADMIN_PASSWORD is required}
+      # Legacy installations used POSTGRES_USER as the bootstrap superuser.
+      # Keep that fallback so an existing volume can be repaired in place.
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER:-${POSTGRES_USER:?POSTGRES_USER is required}}
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:-${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}}
       POSTGRES_DB: postgres
       APP_POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
       APP_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
@@ -16,6 +18,7 @@ services:
       SYNAPSE_POSTGRES_DB: ${SYNAPSE_POSTGRES_DB:?SYNAPSE_POSTGRES_DB is required}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - postgres_socket:/var/run/postgresql
       # Backup çıktısı DB container'ından ayrı, host portu yayınlamayan Docker volume'undadır.
       - postgres_backups:/backups
       - ./docker/postgres/init-databases.sh:/docker-entrypoint-initdb.d/10-nexus-databases.sh:ro
@@ -32,6 +35,35 @@ services:
     cpus: 1.0
     mem_limit: 768m
 
+  postgres-bootstrap:
+    image: postgres:16.14-alpine
+    restart: "no"
+    environment:
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER:-${POSTGRES_USER:?POSTGRES_USER is required}}
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:-${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}}
+      POSTGRES_DB: postgres
+      APP_POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      APP_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      APP_POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      SYNAPSE_POSTGRES_USER: ${SYNAPSE_POSTGRES_USER:?SYNAPSE_POSTGRES_USER is required}
+      SYNAPSE_POSTGRES_PASSWORD: ${SYNAPSE_POSTGRES_PASSWORD:?SYNAPSE_POSTGRES_PASSWORD is required}
+      SYNAPSE_POSTGRES_DB: ${SYNAPSE_POSTGRES_DB:?SYNAPSE_POSTGRES_DB is required}
+      PGHOST: /var/run/postgresql
+    volumes:
+      - ./docker/postgres/init-databases.sh:/usr/local/bin/init-nexus-databases.sh:ro
+      - ./docker/postgres/bootstrap-databases.sh:/usr/local/bin/bootstrap-nexus-databases.sh:ro
+      - postgres_socket:/var/run/postgresql
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - data
+    command: ["/bin/sh", "/usr/local/bin/bootstrap-nexus-databases.sh"]
+    security_opt:
+      - no-new-privileges:true
+    cpus: 0.25
+    mem_limit: 128m
+
   migrate:
     image: nexus-backend:0.1.0
     restart: "no"
@@ -42,8 +74,8 @@ services:
       POSTGRES_PORT: 5432
       MATRIX_HOMESERVER_URL: http://matrix:8008
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-bootstrap:
+        condition: service_completed_successfully
     networks:
       - app
       - data
@@ -169,8 +201,8 @@ services:
     volumes:
       - matrix_data:/data
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-bootstrap:
+        condition: service_completed_successfully
     networks:
       - app
       - data
@@ -299,6 +331,7 @@ networks:
 
 volumes:
   postgres_data:
+  postgres_socket:
   postgres_backups:
   matrix_data:
   caddy_data:
