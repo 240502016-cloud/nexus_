@@ -1,0 +1,4 @@
+# ai_assistant plugin'ine özgü ayarlar.
+# Şu anki main.py bunu henüz okumuyor (URL/model kodda sabit); ileride buradan okunacak.
+ollama_url: http://localhost:11434/api/chat
+model: qwen2.5:7b

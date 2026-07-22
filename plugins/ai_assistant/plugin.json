@@ -1,0 +1,8 @@
+{
+  "name": "ai_assistant",
+  "version": "0.1.0",
+  "description": "Yerel LLM (Ollama) ile soru cevaplayan asistan - API ucreti/token faturasi yok",
+  "entry_point": "main:handle_command",
+  "permissions": ["llm.query"],
+  "commands": ["sor"]
+}

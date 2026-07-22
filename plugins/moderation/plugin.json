@@ -1,0 +1,8 @@
+{
+  "name": "moderation",
+  "version": "0.1.0",
+  "description": "Mesaj silme gibi temel moderasyon araclari",
+  "entry_point": "main:handle_command",
+  "permissions": ["moderation.manage"],
+  "commands": ["sil"]
+}

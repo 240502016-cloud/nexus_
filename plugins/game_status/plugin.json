@@ -1,0 +1,8 @@
+{
+  "name": "game_status",
+  "version": "0.1.0",
+  "description": "Bir Minecraft sunucusunun acik olup olmadigini ve oyuncu sayisini sorgular",
+  "entry_point": "main:handle_command",
+  "permissions": ["network.query"],
+  "commands": ["oyun-durumu"]
+}

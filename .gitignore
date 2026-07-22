@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+build/
+.vite/
+
+# Env
+.env
+.env.local
+
+# Matrix Synapse - `docker compose ... generate` ile üretilir, secret içerir (bkz. matrix/README.md)
+matrix/synapse/*
+!matrix/synapse/README.md
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

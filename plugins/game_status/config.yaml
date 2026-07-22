@@ -1,0 +1,3 @@
+# game_status plugin'ine özgü ayarlar.
+# Şu anki main.py bunu henüz okumuyor; ileride varsayılan sunucu listesi için kullanılabilir.
+timeout_seconds: 5

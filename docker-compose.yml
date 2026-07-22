@@ -1,0 +1,43 @@
+# Aşama 2'de doldurulacak altyapı iskeleti (Matrix Synapse + PostgreSQL + Core API).
+# Şu an sadece servis taslaklarını içerir, henüz çalıştırılabilir durumda değildir.
+
+services:
+  postgres:
+    image: postgres:16
+    env_file: .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  synapse:
+    image: matrixdotorg/synapse:latest
+    env_file: .env
+    volumes:
+      - ./matrix/synapse:/data
+    ports:
+      - "8008:8008"
+    depends_on:
+      - postgres
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 1G
+
+  # core-api:
+  #   build: ./backend
+  #   env_file: .env
+  #   ports:
+  #     - "8000:8000"
+  #   depends_on:
+  #     - postgres
+  #     - synapse
+
+volumes:
+  postgres_data:

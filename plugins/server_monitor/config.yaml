@@ -1,0 +1,3 @@
+# server_monitor plugin'ine özgü ayarlar.
+# Şu anki main.py bunu henüz okumuyor; ileride eşik/uyarı ayarları için kullanılabilir.
+warn_disk_usage_percent: 90

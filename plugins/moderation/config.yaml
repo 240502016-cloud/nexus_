@@ -1,0 +1,3 @@
+# moderation plugin'ine özgü ayarlar.
+# Şu anki main.py bunu henüz okumuyor; ileride kullanıcı susturma/uyarı eşikleri için kullanılabilir.
+allow_self_redact: true

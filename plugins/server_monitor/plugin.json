@@ -1,0 +1,8 @@
+{
+  "name": "server_monitor",
+  "version": "0.1.0",
+  "description": "Sistem CPU/RAM/disk durumunu raporlar",
+  "entry_point": "main:handle_command",
+  "permissions": ["system.read"],
+  "commands": ["sunucu-durumu"]
+}
