@@ -138,6 +138,23 @@ docker compose logs --tail 200 migrate backend matrix
 `postgres_data`, `postgres_backups` veya `matrix_data` volume'larını silmek backup/restore
 işleminin parçası değildir; veri migration doğrulanmadan bu volume'lara `down -v` uygulamayın.
 
+## Eski Synapse veritabanında locale/collation onarımı
+
+Synapse `Database has incorrect collation ... Should be 'C'` hatası verirse mevcut database eski
+bir PostgreSQL kurulumu tarafından `en_US.utf8` gibi desteklenmeyen bir locale ile oluşturulmuştur.
+`allow_unsafe_locale` kontrolünü kapatmayın. Aşağıdaki script önce custom-format dump alır ve hosta
+kopyalar, eski database'i geri dönüş için yeniden adlandırır, aynı adla UTF8 + `C/C` database
+oluşturur ve dump'ı geri yükler:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\repair-synapse-collation.ps1 `
+  -ConfirmRepair -StartServices
+```
+
+Dump `backups/postgres-locale-repair` altında, eski database ise PostgreSQL içinde
+`synapse_locale_backup_<timestamp>` adıyla korunur. Yeni Matrix kurulumu ve uygulama verileri
+doğrulanmadan bu geri dönüş kopyalarını silmeyin.
+
 ## Güvenlik kontrol listesi
 
 - `docker compose config` çıktısında `postgres` altında `ports:` bulunmadığını doğrulayın.
