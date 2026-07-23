@@ -290,6 +290,32 @@ function Test-AiGateway {
     if ($LASTEXITCODE -ne 0) { throw 'AI Gateway test failed.' }
 }
 
+function Invoke-CurlRequest {
+    param(
+        [Parameter(Mandatory = $true)][string]$Url,
+        [ValidateRange(1, 300)][int]$TimeoutSeconds = 10
+    )
+
+    # Windows PowerShell converts native stderr into ErrorRecord objects. With the
+    # script-wide Stop preference, a transient TLS handshake can otherwise abort
+    # the readiness loop before curl's exit code is inspected.
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $content = & curl.exe --fail --silent --show-error --insecure `
+            --max-time ([string]$TimeoutSeconds) $Url 2>$null
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
+    return [pscustomobject]@{
+        ExitCode = $exitCode
+        Content = (($content | Out-String).Trim())
+    }
+}
+
 function Test-PublicEndpoints {
     $values = Read-EnvironmentFile
     $publicUrl = if ($values.ContainsKey('NEXUS_PUBLIC_URL')) {
@@ -305,10 +331,9 @@ function Test-PublicEndpoints {
     }
 
     Write-Step "Waiting for public health endpoint: $publicUrl"
-    $healthContent = $null
     for ($attempt = 1; $attempt -le 24; $attempt++) {
-        $healthContent = & curl.exe --fail --silent --show-error --insecure --max-time 8 "$publicUrl/healthz" 2>$null
-        if ($LASTEXITCODE -eq 0 -and ($healthContent | Out-String).Trim() -eq 'ok') { break }
+        $health = Invoke-CurlRequest -Url "$publicUrl/healthz" -TimeoutSeconds 8
+        if ($health.ExitCode -eq 0 -and $health.Content -eq 'ok') { break }
         if ($attempt -eq 24) {
             throw "Public health endpoint did not become ready: $publicUrl/healthz"
         }
@@ -316,12 +341,12 @@ function Test-PublicEndpoints {
     }
     Write-Host '[OK] reverse proxy health'
 
-    & curl.exe --fail --silent --show-error --insecure --max-time 10 "$publicUrl/api/health" | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Backend public health check failed.' }
+    $backendHealth = Invoke-CurlRequest -Url "$publicUrl/api/health" -TimeoutSeconds 10
+    if ($backendHealth.ExitCode -ne 0) { throw 'Backend public health check failed.' }
     Write-Host '[OK] backend health'
 
-    $matrix = & curl.exe --fail --silent --show-error --insecure --max-time 10 "$publicUrl/_matrix/client/versions"
-    if ($LASTEXITCODE -ne 0 -or ($matrix | Out-String) -notmatch '"versions"') {
+    $matrix = Invoke-CurlRequest -Url "$publicUrl/_matrix/client/versions" -TimeoutSeconds 10
+    if ($matrix.ExitCode -ne 0 -or $matrix.Content -notmatch '"versions"') {
         throw 'Matrix public health check failed.'
     }
     Write-Host '[OK] Matrix client endpoint'
