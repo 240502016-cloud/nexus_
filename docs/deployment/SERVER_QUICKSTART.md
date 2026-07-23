@@ -15,6 +15,7 @@ Nexus-Server-Manager.cmd
 Başlatıcı aşağıdaki operasyonları sekmeli bir arayüzden sunar:
 
 - Yeni sunucu `.env` üretimi ve tam ilk deploy
+- Eski Docker volume'larıyla çakışmayı engelleyen kalıcı Compose kurulum adı
 - Güvenli Git update, build, migration, start/stop/restart, status ve diagnose
 - AI Gateway başlatma, gerçek API key ile health testi, PID/durum görüntüleme ve güvenli durdurma
 - Server ve AI bilgisayarı için rol bazlı Windows Firewall yapılandırması
@@ -52,15 +53,16 @@ Git ve Docker Desktop kurulduktan sonra:
 
 ```powershell
 cd C:\Users\merte\Github
-git clone https://github.com/240502016-cloud/nexus_.git nexus-current
-cd .\nexus-current
+git clone https://github.com/240502016-cloud/nexus_.git nexus-server
+cd .\nexus-server
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -File .\scripts\nexus-server.ps1 `
   -Action Initialize `
   -ServerAddress 25.49.22.166 `
   -AcmeEmail 240502016@kocaelisaglik.edu.tr `
-  -AiGatewayUrl http://25.31.233.158:8090
+  -AiGatewayUrl http://25.31.233.158:8090 `
+  -ComposeProjectName nexus_server_fresh
 ```
 
 Prompt geldiğinde AI bilgisayarındaki `ai-gateway/.env` dosyasının `AI_GATEWAY_API_KEY` değerini
@@ -77,10 +79,21 @@ yapıştırın. Giriş gizli olduğu için terminalde karakter görünmez. `Init
 
 Var olan `.env` dosyasını `Initialize` ezmez. Mevcut sunucuda aşağıdaki güncelleme akışını kullanın.
 
+### Eski kurulumu silmeden temiz kurulum
+
+Eski stack önce durdurulmalıdır; iki stack aynı host portlarını aynı anda kullanamaz. Eski kurulumun
+Compose adı `nexus` olarak kalırken yeni arayüzde **Installation name** alanı
+`nexus_server_fresh` olmalıdır. Bu değer yeni `.env` içine `COMPOSE_PROJECT_NAME` olarak kaydedilir
+ve sonraki start/update/deploy işlemlerinde otomatik kullanılır. Böylece yeni PostgreSQL, Matrix ve
+Caddy volume'ları eski `nexus_*` volume'larından tamamen ayrı oluşturulur.
+
+Yeni kurulum doğrulanana kadar eski proje klasörünü veya `nexus_*` volume'larını silmeyin. Geri dönüş
+gerekirse yeni stack'i durdurup eski stack'i yeniden başlatın.
+
 ## Rutin güncelleme
 
 ```powershell
-cd C:\Users\merte\Github\nexus-current
+cd C:\Users\merte\Github\nexus-server
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -File .\scripts\nexus-server.ps1 `
   -Action Update

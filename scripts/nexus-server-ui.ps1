@@ -173,6 +173,12 @@ function Assert-ConfigEditorContent {
         if ($seen['MATRIX_SERVER_NAME'] -match '://|/') {
             throw 'MATRIX_SERVER_NAME must not contain protocol or path.'
         }
+        if (
+            $seen.ContainsKey('COMPOSE_PROJECT_NAME') -and
+            $seen['COMPOSE_PROJECT_NAME'] -notmatch '^[a-z0-9][a-z0-9_-]*$'
+        ) {
+            throw 'COMPOSE_PROJECT_NAME must start with a lowercase letter or digit and contain only lowercase letters, digits, hyphens or underscores.'
+        }
     }
     else {
         foreach ($required in @('AI_GATEWAY_API_KEY', 'AI_GATEWAY_ALLOWED_NETWORKS', 'OLLAMA_BASE_URL')) {
@@ -232,6 +238,10 @@ function Start-ServerAction {
             if ([string]::IsNullOrWhiteSpace($script:gatewayUrlText.Text)) {
                 throw 'AI Gateway URL is required.'
             }
+            $composeProjectName = $script:composeProjectNameText.Text.Trim()
+            if ($composeProjectName -notmatch '^[a-z0-9][a-z0-9_-]*$') {
+                throw 'Installation name must start with a lowercase letter or digit and contain only lowercase letters, digits, hyphens or underscores.'
+            }
             $gatewayKey = Resolve-GatewayKey
             if ([string]::IsNullOrWhiteSpace($gatewayKey) -or $gatewayKey.Length -lt 32) {
                 throw 'AI Gateway API key is missing or shorter than 32 characters.'
@@ -240,6 +250,7 @@ function Start-ServerAction {
                 '-ServerAddress', $script:serverAddressText.Text.Trim(),
                 '-AcmeEmail', $script:emailText.Text.Trim(),
                 '-AiGatewayUrl', $script:gatewayUrlText.Text.Trim(),
+                '-ComposeProjectName', $composeProjectName,
                 '-HttpPort', [string]$script:httpPort.Value,
                 '-HttpsPort', [string]$script:httpsPort.Value
             )
@@ -453,6 +464,9 @@ $script:httpsPort.Minimum = 1
 $script:httpsPort.Maximum = 65535
 $script:httpsPort.Value = 8443
 $settingsGroup.Controls.Add($script:httpsPort)
+
+[void](Add-Label $settingsGroup 'Installation name' 560 108 95)
+$script:composeProjectNameText = Add-TextBox $settingsGroup 'nexus_server_fresh' 655 105 145
 
 $keyHint = Add-Label $settingsGroup 'Key is masked and passed through the child process environment, not the command line.' 200 178 590
 $keyHint.ForeColor = [Drawing.Color]::DimGray
@@ -790,6 +804,7 @@ $form.Controls.Add($script:statusLabel)
 if ($ValidateOnly) {
     $script:configSelector.SelectedIndex = 0
     Assert-ConfigEditorContent @'
+COMPOSE_PROJECT_NAME=nexus_server_fresh
 POSTGRES_USER=nexus
 POSTGRES_PASSWORD=validation-secret
 POSTGRES_DB=nexus

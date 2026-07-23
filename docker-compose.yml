@@ -1,4 +1,4 @@
-name: nexus
+name: ${COMPOSE_PROJECT_NAME:-nexus}
 
 services:
   postgres:
