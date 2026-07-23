@@ -51,6 +51,9 @@ ek olarak tek-seferlik `migrate`, kalıcı `ai-worker` ve izole `plugin-sandbox`
 önce veri migration uyarılarını ve gerekli secret/domain ayarlarını okuyun:
 [docs/deployment/DOCKER_PRODUCTION.md](./docs/deployment/DOCKER_PRODUCTION.md).
 
+Yeni sunucuyu tek komutla kurmak ve sonraki güncellemeleri otomatikleştirmek için
+[docs/deployment/SERVER_QUICKSTART.md](./docs/deployment/SERVER_QUICKSTART.md) dosyasına bakın.
+
 Domain, otomatik HTTPS, WSS, Matrix discovery ve dış doğrulama adımları için
 [docs/deployment/HTTPS_REVERSE_PROXY.md](./docs/deployment/HTTPS_REVERSE_PROXY.md) dosyasına bakın.
 
