@@ -475,7 +475,18 @@ switch ($Action) {
     'Update' {
         Assert-Prerequisites
         Invoke-SafeGitUpdate
-        Invoke-Deploy
+        Write-Step 'Reloading the updated server manager before deployment'
+        $deployArguments = @(
+            '-NoProfile',
+            '-ExecutionPolicy', 'Bypass',
+            '-File', $PSCommandPath,
+            '-Action', 'Deploy'
+        )
+        if ($SkipBuild) { $deployArguments += '-SkipBuild' }
+        & powershell.exe @deployArguments
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Deployment with the updated server manager failed.'
+        }
     }
     'Start' {
         Assert-Prerequisites
