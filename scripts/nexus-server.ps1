@@ -42,6 +42,7 @@ function Invoke-Checked {
     if ($Capture) {
         return (($output | Out-String).Trim())
     }
+    $output
 }
 
 function Invoke-Compose {
