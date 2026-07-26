@@ -45,7 +45,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
-  if (init?.body && !(init.body instanceof URLSearchParams)) {
+  // FormData ve URLSearchParams'ta Content-Type'ı tarayıcı belirler (multipart boundary vb.).
+  if (init?.body && !(init.body instanceof URLSearchParams) && !(init.body instanceof FormData)) {
     headers["Content-Type"] = "application/json";
   }
 
@@ -82,16 +83,33 @@ export const coreApi = {
     request<User>("/users", { method: "POST", body: JSON.stringify({ username, email, password }) }),
 
   me: () => request<User>("/users/me"),
+  updateProfile: (displayName: string | null) =>
+    request<User>("/users/me", { method: "PATCH", body: JSON.stringify({ display_name: displayName }) }),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<void>("/users/me/password", {
+      method: "POST",
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    }),
+  uploadAvatar: (blob: Blob) => {
+    const form = new FormData();
+    form.append("file", blob, "avatar");
+    return request<User>("/users/me/avatar", { method: "POST", body: form });
+  },
 
   myServers: () => request<Server[]>("/servers"),
   createServer: (name: string) =>
     request<Server>("/servers", { method: "POST", body: JSON.stringify({ name }) }),
+  updateServer: (serverId: number, patch: { name?: string; description?: string | null }) =>
+    request<Server>(`/servers/${serverId}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteServer: (serverId: number) => request<void>(`/servers/${serverId}`, { method: "DELETE" }),
 
   listMembers: (serverId: number) => request<Member[]>(`/servers/${serverId}/members`),
   addMember: (serverId: number, username: string) =>
     request<{ status: string }>(`/servers/${serverId}/members?username=${encodeURIComponent(username)}`, {
       method: "POST",
     }),
+  removeMember: (serverId: number, userId: number) =>
+    request<void>(`/servers/${serverId}/members/${userId}`, { method: "DELETE" }),
 
   listPlugins: () => request<PluginManifest[]>("/plugins"),
   installPlugin: (name: string) =>
@@ -108,9 +126,18 @@ export const coreApi = {
   listChannels: (serverId: number) => request<Channel[]>(`/servers/${serverId}/channels`),
   createChannel: (serverId: number, name: string, type: ChannelType = "text") =>
     request<Channel>(`/servers/${serverId}/channels`, { method: "POST", body: JSON.stringify({ name, type }) }),
+  updateChannel: (serverId: number, channelId: number, patch: { name?: string; topic?: string | null }) =>
+    request<Channel>(`/servers/${serverId}/channels/${channelId}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  deleteChannel: (serverId: number, channelId: number) =>
+    request<void>(`/servers/${serverId}/channels/${channelId}`, { method: "DELETE" }),
 
   listMessages: (channelId: number, limit = 50) =>
     request<Message[]>(`/channels/${channelId}/messages?limit=${limit}`),
   sendMessage: (channelId: number, content: string) =>
     request<Message>(`/channels/${channelId}/messages`, { method: "POST", body: JSON.stringify({ content }) }),
+  deleteMessage: (channelId: number, eventId: string) =>
+    request<void>(`/channels/${channelId}/messages/${encodeURIComponent(eventId)}`, { method: "DELETE" }),
 };

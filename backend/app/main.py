@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from app.core import models  # noqa: F401  (Base.metadata'ya kaydetmek için import edilir)
 from app.core.event_loop import set_main_loop
 from app.core.models import Plugin
-from app.core.routers import auth, bots, channels, members, messages, plugins, servers, users, voice
+from app.core.routers import auth, bots, channels, gateway, members, messages, plugins, servers, users, voice
 from app.database import SessionLocal
 from app.plugins_engine.loader import PluginLoadError, discover_manifests, plugin_registry
 from app.services.ollama import models as ollama_models  # noqa: F401  (Base.metadata'ya kaydedilir)
@@ -24,6 +24,7 @@ app.include_router(bots.router)
 app.include_router(bots.server_bots_router)
 app.include_router(ai_router)
 app.include_router(voice.router)
+app.include_router(gateway.router)
 
 
 def _reload_enabled_plugins() -> None:

@@ -119,6 +119,8 @@ class MatrixClient:
             }
             for event in events
             if event.get("type") == "m.room.message"
+            # Silinmiş (redact edilmiş) mesajları listeye dahil etme.
+            and not event.get("unsigned", {}).get("redacted_because")
         ]
 
     def redact_message(self, access_token: str, room_id: str, event_id: str, reason: str | None = None) -> str:

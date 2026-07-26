@@ -1,4 +1,5 @@
 export type VoiceMode = "toggle" | "ptt";
+export type ThemeMode = "dark" | "light" | "system";
 
 export interface KeyCombo {
   ctrl: boolean;
@@ -10,6 +11,19 @@ export interface KeyCombo {
 export interface VoiceSettings {
   mode: VoiceMode;
   pttCombo: KeyCombo;
+  // Cihaz tercihleri (null = sistem varsayılanı). deviceId'ler tarayıcı/oturuma özgüdür.
+  inputDeviceId: string | null;
+  outputDeviceId: string | null;
+  cameraDeviceId: string | null;
+  // Ses işleme (getUserMedia MediaTrackConstraints'e uygulanır).
+  noiseSuppression: boolean;
+  echoCancellation: boolean;
+  autoGainControl: boolean;
+  // Bildirimler.
+  desktopNotifications: boolean; // gelen çağrı için masaüstü bildirimi
+  callRingtone: boolean; // gelen çağrıda zil sesi
+  // Görünüm.
+  theme: ThemeMode;
 }
 
 const STORAGE_KEY = "nexus.voiceSettings";
@@ -19,7 +33,24 @@ export const DEFAULT_PTT_COMBO: KeyCombo = { ctrl: true, shift: true, alt: false
 export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   mode: "toggle",
   pttCombo: DEFAULT_PTT_COMBO,
+  inputDeviceId: null,
+  outputDeviceId: null,
+  cameraDeviceId: null,
+  noiseSuppression: true,
+  echoCancellation: true,
+  autoGainControl: true,
+  desktopNotifications: false,
+  callRingtone: true,
+  theme: "dark",
 };
+
+function boolWithDefault(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function stringOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
 
 export function loadVoiceSettings(): VoiceSettings {
   try {
@@ -34,6 +65,15 @@ export function loadVoiceSettings(): VoiceSettings {
         alt: Boolean(parsed.pttCombo?.alt),
         code: typeof parsed.pttCombo?.code === "string" ? parsed.pttCombo.code : null,
       },
+      inputDeviceId: stringOrNull(parsed.inputDeviceId),
+      outputDeviceId: stringOrNull(parsed.outputDeviceId),
+      cameraDeviceId: stringOrNull(parsed.cameraDeviceId),
+      noiseSuppression: boolWithDefault(parsed.noiseSuppression, true),
+      echoCancellation: boolWithDefault(parsed.echoCancellation, true),
+      autoGainControl: boolWithDefault(parsed.autoGainControl, true),
+      desktopNotifications: boolWithDefault(parsed.desktopNotifications, false),
+      callRingtone: boolWithDefault(parsed.callRingtone, true),
+      theme: parsed.theme === "light" || parsed.theme === "system" ? parsed.theme : "dark",
     };
   } catch {
     return DEFAULT_VOICE_SETTINGS;

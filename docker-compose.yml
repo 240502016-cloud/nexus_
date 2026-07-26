@@ -261,6 +261,9 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=256m,mode=1777
+    volumes:
+      # Profil fotoğrafları burada kalıcı saklanır (read-only kök fs'te yazılabilir tek yer).
+      - avatar_data:/srv/avatars
     security_opt:
       - no-new-privileges:true
     cpus: 2.0
@@ -286,13 +289,17 @@ services:
     mem_limit: 128m
 
   reverse-proxy:
-    image: caddy:2.11.4-alpine
+    build:
+      context: docker/reverse-proxy
+      dockerfile: Dockerfile
+    image: nexus-caddy:2.11.4-cf
     restart: unless-stopped
     environment:
       NEXUS_DOMAIN: ${NEXUS_DOMAIN:?NEXUS_DOMAIN is required}
       NEXUS_ACME_EMAIL: ${NEXUS_ACME_EMAIL:?NEXUS_ACME_EMAIL is required}
       NEXUS_PUBLIC_URL: ${NEXUS_PUBLIC_URL:-https://${NEXUS_DOMAIN:?NEXUS_DOMAIN is required}:${NEXUS_HTTPS_PORT:-443}}
       NEXUS_MATRIX_SERVER_AUTHORITY: ${NEXUS_MATRIX_SERVER_AUTHORITY:-${NEXUS_DOMAIN:?NEXUS_DOMAIN is required}:${NEXUS_HTTPS_PORT:-443}}
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN is required}
     ports:
       - "${NEXUS_HTTP_PORT:-80}:80"
       - "${NEXUS_HTTPS_PORT:-443}:443"
@@ -338,3 +345,4 @@ volumes:
   matrix_data:
   caddy_data:
   caddy_config:
+  avatar_data:

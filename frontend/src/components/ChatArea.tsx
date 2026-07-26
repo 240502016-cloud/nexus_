@@ -8,6 +8,7 @@ interface ChatAreaProps {
   messages: Message[];
   currentMatrixUserId: string | null;
   onSendMessage: (content: string) => Promise<void>;
+  onDeleteMessage: (eventId: string) => void;
 }
 
 function displayName(matrixUserId: string): string {
@@ -15,7 +16,13 @@ function displayName(matrixUserId: string): string {
   return matrixUserId.replace(/^@/, "").split(":")[0];
 }
 
-export function ChatArea({ channel, messages, currentMatrixUserId, onSendMessage }: ChatAreaProps) {
+export function ChatArea({
+  channel,
+  messages,
+  currentMatrixUserId,
+  onSendMessage,
+  onDeleteMessage,
+}: ChatAreaProps) {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
 
@@ -43,17 +50,26 @@ export function ChatArea({ channel, messages, currentMatrixUserId, onSendMessage
         {!channel ? null : ordered.length === 0 ? (
           <p className="chat-area__placeholder">Henüz mesaj yok. İlk mesajı sen yaz.</p>
         ) : (
-          ordered.map((message) => (
-            <div
-              key={message.event_id}
-              className={
-                message.sender === currentMatrixUserId ? "chat-message chat-message--own" : "chat-message"
-              }
-            >
-              <span className="chat-message__sender">{displayName(message.sender)}</span>
-              <span className="chat-message__content">{message.content || "(silindi)"}</span>
-            </div>
-          ))
+          ordered.map((message) => {
+            const own = message.sender === currentMatrixUserId;
+            return (
+              <div key={message.event_id} className={own ? "chat-message chat-message--own" : "chat-message"}>
+                <span className="chat-message__sender">{displayName(message.sender)}</span>
+                <span className="chat-message__content">{message.content || "(silindi)"}</span>
+                {own && message.content ? (
+                  <button
+                    className="chat-message__delete"
+                    title="Mesajı sil"
+                    onClick={() => {
+                      if (window.confirm("Bu mesaj silinsin mi?")) onDeleteMessage(message.event_id);
+                    }}
+                  >
+                    🗑️
+                  </button>
+                ) : null}
+              </div>
+            );
+          })
         )}
       </div>
       {channel ? (

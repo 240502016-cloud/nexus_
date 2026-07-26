@@ -1,26 +1,162 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
+import { SINK_ID_SUPPORTED, useMediaDevices } from "../hooks/useMediaDevices";
 import type { KeyCombo, VoiceSettings } from "../settings";
 import { DEFAULT_VOICE_SETTINGS, comboIsEmpty, comboLabel, isModifierCode, saveVoiceSettings } from "../settings";
+import type { User } from "../types";
+import { AccountSettings } from "./AccountSettings";
+
+type SettingsTab = "account" | "voice" | "notifications" | "appearance";
 
 interface SettingsPanelProps {
   settings: VoiceSettings;
+  currentUser: User;
+  onUserUpdated: (user: User) => void;
   onClose: () => void;
   onChange: (settings: VoiceSettings) => void;
 }
 
-export function SettingsPanel({ settings: initialSettings, onClose, onChange }: SettingsPanelProps) {
+async function setElementSink(el: HTMLMediaElement, deviceId: string | null): Promise<void> {
+  const withSink = el as HTMLMediaElement & { setSinkId?: (id: string) => Promise<void> };
+  if (typeof withSink.setSinkId !== "function") return;
+  try {
+    await withSink.setSinkId(deviceId ?? "");
+  } catch {
+    /* yok say */
+  }
+}
+
+export function SettingsPanel({
+  settings: initialSettings,
+  currentUser,
+  onUserUpdated,
+  onClose,
+  onChange,
+}: SettingsPanelProps) {
   const [settings, setSettings] = useState<VoiceSettings>(initialSettings);
   const [recording, setRecording] = useState(false);
+  const [tab, setTab] = useState<SettingsTab>("account");
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission | "unsupported">(
+    typeof Notification === "undefined" ? "unsupported" : Notification.permission,
+  );
 
-  // Tuş yakalama: kullanıcı bir kombinasyonu basılı tutup bırakınca, basılı kaldığı süre
-  // boyunca görülen en geniş modifier kümesi + varsa modifier olmayan tuş, yeni combo olur.
+  async function requestNotifPermission() {
+    if (typeof Notification === "undefined") return;
+    const result = await Notification.requestPermission();
+    setNotifPermission(result);
+  }
+
+  const { devices, permissionGranted, error: deviceError, requestPermission } = useMediaDevices();
+
+  // --- Mikrofon test (canlı seviye) ve kamera önizleme kaynakları ---
+  const [micLevel, setMicLevel] = useState(0);
+  const [micTesting, setMicTesting] = useState(false);
+  const [camPreviewing, setCamPreviewing] = useState(false);
+  const micTestRef = useRef<{ ctx: AudioContext; stream: MediaStream; raf: number } | null>(null);
+  const camStreamRef = useRef<MediaStream | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  const update = useCallback((patch: Partial<VoiceSettings>) => {
+    setSettings((prev) => ({ ...prev, ...patch }));
+  }, []);
+
+  const stopMicTest = useCallback(() => {
+    const t = micTestRef.current;
+    if (t) {
+      cancelAnimationFrame(t.raf);
+      t.stream.getTracks().forEach((track) => track.stop());
+      void t.ctx.close();
+      micTestRef.current = null;
+    }
+    setMicTesting(false);
+    setMicLevel(0);
+  }, []);
+
+  const startMicTest = useCallback(async () => {
+    stopMicTest();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: settings.inputDeviceId ? { deviceId: { exact: settings.inputDeviceId } } : true,
+      });
+      const ctx = new AudioContext();
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      const buffer = new Uint8Array(analyser.frequencyBinCount);
+      const tick = () => {
+        analyser.getByteFrequencyData(buffer);
+        const avg = buffer.reduce((s, v) => s + v, 0) / buffer.length;
+        setMicLevel(Math.min(100, Math.round((avg / 128) * 100)));
+        micTestRef.current = { ctx, stream, raf: requestAnimationFrame(tick) };
+      };
+      micTestRef.current = { ctx, stream, raf: requestAnimationFrame(tick) };
+      setMicTesting(true);
+    } catch {
+      setMicTesting(false);
+    }
+  }, [settings.inputDeviceId, stopMicTest]);
+
+  const stopCamPreview = useCallback(() => {
+    camStreamRef.current?.getTracks().forEach((t) => t.stop());
+    camStreamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setCamPreviewing(false);
+  }, []);
+
+  const startCamPreview = useCallback(async () => {
+    stopCamPreview();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: settings.cameraDeviceId ? { deviceId: { exact: settings.cameraDeviceId } } : true,
+      });
+      camStreamRef.current = stream;
+      if (videoRef.current) videoRef.current.srcObject = stream;
+      setCamPreviewing(true);
+    } catch {
+      setCamPreviewing(false);
+    }
+  }, [settings.cameraDeviceId, stopCamPreview]);
+
+  const testSpeaker = useCallback(async () => {
+    const ctx = new AudioContext();
+    const dest = ctx.createMediaStreamDestination();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = 440;
+    const now = ctx.currentTime;
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.25, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);
+    osc.connect(gain);
+    gain.connect(dest);
+    const el = new Audio();
+    el.srcObject = dest.stream;
+    await setElementSink(el, settings.outputDeviceId);
+    osc.start();
+    osc.stop(now + 0.5);
+    try {
+      await el.play();
+    } catch {
+      /* yok say */
+    }
+    window.setTimeout(() => void ctx.close(), 800);
+  }, [settings.outputDeviceId]);
+
+  // Panel kapanınca test kaynaklarını serbest bırak (memory/stream sızıntısını önle).
+  useEffect(() => {
+    return () => {
+      stopMicTest();
+      stopCamPreview();
+    };
+  }, [stopMicTest, stopCamPreview]);
+
+  // PTT tuş yakalama.
   useEffect(() => {
     if (!recording) return;
-
     let maxCombo: KeyCombo = { ctrl: false, shift: false, alt: false, code: null };
     let sawKey = false;
-
     function handleKeyDown(event: KeyboardEvent) {
       event.preventDefault();
       sawKey = true;
@@ -41,7 +177,6 @@ export function SettingsPanel({ settings: initialSettings, onClose, onChange }: 
     function handleBlur() {
       setRecording(false);
     }
-
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
     window.addEventListener("blur", handleBlur);
@@ -53,6 +188,8 @@ export function SettingsPanel({ settings: initialSettings, onClose, onChange }: 
   }, [recording]);
 
   function handleSave() {
+    stopMicTest();
+    stopCamPreview();
     saveVoiceSettings(settings);
     onChange(settings);
     onClose();
@@ -64,46 +201,269 @@ export function SettingsPanel({ settings: initialSettings, onClose, onChange }: 
 
   return (
     <div className="settings-overlay" onClick={onClose}>
-      <div className="settings-panel" onClick={(event) => event.stopPropagation()}>
+      <div className="settings-panel settings-panel--wide" onClick={(event) => event.stopPropagation()}>
         <header className="settings-panel__header">
-          <h2>Ses Ayarları</h2>
+          <h2>Ayarlar</h2>
           <button className="settings-panel__close" onClick={onClose} aria-label="Kapat">
             ✕
           </button>
         </header>
 
+        <nav className="settings-panel__tabs">
+          <button
+            className={tab === "account" ? "settings-panel__tab active" : "settings-panel__tab"}
+            onClick={() => setTab("account")}
+          >
+            Hesabım
+          </button>
+          <button
+            className={tab === "voice" ? "settings-panel__tab active" : "settings-panel__tab"}
+            onClick={() => setTab("voice")}
+          >
+            Ses ve Video
+          </button>
+          <button
+            className={tab === "notifications" ? "settings-panel__tab active" : "settings-panel__tab"}
+            onClick={() => setTab("notifications")}
+          >
+            Bildirimler
+          </button>
+          <button
+            className={tab === "appearance" ? "settings-panel__tab active" : "settings-panel__tab"}
+            onClick={() => setTab("appearance")}
+          >
+            Görünüm
+          </button>
+        </nav>
+
+        {tab === "account" ? (
+          <AccountSettings currentUser={currentUser} onUserUpdated={onUserUpdated} />
+        ) : (
+          <>
+        {tab === "voice" ? (
+          <>
+        {/* Konuşma modu */}
         <div className="settings-panel__section">
+          <h3 className="settings-panel__section-title">Konuşma modu</h3>
           <label className="settings-panel__radio">
             <input
               type="radio"
               checked={settings.mode === "toggle"}
-              onChange={() => setSettings((prev) => ({ ...prev, mode: "toggle" }))}
+              onChange={() => update({ mode: "toggle" })}
             />
-            Sürekli açık — elle sustur/aç
+            Ses algılama (sürekli açık — elle sustur/aç)
           </label>
           <label className="settings-panel__radio">
-            <input
-              type="radio"
-              checked={settings.mode === "ptt"}
-              onChange={() => setSettings((prev) => ({ ...prev, mode: "ptt" }))}
-            />
+            <input type="radio" checked={settings.mode === "ptt"} onChange={() => update({ mode: "ptt" })} />
             Bas-konuş (Push-to-talk)
           </label>
-        </div>
-
-        {settings.mode === "ptt" ? (
-          <div className="settings-panel__section">
+          {settings.mode === "ptt" ? (
             <div className="settings-panel__ptt-key">
               <span>Tuş: </span>
               <strong>{recording ? "Tuşlara basın..." : comboLabel(settings.pttCombo)}</strong>
+              <button onClick={() => setRecording(true)} disabled={recording}>
+                {recording ? "Dinleniyor..." : "Değiştir"}
+              </button>
             </div>
-            <button onClick={() => setRecording(true)} disabled={recording}>
-              {recording ? "Dinleniyor..." : "Tuşu değiştir"}
+          ) : null}
+        </div>
+
+        {/* Cihazlar */}
+        <div className="settings-panel__section">
+          <h3 className="settings-panel__section-title">Cihazlar</h3>
+          {!permissionGranted ? (
+            <div className="settings-panel__notice-row">
+              <span>Cihaz adlarını görmek için mikrofon/kamera iznine ihtiyaç var.</span>
+              <button onClick={requestPermission}>İzin ver</button>
+            </div>
+          ) : null}
+          {deviceError ? <p className="settings-panel__error-text">{deviceError}</p> : null}
+
+          <label className="settings-panel__field">
+            <span>Mikrofon</span>
+            <select
+              value={settings.inputDeviceId ?? ""}
+              onChange={(e) => update({ inputDeviceId: e.target.value || null })}
+            >
+              <option value="">Sistem varsayılanı</option>
+              {devices.microphones.map((d) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="settings-panel__test-row">
+            <button onClick={micTesting ? stopMicTest : startMicTest}>
+              {micTesting ? "Testi durdur" : "Mikrofonu test et"}
             </button>
+            <div className="settings-panel__meter" aria-label="Mikrofon seviyesi">
+              <div className="settings-panel__meter-fill" style={{ width: `${micLevel}%` }} />
+            </div>
+          </div>
+
+          <label className="settings-panel__field">
+            <span>Hoparlör (çıkış)</span>
+            <select
+              value={settings.outputDeviceId ?? ""}
+              onChange={(e) => update({ outputDeviceId: e.target.value || null })}
+              disabled={!SINK_ID_SUPPORTED}
+            >
+              <option value="">Sistem varsayılanı</option>
+              {devices.speakers.map((d) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {SINK_ID_SUPPORTED ? (
+            <div className="settings-panel__test-row">
+              <button onClick={testSpeaker}>Hoparlörü test et 🔊</button>
+            </div>
+          ) : (
             <p className="settings-panel__hint">
-              Sadece sekme odaktayken çalışır. Sekme arka plandayken (ör. tam ekran bir oyun)
-              tarayıcı güvenlik kısıtı nedeniyle tuş yakalanamaz.
+              Bu tarayıcı ses çıkışı seçimini (setSinkId) desteklemiyor; sistem varsayılanı kullanılır.
             </p>
+          )}
+
+          <label className="settings-panel__field">
+            <span>Kamera</span>
+            <select
+              value={settings.cameraDeviceId ?? ""}
+              onChange={(e) => update({ cameraDeviceId: e.target.value || null })}
+            >
+              <option value="">Sistem varsayılanı</option>
+              {devices.cameras.map((d) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="settings-panel__test-row">
+            <button onClick={camPreviewing ? stopCamPreview : startCamPreview}>
+              {camPreviewing ? "Önizlemeyi kapat" : "Kamera önizleme"}
+            </button>
+          </div>
+          {camPreviewing ? (
+            <video ref={videoRef} autoPlay playsInline muted className="settings-panel__cam-preview" />
+          ) : null}
+        </div>
+
+        {/* Ses işleme */}
+        <div className="settings-panel__section">
+          <h3 className="settings-panel__section-title">Ses işleme</h3>
+          <label className="settings-panel__radio">
+            <input
+              type="checkbox"
+              checked={settings.noiseSuppression}
+              onChange={(e) => update({ noiseSuppression: e.target.checked })}
+            />
+            Gürültü engelleme
+          </label>
+          <label className="settings-panel__radio">
+            <input
+              type="checkbox"
+              checked={settings.echoCancellation}
+              onChange={(e) => update({ echoCancellation: e.target.checked })}
+            />
+            Yankı engelleme
+          </label>
+          <label className="settings-panel__radio">
+            <input
+              type="checkbox"
+              checked={settings.autoGainControl}
+              onChange={(e) => update({ autoGainControl: e.target.checked })}
+            />
+            Otomatik kazanç kontrolü
+          </label>
+          <p className="settings-panel__hint">
+            Bu seçenekler tarayıcının standart ses işleme (MediaTrackConstraints) desteğini kullanır;
+            değişiklik kaydedilince görüşmeden çıkmadan uygulanır.
+          </p>
+        </div>
+
+          </>
+        ) : null}
+
+        {tab === "notifications" ? (
+          <div className="settings-panel__section">
+            <h3 className="settings-panel__section-title">Bildirimler</h3>
+            <div className="settings-panel__notice-row">
+              <span>
+                Tarayıcı bildirim izni:{" "}
+                <strong>
+                  {notifPermission === "granted"
+                    ? "Verildi"
+                    : notifPermission === "denied"
+                      ? "Reddedildi"
+                      : notifPermission === "unsupported"
+                        ? "Desteklenmiyor"
+                        : "İstenmedi"}
+                </strong>
+              </span>
+              {notifPermission === "default" ? (
+                <button onClick={requestNotifPermission}>İzin iste</button>
+              ) : null}
+            </div>
+            {notifPermission === "denied" ? (
+              <p className="settings-panel__hint">
+                Bildirimler tarayıcıdan engellenmiş; site izinlerinden yeniden açabilirsiniz.
+              </p>
+            ) : null}
+            <label className="settings-panel__radio">
+              <input
+                type="checkbox"
+                checked={settings.desktopNotifications}
+                disabled={notifPermission !== "granted"}
+                onChange={(e) => update({ desktopNotifications: e.target.checked })}
+              />
+              Gelen arama için masaüstü bildirimi
+            </label>
+            <label className="settings-panel__radio">
+              <input
+                type="checkbox"
+                checked={settings.callRingtone}
+                onChange={(e) => update({ callRingtone: e.target.checked })}
+              />
+              Gelen aramada zil sesi
+            </label>
+            <p className="settings-panel__hint">
+              Masaüstü bildirimi yalnızca sekme arka plandayken gösterilir; sekme öndeyse arama
+              ekranı zaten görünür.
+            </p>
+          </div>
+        ) : null}
+
+        {tab === "appearance" ? (
+          <div className="settings-panel__section">
+            <h3 className="settings-panel__section-title">Tema</h3>
+            <label className="settings-panel__radio">
+              <input
+                type="radio"
+                checked={settings.theme === "system"}
+                onChange={() => update({ theme: "system" })}
+              />
+              Sistem temasını kullan
+            </label>
+            <label className="settings-panel__radio">
+              <input
+                type="radio"
+                checked={settings.theme === "dark"}
+                onChange={() => update({ theme: "dark" })}
+              />
+              Koyu
+            </label>
+            <label className="settings-panel__radio">
+              <input
+                type="radio"
+                checked={settings.theme === "light"}
+                onChange={() => update({ theme: "light" })}
+              />
+              Açık
+            </label>
+            <p className="settings-panel__hint">Değişiklik kaydedilince uygulanır.</p>
           </div>
         ) : null}
 
@@ -113,6 +473,8 @@ export function SettingsPanel({ settings: initialSettings, onClose, onChange }: 
             Kaydet
           </button>
         </div>
+          </>
+        )}
       </div>
     </div>
   );

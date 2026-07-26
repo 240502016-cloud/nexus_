@@ -53,3 +53,47 @@ def list_channels(server_id: int, current_user: User = Depends(get_current_user)
         raise HTTPException(status_code=404, detail="Sunucu bulunamadı")
     ensure_server_member(db, server, current_user)
     return server.channels
+
+
+def _get_owned_channel(db: Session, server_id: int, channel_id: int, current_user: User) -> Channel:
+    server = db.get(Server, server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="Sunucu bulunamadı")
+    ensure_server_owner(server, current_user)
+    channel = db.get(Channel, channel_id)
+    if not channel or channel.server_id != server_id:
+        raise HTTPException(status_code=404, detail="Kanal bulunamadı")
+    return channel
+
+
+@router.patch("/{channel_id}", response_model=schemas.ChannelRead)
+def update_channel(
+    server_id: int,
+    channel_id: int,
+    payload: schemas.ChannelUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Kanalı yeniden adlandırır / konusunu düzenler (yalnızca sunucu sahibi)."""
+    channel = _get_owned_channel(db, server_id, channel_id, current_user)
+    if payload.name is not None:
+        channel.name = payload.name.strip()
+    if payload.topic is not None:
+        channel.topic = payload.topic.strip() or None
+    db.add(channel)
+    db.commit()
+    db.refresh(channel)
+    return channel
+
+
+@router.delete("/{channel_id}", status_code=204)
+def delete_channel(
+    server_id: int,
+    channel_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Kanalı siler (yalnızca sunucu sahibi). Matrix odası best-effort korunur/orphan kalır."""
+    channel = _get_owned_channel(db, server_id, channel_id, current_user)
+    db.delete(channel)
+    db.commit()

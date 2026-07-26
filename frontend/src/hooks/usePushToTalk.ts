@@ -3,6 +3,14 @@ import { useEffect, useRef } from "react";
 import type { KeyCombo } from "../settings";
 import { comboIsEmpty } from "../settings";
 
+// Kullanıcı bir metin alanına yazıyorsa PTT tetiklenmemeli (ve tuş bastırılıp yazma engellenmemeli).
+function isEditableTarget(event: KeyboardEvent): boolean {
+  const target = event.target as HTMLElement | null;
+  if (!target) return false;
+  const tag = target.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable;
+}
+
 /**
  * Sekme odaktayken combo tuşları basılı tutulduğu sürece onChange(true), bırakılınca
  * onChange(false) çağırır. Sekme arka plana geçerse (blur) basılı tuşlar bırakılmış sayılır -
@@ -42,11 +50,14 @@ export function usePushToTalk(enabled: boolean, combo: KeyCombo, onChange: (acti
     }
 
     function handleKeyDown(event: KeyboardEvent) {
+      // Metin alanına yazarken PTT'yi tetikleme ve tuşu bastırma (yazmayı engelleme).
+      if (isEditableTarget(event)) return;
       if (isComboKey(event)) event.preventDefault();
       pressed.add(event.code);
       evaluate();
     }
     function handleKeyUp(event: KeyboardEvent) {
+      if (isEditableTarget(event)) return;
       if (isComboKey(event)) event.preventDefault();
       pressed.delete(event.code);
       evaluate();

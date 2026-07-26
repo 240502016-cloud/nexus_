@@ -7,6 +7,7 @@ from app.core.auth import get_current_user
 from app.core.authz import ensure_server_member
 from app.core.matrix_client import MatrixError, matrix_client
 from app.core.models import Channel, User
+from app.core.routers.gateway import notify_channel_message
 from app.database import get_db
 
 router = APIRouter(prefix="/channels/{channel_id}/messages", tags=["messages"])
@@ -41,9 +42,41 @@ def send_message(
         ),
     )
 
+    # Gerçek zamanlı: kanaldaki üyelere yeni mesaj sinyali gönder (bot cevapları da dahil,
+    # çünkü bu noktada handle_message_event tamamlandı).
+    recipients = {sm.user_id for sm in channel.server.members}
+    recipients.add(channel.server.owner_id)
+    notify_channel_message(channel_id, channel.server_id, recipients)
+
     return schemas.MessageRead(
         event_id=event_id, sender=current_user.matrix_user_id, content=payload.content, origin_server_ts=None
     )
+
+
+@router.delete("/{event_id}", status_code=204)
+def delete_message(
+    channel_id: int,
+    event_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Bir mesajı siler (Matrix redact). Yetkilendirmeyi Matrix uygular: kullanıcı yalnızca
+    kendi mesajını (veya yeterli power level'a sahipse başkasının mesajını) silebilir."""
+    channel = db.get(Channel, channel_id)
+    if not channel or not channel.matrix_room_id:
+        raise HTTPException(status_code=404, detail="Kanal veya Matrix odası bulunamadı")
+    ensure_server_member(db, channel.server, current_user)
+
+    if not current_user.matrix_access_token:
+        raise HTTPException(status_code=409, detail="Kullanıcının Matrix hesabı yok")
+
+    try:
+        matrix_client.redact_message(current_user.matrix_access_token, channel.matrix_room_id, event_id)
+    except MatrixError as exc:
+        # Matrix yetki (power level) reddi büyük olasılıkla 403 içerir; kullanıcıya net dönelim.
+        if "403" in str(exc):
+            raise HTTPException(status_code=403, detail="Bu mesajı silme yetkiniz yok") from exc
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.get("", response_model=list[schemas.MessageRead])

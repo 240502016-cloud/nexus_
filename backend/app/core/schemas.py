@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.core.models import ChannelType
 from app.core.permissions import Permission
@@ -31,6 +31,17 @@ class UserRead(UserBase):
     created_at: datetime
 
 
+class UserUpdate(BaseModel):
+    """Kullanıcının kendi profilinde düzenleyebileceği alanlar."""
+
+    display_name: str | None = Field(default=None, max_length=64)
+
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=8, max_length=200)
+
+
 # ---- Server Member ----
 
 
@@ -55,6 +66,11 @@ class ServerCreate(ServerBase):
     pass
 
 
+class ServerUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    description: str | None = None
+
+
 class ServerRead(ServerBase):
     model_config = ConfigDict(from_attributes=True)
 
@@ -75,6 +91,11 @@ class ChannelBase(BaseModel):
 
 class ChannelCreate(ChannelBase):
     pass
+
+
+class ChannelUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    topic: str | None = None
 
 
 class ChannelRead(ChannelBase):

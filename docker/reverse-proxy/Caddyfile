@@ -5,9 +5,11 @@
 {$NEXUS_DOMAIN} {
     encode zstd gzip
 
-    # Bu sabitleme eski TLS sürümlerinin yanlışlıkla etkinleşmesini önler.
+    # Sunucu Hamachi'de olduğu için HTTP-01/TLS-ALPN doğrulaması yapılamaz; Cloudflare DNS-01
+    # ile güvenilir Let's Encrypt sertifikası alınır (istemciler artık sertifika kurmaz).
     tls {
         protocols tls1.2 tls1.3
+        dns cloudflare {env.CLOUDFLARE_API_TOKEN}
     }
 
     log {

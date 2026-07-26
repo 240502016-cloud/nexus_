@@ -7,6 +7,11 @@ relay eder ve katılımcı listesi/mute durumu gibi oda durumunu yayınlar.
 Yeni katılan taraf, kendisine gönderilen mevcut katılımcı listesindeki herkese "offer"
 gönderir (mesh bağlantı kurma sorumluluğu her zaman yeni gelende); bu sayede aynı ikili
 arasında çift bağlantı kurulmaz.
+
+Ayrıca oda durumu (kimler kanalda, mute/deafen/speaking) her değişimde bir dinleyici
+callback'i üzerinden gateway'e bildirilir; böylece kanala GİRMEYEN sunucu üyeleri de
+katılımcıları gerçek zamanlı görebilir. voice -> gateway bağımlılığı callback ile kurulur
+(doğrudan import edilmez), bu da döngüsel import'u önler.
 """
 
 from __future__ import annotations
@@ -16,6 +21,7 @@ import base64
 import hashlib
 import hmac
 import time
+from typing import Awaitable, Callable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from app.config import settings
@@ -25,34 +31,92 @@ from app.database import SessionLocal
 
 
 class VoiceConnectionManager:
-    """Bellekte tutulan sesli kanal katılımcıları ve WebSocket bağlantıları."""
+    """Bellekte tutulan sesli kanal katılımcıları ve WebSocket bağlantıları.
+
+    Oda yapısı: channel_id -> {"server_id", "recipients": set[user_id], "users": {user_id: info}}
+    recipients = o kanalın sunucusundaki tüm üyeler (roster'ı görmeye yetkili kişiler).
+    """
 
     def __init__(self) -> None:
-        self._channels: dict[int, dict[int, dict]] = {}
+        self._rooms: dict[int, dict] = {}
 
-    async def join(self, channel_id: int, user_id: int, username: str, ws: WebSocket) -> list[dict]:
-        room = self._channels.setdefault(channel_id, {})
-        existing = [
-            {"user_id": uid, "username": info["username"], "muted": info["muted"]} for uid, info in room.items()
-        ]
-        room[user_id] = {"ws": ws, "username": username, "muted": False}
+    @staticmethod
+    def _participant(uid: int, info: dict) -> dict:
+        return {
+            "user_id": uid,
+            "username": info["username"],
+            "avatar_url": info.get("avatar_url"),
+            "muted": info["muted"],
+            "deafened": info["deafened"],
+            "speaking": info["speaking"],
+        }
+
+    async def join(
+        self,
+        channel_id: int,
+        server_id: int,
+        recipients: set[int],
+        user_id: int,
+        username: str,
+        avatar_url: str | None,
+        ws: WebSocket,
+    ) -> list[dict]:
+        room = self._rooms.setdefault(
+            channel_id, {"server_id": server_id, "recipients": set(recipients), "users": {}}
+        )
+        # Üyelik değişmiş olabilir; her katılımda alıcı kümesini tazele.
+        room["server_id"] = server_id
+        room["recipients"] = set(recipients)
+        users = room["users"]
+        existing = [self._participant(uid, info) for uid, info in users.items()]
+        users[user_id] = {
+            "ws": ws,
+            "username": username,
+            "avatar_url": avatar_url,
+            "muted": False,
+            "deafened": False,
+            "speaking": False,
+        }
         return existing
 
     def leave(self, channel_id: int, user_id: int) -> None:
-        room = self._channels.get(channel_id)
+        room = self._rooms.get(channel_id)
         if room:
-            room.pop(user_id, None)
-            if not room:
-                self._channels.pop(channel_id, None)
+            room["users"].pop(user_id, None)
+            if not room["users"]:
+                self._rooms.pop(channel_id, None)
+
+    def _set(self, channel_id: int, user_id: int, key: str, value) -> None:
+        room = self._rooms.get(channel_id)
+        if room and user_id in room["users"]:
+            room["users"][user_id][key] = value
 
     def set_muted(self, channel_id: int, user_id: int, muted: bool) -> None:
-        room = self._channels.get(channel_id)
-        if room and user_id in room:
-            room[user_id]["muted"] = muted
+        self._set(channel_id, user_id, "muted", muted)
+
+    def set_deafened(self, channel_id: int, user_id: int, deafened: bool) -> None:
+        self._set(channel_id, user_id, "deafened", deafened)
+
+    def set_speaking(self, channel_id: int, user_id: int, speaking: bool) -> None:
+        self._set(channel_id, user_id, "speaking", speaking)
+
+    def roster(self, channel_id: int) -> list[dict]:
+        room = self._rooms.get(channel_id)
+        if not room:
+            return []
+        return [self._participant(uid, info) for uid, info in room["users"].items()]
+
+    def recipients(self, channel_id: int) -> set[int]:
+        room = self._rooms.get(channel_id)
+        return set(room["recipients"]) if room else set()
+
+    def rooms_for_recipient(self, user_id: int) -> list[int]:
+        return [cid for cid, room in self._rooms.items() if user_id in room["recipients"]]
 
     async def broadcast(self, channel_id: int, message: dict, exclude_user_id: int | None = None) -> None:
-        room = self._channels.get(channel_id, {})
-        for uid, info in list(room.items()):
+        room = self._rooms.get(channel_id)
+        users = room["users"] if room else {}
+        for uid, info in list(users.items()):
             if uid == exclude_user_id:
                 continue
             try:
@@ -61,8 +125,8 @@ class VoiceConnectionManager:
                 pass  # bağlantı kopmuş olabilir; disconnect handler zaten temizleyecek
 
     async def send_to(self, channel_id: int, user_id: int, message: dict) -> None:
-        room = self._channels.get(channel_id, {})
-        info = room.get(user_id)
+        room = self._rooms.get(channel_id)
+        info = room["users"].get(user_id) if room else None
         if info:
             try:
                 await info["ws"].send_json(message)
@@ -71,6 +135,29 @@ class VoiceConnectionManager:
 
 
 voice_manager = VoiceConnectionManager()
+
+# Oda durumu değişince çağrılan dinleyici (gateway tarafından register edilir).
+# İmza: (channel_id, participants, recipient_ids) -> None
+VoiceStateListener = Callable[[int, list[dict], set[int]], Awaitable[None]]
+_voice_state_listener: Optional[VoiceStateListener] = None
+
+
+def set_voice_state_listener(listener: VoiceStateListener) -> None:
+    global _voice_state_listener
+    _voice_state_listener = listener
+
+
+async def _notify_voice_state(channel_id: int, recipients: set[int] | None = None) -> None:
+    """Kanalın güncel roster'ını yetkili üyelere (gateway üzerinden) bildir."""
+    if _voice_state_listener is None:
+        return
+    recips = recipients if recipients is not None else voice_manager.recipients(channel_id)
+    participants = voice_manager.roster(channel_id)
+    try:
+        await _voice_state_listener(channel_id, participants, recips)
+    except Exception:
+        pass
+
 
 router = APIRouter(tags=["voice"])
 
@@ -123,17 +210,31 @@ async def voice_socket(websocket: WebSocket, channel_id: int, token: str = Query
             return
 
         username = user.username
+        avatar_url = user.avatar_url
+        server_id = channel.server_id
+        # Roster'ı görmeye yetkili kişiler: sunucunun tüm üyeleri + sahibi.
+        recipients = {sm.user_id for sm in channel.server.members}
+        recipients.add(channel.server.owner_id)
     finally:
         db.close()
 
     await websocket.accept()
-    existing_peers = await voice_manager.join(channel_id, user_id, username, websocket)
-    await websocket.send_json({"type": "peers", "peers": existing_peers})
+    existing_peers = await voice_manager.join(
+        channel_id, server_id, recipients, user_id, username, avatar_url, websocket
+    )
+    await websocket.send_json({"type": "peers", "peers": existing_peers, "self_id": user_id})
     await voice_manager.broadcast(
         channel_id,
-        {"type": "peer-joined", "user_id": user_id, "username": username, "muted": False},
+        {
+            "type": "peer-joined",
+            "user_id": user_id,
+            "username": username,
+            "muted": False,
+            "deafened": False,
+        },
         exclude_user_id=user_id,
     )
+    await _notify_voice_state(channel_id)
 
     try:
         while True:
@@ -158,14 +259,30 @@ async def voice_socket(websocket: WebSocket, channel_id: int, token: str = Query
                     {"type": "mute-changed", "user_id": user_id, "muted": muted},
                     exclude_user_id=user_id,
                 )
-            elif msg_type == "speaking":
+                await _notify_voice_state(channel_id)
+            elif msg_type == "deafen":
+                deafened = bool(data.get("deafened"))
+                voice_manager.set_deafened(channel_id, user_id, deafened)
                 await voice_manager.broadcast(
                     channel_id,
-                    {"type": "speaking-changed", "user_id": user_id, "speaking": bool(data.get("speaking"))},
+                    {"type": "deafen-changed", "user_id": user_id, "deafened": deafened},
                     exclude_user_id=user_id,
                 )
+                await _notify_voice_state(channel_id)
+            elif msg_type == "speaking":
+                speaking = bool(data.get("speaking"))
+                voice_manager.set_speaking(channel_id, user_id, speaking)
+                await voice_manager.broadcast(
+                    channel_id,
+                    {"type": "speaking-changed", "user_id": user_id, "speaking": speaking},
+                    exclude_user_id=user_id,
+                )
+                await _notify_voice_state(channel_id)
     except WebSocketDisconnect:
         pass
     finally:
+        # Oda silinmeden ÖNCE alıcıları yakala; ayrıldıktan sonra (belki boş) roster'ı onlara bildir.
+        recipients_before = voice_manager.recipients(channel_id)
         voice_manager.leave(channel_id, user_id)
         await voice_manager.broadcast(channel_id, {"type": "peer-left", "user_id": user_id})
+        await _notify_voice_state(channel_id, recipients_before)

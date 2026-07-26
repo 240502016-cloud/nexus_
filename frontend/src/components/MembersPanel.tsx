@@ -2,16 +2,35 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import { ApiError, coreApi } from "../api/client";
+import type { PresenceInfo } from "../hooks/useGateway";
 import type { Member } from "../types";
 
 interface MembersPanelProps {
   serverId: number;
   serverName: string;
   canInvite: boolean;
+  currentUserId: number;
+  presences?: Map<number, PresenceInfo>;
+  onCallMember?: (userId: number, username: string) => void;
   onClose: () => void;
 }
 
-export function MembersPanel({ serverId, serverName, canInvite, onClose }: MembersPanelProps) {
+const STATUS_LABEL: Record<string, string> = {
+  online: "Çevrimiçi",
+  idle: "Boşta",
+  dnd: "Rahatsız etmeyin",
+  offline: "Çevrimdışı",
+};
+
+export function MembersPanel({
+  serverId,
+  serverName,
+  canInvite,
+  currentUserId,
+  presences,
+  onCallMember,
+  onClose,
+}: MembersPanelProps) {
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [username, setUsername] = useState("");
@@ -28,6 +47,17 @@ export function MembersPanel({ serverId, serverName, canInvite, onClose }: Membe
   }
 
   useEffect(loadMembers, [serverId]);
+
+  async function handleKick(userId: number, name: string) {
+    if (!window.confirm(`${name} sunucudan çıkarılsın mı?`)) return;
+    setError(null);
+    try {
+      await coreApi.removeMember(serverId, userId);
+      loadMembers();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Üye çıkarılamadı");
+    }
+  }
 
   async function handleInvite(event: FormEvent) {
     event.preventDefault();
@@ -64,9 +94,51 @@ export function MembersPanel({ serverId, serverName, canInvite, onClose }: Membe
             <div>Yükleniyor...</div>
           ) : (
             <ul className="members-panel__list">
-              {members.map((member) => (
-                <li key={member.id}>{member.display_name ?? member.username}</li>
-              ))}
+              {members.map((member) => {
+                const presence = presences?.get(member.id);
+                const online = presence?.online ?? false;
+                const status = online ? (presence?.status ?? "online") : "offline";
+                const custom = online ? (presence?.custom ?? "") : "";
+                const isSelf = member.id === currentUserId;
+                return (
+                  <li key={member.id} className="members-panel__row">
+                    <span
+                      className={`presence-dot presence-dot--${status}`}
+                      title={STATUS_LABEL[status] ?? "Çevrimdışı"}
+                    />
+                    {member.avatar_url ? (
+                      <img className="member-avatar" src={member.avatar_url} alt="" />
+                    ) : (
+                      <span className="member-avatar member-avatar--empty">
+                        {(member.display_name ?? member.username).charAt(0).toUpperCase()}
+                      </span>
+                    )}
+                    <span className="members-panel__member-name">
+                      {member.display_name ?? member.username}
+                      {custom ? <span className="members-panel__custom"> — {custom}</span> : null}
+                    </span>
+                    {!isSelf && onCallMember ? (
+                      <button
+                        className="members-panel__call"
+                        title={online ? "Ses kanalına çağır" : "Çevrimdışı"}
+                        disabled={!online}
+                        onClick={() => onCallMember(member.id, member.username)}
+                      >
+                        📞
+                      </button>
+                    ) : null}
+                    {canInvite && !isSelf ? (
+                      <button
+                        className="members-panel__kick"
+                        title="Sunucudan çıkar"
+                        onClick={() => handleKick(member.id, member.display_name ?? member.username)}
+                      >
+                        🚫
+                      </button>
+                    ) : null}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

@@ -38,3 +38,8 @@ matrix/synapse/*
 Thumbs.db
 .vscode/
 .idea/
+
+# Zaman damgali yedekler (gizli anahtar icerebilir, ornegin .env.bak.20260724-190029)
+*.bak
+*.bak.*
+.env.bak*

@@ -75,3 +75,32 @@ def add_member(
 
     db.commit()
     return {"status": "ok"}
+
+
+@router.delete("/{user_id}", status_code=204)
+def remove_member(
+    server_id: int,
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Üyeyi sunucudan çıkarır. Sahip herkesi çıkarabilir; bir üye kendini çıkarabilir (ayrıl).
+    Sunucu sahibi çıkarılamaz (önce sahiplik devri gerekir)."""
+    server = _get_server(db, server_id)
+    if user_id == server.owner_id:
+        raise HTTPException(status_code=400, detail="Sunucu sahibi çıkarılamaz")
+    if current_user.id != server.owner_id and current_user.id != user_id:
+        raise HTTPException(status_code=403, detail="Bu işlem için yetkiniz yok")
+
+    membership = db.get(ServerMember, {"user_id": user_id, "server_id": server_id})
+    if not membership:
+        raise HTTPException(status_code=404, detail="Üye bulunamadı")
+
+    # Kullanıcıdan bu sunucuya ait rolleri kaldır.
+    server_role_ids = {role.id for role in server.roles}
+    target = db.get(User, user_id)
+    if target:
+        target.roles = [role for role in target.roles if role.id not in server_role_ids]
+
+    db.delete(membership)
+    db.commit()

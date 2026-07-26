@@ -1,6 +1,8 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 
+import type { PresenceInfo, VoiceRosterMember } from "../hooks/useGateway";
+import type { VoiceChannelState } from "../hooks/useVoiceChannel";
 import type { VoiceSettings } from "../settings";
 import type { Channel, ChannelType, Server, User } from "../types";
 import { BotsPanel } from "./BotsPanel";
@@ -16,8 +18,52 @@ interface ChannelSidebarProps {
   onToggleVoice: (channelId: number) => void;
   currentUser: User;
   voiceSettings: VoiceSettings;
+  voice: VoiceChannelState;
   canCreateChannel: boolean;
   onCreateChannel: (name: string, type: ChannelType) => Promise<void>;
+  onRenameChannel?: (channelId: number) => void;
+  onDeleteChannel?: (channelId: number) => void;
+  onRenameServer?: (serverId: number) => void;
+  onDeleteServer?: (serverId: number) => void;
+  onLeaveServer?: (serverId: number) => void;
+  presences?: Map<number, PresenceInfo>;
+  voiceStates?: Map<number, VoiceRosterMember[]>;
+  onCallMember?: (userId: number, username: string) => void;
+}
+
+function memberInitial(name: string): string {
+  return name.trim().charAt(0).toUpperCase() || "?";
+}
+
+function VoiceRoster({ members }: { members: VoiceRosterMember[] }) {
+  if (members.length === 0) return null;
+  return (
+    <ul className="voice-roster">
+      {members.map((m) => (
+        <li key={m.user_id} className="voice-roster__member">
+          {m.avatar_url ? (
+            <img
+              className={m.speaking ? "voice-avatar voice-avatar--speaking" : "voice-avatar"}
+              src={m.avatar_url}
+              alt=""
+            />
+          ) : (
+            <span className={m.speaking ? "voice-avatar voice-avatar--speaking" : "voice-avatar"}>
+              {memberInitial(m.username)}
+            </span>
+          )}
+          <span className="voice-roster__name">{m.username}</span>
+          <span className="voice-roster__icons">
+            {m.deafened ? (
+              <span title="Sağır">🎧⃠</span>
+            ) : m.muted ? (
+              <span title="Susturulmuş">🔇</span>
+            ) : null}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 export function ChannelSidebar({
@@ -29,8 +75,17 @@ export function ChannelSidebar({
   onToggleVoice,
   currentUser,
   voiceSettings,
+  voice,
   canCreateChannel,
   onCreateChannel,
+  onRenameChannel,
+  onDeleteChannel,
+  onRenameServer,
+  onDeleteServer,
+  onLeaveServer,
+  presences,
+  voiceStates,
+  onCallMember,
 }: ChannelSidebarProps) {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
@@ -67,6 +122,32 @@ export function ChannelSidebar({
             >
               🤖
             </button>
+            {canCreateChannel ? (
+              <>
+                <button
+                  className="channel-sidebar__members-button"
+                  onClick={() => onRenameServer?.(server.id)}
+                  title="Sunucuyu yeniden adlandır"
+                >
+                  ✏️
+                </button>
+                <button
+                  className="channel-sidebar__members-button"
+                  onClick={() => onDeleteServer?.(server.id)}
+                  title="Sunucuyu sil"
+                >
+                  🗑️
+                </button>
+              </>
+            ) : (
+              <button
+                className="channel-sidebar__members-button"
+                onClick={() => onLeaveServer?.(server.id)}
+                title="Sunucudan ayrıl"
+              >
+                🚪
+              </button>
+            )}
           </span>
         ) : null}
       </header>
@@ -76,20 +157,41 @@ export function ChannelSidebar({
           const isActiveVoice = isVoice && channel.id === activeVoiceChannelId;
           return (
             <li key={channel.id}>
-              <button
-                className={
-                  (!isVoice && channel.id === activeChannelId) || isActiveVoice
-                    ? "channel-item active"
-                    : "channel-item"
-                }
-                onClick={() => (isVoice ? onToggleVoice(channel.id) : onSelect(channel.id))}
-              >
-                <span className="channel-item__icon">{isVoice ? "🔊" : "#"}</span>
-                {channel.name}
-              </button>
+              <div className="channel-row">
+                <button
+                  className={
+                    (!isVoice && channel.id === activeChannelId) || isActiveVoice
+                      ? "channel-item active"
+                      : "channel-item"
+                  }
+                  onClick={() => (isVoice ? onToggleVoice(channel.id) : onSelect(channel.id))}
+                >
+                  <span className="channel-item__icon">{isVoice ? "🔊" : "#"}</span>
+                  {channel.name}
+                </button>
+                {canCreateChannel ? (
+                  <span className="channel-row__actions">
+                    <button
+                      className="channel-row__action"
+                      title="Yeniden adlandır"
+                      onClick={() => onRenameChannel?.(channel.id)}
+                    >
+                      ✏️
+                    </button>
+                    <button
+                      className="channel-row__action"
+                      title="Kanalı sil"
+                      onClick={() => onDeleteChannel?.(channel.id)}
+                    >
+                      🗑️
+                    </button>
+                  </span>
+                ) : null}
+              </div>
+              {isVoice ? <VoiceRoster members={voiceStates?.get(channel.id) ?? []} /> : null}
               {isActiveVoice ? (
                 <VoicePanel
-                  channelId={channel.id}
+                  voice={voice}
                   currentUser={currentUser}
                   voiceSettings={voiceSettings}
                   onLeave={() => onToggleVoice(channel.id)}
@@ -146,6 +248,9 @@ export function ChannelSidebar({
           serverId={server.id}
           serverName={server.name}
           canInvite={canCreateChannel}
+          currentUserId={currentUser.id}
+          presences={presences}
+          onCallMember={onCallMember}
           onClose={() => setMembersOpen(false)}
         />
       ) : null}
