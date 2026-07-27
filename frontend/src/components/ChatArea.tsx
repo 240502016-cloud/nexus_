@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
 import type { Channel, Message } from "../types";
@@ -78,8 +78,21 @@ export function ChatArea({
 }: ChatAreaProps) {
   const [draft, setDraft] = useState("");
   const [gameActionBusy, setGameActionBusy] = useState<string | null>(null);
+  const [unseenMessageCount, setUnseenMessageCount] = useState(0);
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const historyRequestRef = useRef(false);
+  const knownMessageIdsRef = useRef<Set<string>>(new Set());
+  const initializedChannelRef = useRef<number | null>(null);
+  const isNearBottomRef = useRef(true);
+  const forceScrollToBottomRef = useRef(false);
+
+  function scrollToLatest(behavior: ScrollBehavior = "smooth") {
+    const container = messagesRef.current;
+    if (!container) return;
+    container.scrollTo({ top: container.scrollHeight, behavior });
+    isNearBottomRef.current = true;
+    setUnseenMessageCount(0);
+  }
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -87,6 +100,7 @@ export function ChatArea({
     if (!content) return;
     // Input'u ağ yanıtını beklemeden temizle; App mesajı aynı anda iyimser olarak listeye ekler.
     setDraft("");
+    forceScrollToBottomRef.current = true;
     await onSendMessage(content);
   }
 
@@ -109,6 +123,45 @@ export function ChatArea({
       .filter((id): id is string => Boolean(id)),
   );
   const currentUsername = currentMatrixUserId ? displayName(currentMatrixUserId).toLocaleLowerCase("tr") : "";
+
+  useEffect(() => {
+    knownMessageIdsRef.current = new Set();
+    initializedChannelRef.current = channel?.id ?? null;
+    isNearBottomRef.current = true;
+    forceScrollToBottomRef.current = false;
+    setUnseenMessageCount(0);
+  }, [channel?.id]);
+
+  useEffect(() => {
+    if (!channel || messages.length === 0) return;
+    const knownIds = knownMessageIdsRef.current;
+
+    // İlk kanal yüklemesinde doğrudan en güncel mesaja git.
+    if (knownIds.size === 0 && initializedChannelRef.current === channel.id) {
+      knownMessageIdsRef.current = new Set(messages.map((message) => message.event_id));
+      requestAnimationFrame(() => scrollToLatest("auto"));
+      return;
+    }
+
+    // Yeni mesajlar listenin başına eklenir; lazy-load edilen eski mesajlar sona eklendiği için
+    // burada bildirim üretmez. Silme işlemi de mevcut bir kimliği öne taşıdığı için yeni sayılmaz.
+    const newest = messages[0];
+    const isNewHead = !knownIds.has(newest.event_id);
+    knownMessageIdsRef.current = new Set(messages.map((message) => message.event_id));
+    if (!isNewHead) return;
+
+    const ownMessage =
+      newest.sender === currentMatrixUserId ||
+      Boolean(newest.delivery_status) ||
+      forceScrollToBottomRef.current;
+    forceScrollToBottomRef.current = false;
+
+    if (ownMessage || isNearBottomRef.current) {
+      requestAnimationFrame(() => scrollToLatest(ownMessage ? "smooth" : "auto"));
+    } else {
+      setUnseenMessageCount((count) => count + 1);
+    }
+  }, [channel, currentMatrixUserId, messages]);
 
   async function runGameAction(challengeId: string, command: string) {
     setGameActionBusy(`${challengeId}:${command}`);
@@ -145,6 +198,10 @@ export function ChatArea({
         aria-live="polite"
         ref={messagesRef}
         onScroll={(event) => {
+          const container = event.currentTarget;
+          const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight <= 64;
+          isNearBottomRef.current = nearBottom;
+          if (nearBottom && unseenMessageCount > 0) setUnseenMessageCount(0);
           if (event.currentTarget.scrollTop <= 64) void loadOlderPreservingScroll();
         }}
       >
@@ -271,6 +328,17 @@ export function ChatArea({
           })
         )}
       </div>
+      {unseenMessageCount > 0 ? (
+        <button
+          type="button"
+          className="chat-area__new-message"
+          onClick={() => scrollToLatest()}
+          aria-label={`${unseenMessageCount} yeni mesaja git`}
+          title={`${unseenMessageCount} yeni mesaj`}
+        >
+          <span aria-hidden="true">⌄</span>
+        </button>
+      ) : null}
       {channel ? (
         <form className="chat-area__composer" onSubmit={handleSubmit}>
           <input

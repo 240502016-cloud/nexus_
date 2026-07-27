@@ -210,6 +210,8 @@ docker compose up -d backend ai-worker plugin-sandbox frontend
 - Kamera/ekran kalitesi ana araç çubuğunda görünür: 480p, 720p, 1080p ve 30/60 FPS.
 - Matrix mesaj geçmişi cursor ile 50'şer yüklenir. Eski mesajlar yukarı kaydırıldıkça lazy-load
   edilir; DOM tarafında `content-visibility` ile uzun geçmişin çizim maliyeti azaltılır.
+- Kullanıcı kendi mesajını gönderdiğinde sohbet otomatik olarak en alta iner. Geçmişi okurken
+  başkasından mesaj gelirse konum korunur ve sağ altta dairesel yeni-mesaj oku belirir.
 - Ses kanalları metin kanalı değildir: yeni ses kanallarına Matrix odası açılmaz; eski ses
   kanallarında da mesaj gönderme/listeleme API tarafından reddedilir.
 - Mesajlar için uygulama içi kenar bildirimi, kısa bildirim sesi ve izin verilirse işletim sistemi

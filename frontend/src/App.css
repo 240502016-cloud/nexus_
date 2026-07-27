@@ -2067,6 +2067,7 @@ button {
 
 /* ---- Chat surface ---- */
 .chat-area {
+  position: relative;
   min-height: 180px;
   background: transparent;
 }
@@ -3122,6 +3123,47 @@ button {
   border-radius: 999px;
   color: var(--text-bright);
   background: var(--bg-button);
+}
+
+.chat-area__new-message {
+  position: absolute;
+  z-index: 8;
+  right: 22px;
+  bottom: 78px;
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  padding: 0 0 5px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+  color: #fff;
+  background: linear-gradient(145deg, var(--accent), #5843d5);
+  box-shadow:
+    0 10px 28px rgba(20, 14, 55, 0.48),
+    0 0 0 4px rgba(129, 104, 255, 0.13);
+  cursor: pointer;
+  font-size: 25px;
+  font-weight: 800;
+  line-height: 1;
+  animation: new-message-arrival 180ms ease-out;
+}
+
+.chat-area__new-message:hover {
+  color: #fff;
+  background: linear-gradient(145deg, var(--accent-hover), #6753e6);
+  transform: translateY(-2px);
+}
+
+@keyframes new-message-arrival {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.88);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .chat-message {
