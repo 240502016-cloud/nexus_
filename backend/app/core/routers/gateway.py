@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import decode_user_id
 from app.core.event_loop import get_main_loop
-from app.core.models import Channel, ChannelType, Server, ServerMember, User
+from app.core.models import Channel, ChannelType, Friendship, Server, ServerMember, User
 from app.core.routers.voice import set_voice_state_listener, voice_manager
 from app.database import SessionLocal
 
@@ -142,6 +142,49 @@ def notify_channel_message(
     )
 
 
+async def _push_direct_message(
+    conversation_id: int,
+    recipient_ids: set[int],
+    sender_id: int,
+    message_payload: dict,
+) -> None:
+    payload = {
+        "type": "direct-message",
+        "conversation_id": conversation_id,
+        "sender_id": sender_id,
+        "message": message_payload,
+    }
+    for uid in recipient_ids:
+        await gateway_manager.send_to_user(uid, payload)
+
+
+def notify_direct_message(
+    conversation_id: int,
+    recipient_ids: set[int],
+    sender_id: int,
+    message_payload: dict,
+) -> None:
+    try:
+        loop = get_main_loop()
+    except RuntimeError:
+        return
+    asyncio.run_coroutine_threadsafe(
+        _push_direct_message(conversation_id, set(recipient_ids), sender_id, message_payload),
+        loop,
+    )
+
+
+def notify_social_event(user_id: int, event: str) -> None:
+    try:
+        loop = get_main_loop()
+    except RuntimeError:
+        return
+    asyncio.run_coroutine_threadsafe(
+        gateway_manager.send_to_user(user_id, {"type": "social-event", "event": event}),
+        loop,
+    )
+
+
 router = APIRouter(tags=["gateway"])
 
 
@@ -158,6 +201,23 @@ def _co_member_ids(db: Session, user_id: int) -> set[int]:
             ids.add(sm.user_id)
         for s in db.query(Server).filter(Server.id.in_(server_ids)).all():
             ids.add(s.owner_id)
+    friendships = (
+        db.query(Friendship)
+        .filter(
+            Friendship.status == "accepted",
+            (
+                (Friendship.user_low_id == user_id)
+                | (Friendship.user_high_id == user_id)
+            ),
+        )
+        .all()
+    )
+    for friendship in friendships:
+        ids.add(
+            friendship.user_high_id
+            if friendship.user_low_id == user_id
+            else friendship.user_low_id
+        )
     ids.discard(user_id)
     return ids
 

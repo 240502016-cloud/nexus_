@@ -7,6 +7,7 @@ import { ChatArea } from "./components/ChatArea";
 import { IncomingCallModal, OutgoingCallToast, CallNoticeToast } from "./components/IncomingCallModal";
 import { LoginForm } from "./components/LoginForm";
 import { MembersPanel } from "./components/MembersPanel";
+import { ProfilePanel } from "./components/ProfilePanel";
 import { RegisterForm } from "./components/RegisterForm";
 import { ServerRail } from "./components/ServerRail";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -81,6 +82,7 @@ export default function App() {
   const [olderMessagesLoading, setOlderMessagesLoading] = useState(false);
   const [voiceSettings, setVoiceSettings] = useState<VoiceSettings>(() => loadVoiceSettings());
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [callError, setCallError] = useState<string | null>(null);
   const [customStatusDraft, setCustomStatusDraft] = useState("");
   const [voiceStageVisible, setVoiceStageVisible] = useState(true);
@@ -91,6 +93,7 @@ export default function App() {
     content: string;
   } | null>(null);
   const [membersVisible, setMembersVisible] = useState(false);
+  const [directNotice, setDirectNotice] = useState<string | null>(null);
 
   // Sesli kanal ve gateway (presence + çağrı) hook'ları uygulama seviyesinde tutulur ki video
   // ana alanda, kontroller yan panelde gösterilebilsin ve çağrılar her yerde alınabilsin.
@@ -305,6 +308,34 @@ export default function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gateway.channelMessage?.sequence]);
+
+  useEffect(() => {
+    const event = gateway.directMessage;
+    if (!event || !user || event.senderId === user.id) return;
+    if (gateway.selfStatus.status === "dnd") return;
+    const sender = event.message.sender.replace(/^@/, "").split(":")[0];
+    if (voiceSettings.messageNotifications) setDirectNotice(`${sender}: ${event.message.content}`);
+    if (voiceSettings.notificationSound) playMessageNotification();
+    if (
+      voiceSettings.desktopNotifications &&
+      typeof Notification !== "undefined" &&
+      Notification.permission === "granted"
+    ) {
+      try {
+        const notification = new Notification(`${sender} sana özel mesaj gönderdi`, {
+          body: event.message.content.slice(0, 180),
+          tag: `nexus-direct-${event.conversationId}`,
+        });
+        notification.onclick = () => {
+          window.focus();
+          notification.close();
+        };
+      } catch {
+        /* uygulama içi bildirim devam eder */
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gateway.directMessage?.sequence]);
 
   // Aktif olmayan kanallardaki mesajlar için kenar bildirimi, kısa ses ve izin verilmişse
   // tarayıcı dışı sistem bildirimi üret. DND bütün yolları tek noktadan kapatır.
@@ -635,6 +666,17 @@ export default function App() {
         onSelect={setActiveServerId}
         onCreateServer={handleCreateServer}
       />
+      {activeServer && membersVisible ? (
+        <MembersPanel
+          serverId={activeServer.id}
+          serverName={activeServer.name}
+          canInvite={activeServer.owner_id === user.id}
+          currentUserId={user.id}
+          presences={gateway.presences}
+          onCallMember={handleCallMember}
+          onClose={() => setMembersVisible(false)}
+        />
+      ) : null}
       <ChannelSidebar
         server={activeServer}
         channels={channels}
@@ -653,6 +695,7 @@ export default function App() {
         onDeleteServer={handleDeleteServer}
         onLeaveServer={handleLeaveServer}
         voiceStates={gateway.voiceStates}
+        onOpenProfile={() => setProfileOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
         onLogout={handleLogout}
       />
@@ -765,15 +808,14 @@ export default function App() {
           onLoadOlder={handleLoadOlderMessages}
         />
       </div>
-      {activeServer && membersVisible ? (
-        <MembersPanel
-          serverId={activeServer.id}
-          serverName={activeServer.name}
-          canInvite={activeServer.owner_id === user.id}
-          currentUserId={user.id}
+      {profileOpen ? (
+        <ProfilePanel
+          currentUser={user}
           presences={gateway.presences}
-          onCallMember={handleCallMember}
-          onClose={() => setMembersVisible(false)}
+          directMessage={gateway.directMessage}
+          socialEventSequence={gateway.socialEventSequence}
+          onClose={() => setProfileOpen(false)}
+          onOpenSettings={() => setSettingsOpen(true)}
         />
       ) : null}
       {settingsOpen ? (
@@ -813,6 +855,29 @@ export default function App() {
             type="button"
             className="message-notice__close"
             onClick={() => setMessageNotice(null)}
+            aria-label="Bildirimi kapat"
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
+      {directNotice ? (
+        <div className="message-notice message-notice--direct" role="status">
+          <button
+            type="button"
+            className="message-notice__body"
+            onClick={() => {
+              setDirectNotice(null);
+              setProfileOpen(true);
+            }}
+          >
+            <strong>Özel mesaj</strong>
+            <span>{directNotice}</span>
+          </button>
+          <button
+            type="button"
+            className="message-notice__close"
+            onClick={() => setDirectNotice(null)}
             aria-label="Bildirimi kapat"
           >
             ×

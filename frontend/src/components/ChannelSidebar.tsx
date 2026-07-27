@@ -26,6 +26,7 @@ interface ChannelSidebarProps {
   onDeleteServer?: (serverId: number) => void;
   onLeaveServer?: (serverId: number) => void;
   voiceStates?: Map<number, VoiceRosterMember[]>;
+  onOpenProfile: () => void;
   onOpenSettings: () => void;
   onLogout: () => void;
 }
@@ -83,6 +84,7 @@ export function ChannelSidebar({
   onDeleteServer,
   onLeaveServer,
   voiceStates,
+  onOpenProfile,
   onOpenSettings,
   onLogout,
 }: ChannelSidebarProps) {
@@ -242,10 +244,13 @@ export function ChannelSidebar({
             {memberInitial(currentUser.display_name || currentUser.username)}
           </span>
         )}
-        <div className="user-dock__identity">
+        <button type="button" className="user-dock__identity" onClick={onOpenProfile} title="Profili aç">
           <strong>{currentUser.display_name || currentUser.username}</strong>
           <span>@{currentUser.username}</span>
-        </div>
+        </button>
+        <button type="button" className="user-dock__action" onClick={onOpenProfile} title="Profil ve arkadaşlar">
+          PRO
+        </button>
         <button type="button" className="user-dock__action" onClick={onOpenSettings} title="Ayarlar">
           AYR
         </button>

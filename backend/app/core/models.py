@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     Enum as SAEnum,
@@ -61,6 +62,39 @@ class User(Base):
         back_populates="user", cascade="all, delete-orphan"
     )
     roles: Mapped[list["Role"]] = relationship(secondary=user_roles, back_populates="members")
+
+
+class Friendship(Base):
+    """İki kullanıcı arasındaki tekil arkadaşlık/istek kaydı ve isteğe bağlı DM odası."""
+
+    __tablename__ = "friendships"
+    __table_args__ = (
+        UniqueConstraint("user_low_id", "user_high_id", name="uq_friendship_pair"),
+        CheckConstraint("user_low_id < user_high_id", name="ck_friendship_order"),
+        Index("ix_friendships_status", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_low_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    user_high_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    requested_by_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    matrix_room_id: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
+    matrix_owner_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    low_user: Mapped["User"] = relationship(foreign_keys=[user_low_id])
+    high_user: Mapped["User"] = relationship(foreign_keys=[user_high_id])
+    requested_by: Mapped["User"] = relationship(foreign_keys=[requested_by_id])
+    matrix_owner: Mapped["User | None"] = relationship(foreign_keys=[matrix_owner_id])
+
+    def other_user(self, user_id: int) -> "User":
+        return self.high_user if self.user_low_id == user_id else self.low_user
 
 
 class Server(Base):

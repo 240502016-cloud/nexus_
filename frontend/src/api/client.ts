@@ -5,11 +5,16 @@ import type {
   Bot,
   Channel,
   ChannelType,
+  DirectConversation,
+  Friend,
+  FriendRequest,
+  FriendRequestList,
   LoginResponse,
   Member,
   Message,
   MessagePage,
   PluginManifest,
+  PublicUser,
   Server,
   User,
 } from "../types";
@@ -96,6 +101,34 @@ export const coreApi = {
     form.append("file", blob, "avatar");
     return request<User>("/users/me/avatar", { method: "POST", body: form });
   },
+  searchUsers: (query: string) =>
+    request<PublicUser[]>(`/users/search?q=${encodeURIComponent(query)}`),
+
+  listFriends: () => request<Friend[]>("/friends"),
+  listFriendRequests: () => request<FriendRequestList>("/friends/requests"),
+  sendFriendRequest: (username: string) =>
+    request<FriendRequest>("/friends/requests", {
+      method: "POST",
+      body: JSON.stringify({ username }),
+    }),
+  acceptFriendRequest: (friendshipId: number) =>
+    request<Friend>(`/friends/requests/${friendshipId}/accept`, { method: "POST" }),
+  removeFriendship: (friendshipId: number) =>
+    request<void>(`/friends/${friendshipId}`, { method: "DELETE" }),
+
+  listDirectConversations: () => request<DirectConversation[]>("/direct/conversations"),
+  listDirectMessages: (conversationId: number, limit = 50, cursor?: string | null) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (cursor) params.set("cursor", cursor);
+    return request<MessagePage>(
+      `/direct/conversations/${conversationId}/messages?${params.toString()}`,
+    );
+  },
+  sendDirectMessage: (conversationId: number, content: string, clientId: string) =>
+    request<Message>(`/direct/conversations/${conversationId}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ content, client_id: clientId }),
+    }),
 
   myServers: () => request<Server[]>("/servers"),
   createServer: (name: string) =>
@@ -105,9 +138,10 @@ export const coreApi = {
   deleteServer: (serverId: number) => request<void>(`/servers/${serverId}`, { method: "DELETE" }),
 
   listMembers: (serverId: number) => request<Member[]>(`/servers/${serverId}/members`),
-  addMember: (serverId: number, username: string) =>
-    request<{ status: string }>(`/servers/${serverId}/members?username=${encodeURIComponent(username)}`, {
+  addMember: (serverId: number, userId: number) =>
+    request<{ status: string }>(`/servers/${serverId}/members`, {
       method: "POST",
+      body: JSON.stringify({ user_id: userId }),
     }),
   removeMember: (serverId: number, userId: number) =>
     request<void>(`/servers/${serverId}/members/${userId}`, { method: "DELETE" }),

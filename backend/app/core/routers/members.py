@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core import schemas
 from app.core.auth import get_current_user
 from app.core.authz import ensure_server_member, ensure_server_owner
 from app.core.matrix_client import MatrixError, matrix_client
-from app.core.models import Server, ServerMember, User
+from app.core.models import Friendship, Server, ServerMember, User
 from app.database import get_db
 
 router = APIRouter(prefix="/servers/{server_id}/members", tags=["members"])
@@ -53,16 +53,28 @@ def list_members(
 @router.post("", status_code=201)
 def add_member(
     server_id: int,
-    username: str = Query(..., description="Sunucuya davet edilecek kullanıcının kullanıcı adı"),
+    payload: schemas.MemberInvite,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     server = _get_server(db, server_id)
     ensure_server_owner(server, current_user)
 
-    user = db.query(User).filter(User.username == username).first()
+    user = db.get(User, payload.user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")
+    low_id, high_id = sorted((current_user.id, user.id))
+    friendship = (
+        db.query(Friendship)
+        .filter(
+            Friendship.user_low_id == low_id,
+            Friendship.user_high_id == high_id,
+            Friendship.status == "accepted",
+        )
+        .first()
+    )
+    if not friendship:
+        raise HTTPException(status_code=403, detail="Sunucuya yalnızca arkadaşlar davet edilebilir")
     if not user.matrix_access_token:
         raise HTTPException(status_code=409, detail="Kullanıcının Matrix hesabı yok")
 

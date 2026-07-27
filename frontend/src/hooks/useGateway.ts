@@ -51,6 +51,13 @@ export interface ChannelMessageEvent {
   sequence: number;
 }
 
+export interface DirectMessageEvent {
+  conversationId: number;
+  senderId: number;
+  message: Message;
+  sequence: number;
+}
+
 interface GatewayMessage {
   type: string;
   [key: string]: unknown;
@@ -68,6 +75,8 @@ export function useGateway(enabled: boolean) {
   const [presences, setPresences] = useState<Map<number, PresenceInfo>>(new Map());
   const [selfStatus, setSelfStatus] = useState<SelfStatus>({ status: "online", custom: "" });
   const [channelMessage, setChannelMessage] = useState<ChannelMessageEvent | null>(null);
+  const [directMessage, setDirectMessage] = useState<DirectMessageEvent | null>(null);
+  const [socialEventSequence, setSocialEventSequence] = useState(0);
   // channelId -> o ses kanalındaki katılımcılar (kanala girmeden görülür).
   const [voiceStates, setVoiceStates] = useState<Map<number, VoiceRosterMember[]>>(new Map());
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
@@ -78,6 +87,7 @@ export function useGateway(enabled: boolean) {
   const reconnectRef = useRef<number | null>(null);
   const backoffRef = useRef(RECONNECT_MIN_MS);
   const messageSequenceRef = useRef(0);
+  const directMessageSequenceRef = useRef(0);
   const outgoingRef = useRef<OutgoingCall | null>(null);
   outgoingRef.current = outgoingCall;
 
@@ -177,6 +187,18 @@ export function useGateway(enabled: boolean) {
             deletedEventId: (data.deleted_event_id as string | undefined) ?? null,
             sequence: messageSequenceRef.current,
           });
+          break;
+        case "direct-message":
+          directMessageSequenceRef.current += 1;
+          setDirectMessage({
+            conversationId: data.conversation_id as number,
+            senderId: data.sender_id as number,
+            message: data.message as Message,
+            sequence: directMessageSequenceRef.current,
+          });
+          break;
+        case "social-event":
+          setSocialEventSequence((sequence) => sequence + 1);
           break;
         case "voice-channel-state": {
           const channelId = data.channel_id as number;
@@ -320,6 +342,8 @@ export function useGateway(enabled: boolean) {
     selfStatus,
     setStatus,
     channelMessage,
+    directMessage,
+    socialEventSequence,
     voiceStates,
     incomingCall,
     outgoingCall,

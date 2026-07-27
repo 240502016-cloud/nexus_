@@ -5,6 +5,7 @@ from app.core import schemas
 from app.core.auth import get_current_user
 from app.core.authz import ensure_server_member, ensure_server_owner
 from app.core.matrix_client import MatrixError, matrix_client
+from app.core.matrix_rooms import invite_and_join
 from app.core.models import Channel, ChannelType, Server, User
 from app.database import get_db
 
@@ -30,6 +31,8 @@ def create_channel(
             raise HTTPException(status_code=409, detail="Sunucu sahibinin Matrix hesabı yok")
         try:
             room_id = matrix_client.create_room(owner.matrix_access_token, name=payload.name)
+            for membership in server.members:
+                invite_and_join(room_id, owner, membership.user)
         except MatrixError as exc:
             raise HTTPException(status_code=502, detail=f"Matrix odası oluşturulamadı: {exc}") from exc
 

@@ -249,3 +249,41 @@ Doğrulama: 16 backend testi, frontend TypeScript lint ve production build başa
 - Ardından mevcut sunucu yöneticisi üzerinden tüm imajları build eder, PostgreSQL bootstrap
   kontrolünü ve Alembic migration'larını çalıştırır, stack'i başlatıp public health testlerini yapar.
 - Volume silen `docker compose down -v` gibi bir işlem içermez.
+
+---
+
+## 9. 27 Temmuz 2026 — Mesaj onarımı, arkadaşlar ve özel konuşmalar
+
+- Matrix'te sunucu üyesi olup metin odasında bulunmayan kullanıcılar, mesaj gönderirken veya geçmişi
+  açarken otomatik davet edilip odaya katılır. Yeni metin kanalları oluşturulurken mevcut üyeler de
+  baştan eklenir; kullanıcıya ham Matrix/403 yanıtı gösterilmez.
+- WebRTC bağlantılarında audio/video m-line sırası kalıcı hale getirildi. Kamera veya ekran paylaşımı
+  açılıp kapatılırken track değiştirilir; yeni m-line eklenmediği için sonraki offer/answer sırası
+  bozulmaz. Eş zamanlı offer çakışmaları güvenli rollback ile çözülür.
+- Kullanıcının kendi mesajı iyimser olarak eklenir eklenmez sohbet kesin olarak en alta iner.
+  **Enter gönderir, Shift+Enter aynı mesajda yeni satır açar.**
+- Arkadaşlık isteği gönderme, kabul/ret/iptal, arkadaş çıkarma ve kullanıcı arama eklendi.
+- Sunucu daveti artık serbest kullanıcı adı kabul etmez; yalnızca kabul edilmiş arkadaşlar arasından
+  seçim yapılabilir.
+- Profil merkezi; hesap özeti, arkadaşlar, gelen/giden istekler ve kalıcı birebir Matrix özel
+  konuşmalarını tek temalı ekranda birleştirir. Özel mesajlar gerçek zamanlı gelir ve eski mesajlar
+  cursor ile sayfalanır.
+- Sunucu kullanıcı paneli sağdan kaldırılıp sunucu şeridi ile kanal listesi arasına, sol tarafa
+  taşındı. Dar ekranlarda yine soldan açılan küçük bir katman olur.
+- Botlar, profil, arkadaşlar, davet alanları, input/select ve devre dışı düğmeler koyu/açık temada
+  yüksek kontrastlı hale getirildi; uzun plugin komutları satıra sarılır.
+- Synapse normal mesaj limiti 5 mesaj/sn ve 50 mesajlık burst olarak ayarlandı. Bot komut sınırı
+  10 saniyede 20 komuta çıkarıldı.
+- Temiz kurulum migration zincirindeki sonraki tabloların ilk migration tarafından erken oluşturulması
+  engellendi.
+
+### Deploy (migration + Matrix yapılandırması içerir)
+
+```text
+docker compose build matrix backend frontend
+docker compose run --rm migrate
+docker compose up -d matrix backend ai-worker plugin-sandbox frontend
+```
+
+Arkadaşın bilgisayarında önerilen yol yine `Arkadas-Sunucuyu-Guncelle.cmd`; sunucu yöneticisi tüm
+imajları yeniden oluşturduğu için Matrix spam ayarı ve `0006_social_graph` migration'ı da uygulanır.

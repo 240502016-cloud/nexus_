@@ -14,7 +14,7 @@ from app.services.ollama.models import QueuedAiResponse
 
 # Kullanıcı başına 10 saniyede en fazla 5 komut - plugin'lerin (özellikle Ollama gibi
 # CPU/GPU maliyeti olanların) mesaj spam'iyle kötüye kullanılmasını önler.
-_command_limiter = RateLimiter(max_calls=5, window_seconds=10)
+_command_limiter = RateLimiter(max_calls=20, window_seconds=10)
 
 # Serbest metinle sohbet edilebilecek "varsayılan" komut - bir bot @mention edilip ardından
 # tanınan bir komut adı gelmezse, kalan metnin tamamı bu komuta arg olarak gönderilir

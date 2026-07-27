@@ -31,6 +31,16 @@ class UserRead(UserBase):
     created_at: datetime
 
 
+class PublicUserRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    username: str
+    display_name: str | None = None
+    avatar_url: str | None = None
+    created_at: datetime
+
+
 class UserUpdate(BaseModel):
     """Kullanıcının kendi profilinde düzenleyebileceği alanlar."""
 
@@ -51,6 +61,10 @@ class MemberRead(BaseModel):
     display_name: str | None = None
     avatar_url: str | None = None
     joined_at: datetime
+
+
+class MemberInvite(BaseModel):
+    user_id: int = Field(gt=0)
 
 
 # ---- Server ----
@@ -159,6 +173,37 @@ class MessagePage(BaseModel):
     items: list[MessageRead]
     next_cursor: str | None = None
     has_more: bool = False
+
+
+# ---- Friends / private conversations ----
+
+
+class FriendRequestCreate(BaseModel):
+    username: str = Field(min_length=2, max_length=32)
+
+
+class FriendRead(BaseModel):
+    friendship_id: int
+    user: PublicUserRead
+    since: datetime
+
+
+class FriendRequestRead(BaseModel):
+    id: int
+    user: PublicUserRead
+    direction: str
+    created_at: datetime
+
+
+class FriendRequestList(BaseModel):
+    incoming: list[FriendRequestRead] = Field(default_factory=list)
+    outgoing: list[FriendRequestRead] = Field(default_factory=list)
+
+
+class DirectConversationRead(BaseModel):
+    id: int
+    friend: PublicUserRead
+    created_at: datetime
 
 
 # ---- Plugin ----

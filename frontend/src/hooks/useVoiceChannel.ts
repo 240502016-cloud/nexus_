@@ -49,7 +49,8 @@ interface PeerState {
   makingOffer: boolean;
   ignoreOffer: boolean;
   polite: boolean;
-  videoSender: RTCRtpSender | null;
+  videoSender: RTCRtpSender;
+  videoTransceiver: RTCRtpTransceiver;
 }
 
 const SPEAKING_THRESHOLD = 12;
@@ -290,27 +291,35 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       const pc = new RTCPeerConnection({ iceServers });
       // Politeness deterministik: büyük user_id "polite". Aynı anda iki taraf offer üretirse
       // (glare) polite taraf geri çekilir, böylece bağlantı kilitlenmez.
+      // Her bağlantıda m-line sırasını baştan ve daima audio→video olarak sabitle. Sonradan
+      // addTrack/removeTrack kullanmak Chrome'da yeni teklifin m-line sırasını değiştirip
+      // setRemoteDescription hatasına yol açabiliyor.
+      const audioTransceiver = pc.addTransceiver("audio", {
+        direction: localStreamRef.current ? "sendrecv" : "recvonly",
+      });
+      if (localStreamRef.current) {
+        const audioTrack = localStreamRef.current.getAudioTracks()[0];
+        if (audioTrack) void audioTransceiver.sender.replaceTrack(audioTrack);
+      }
+      const sendingVideo = Boolean(videoTrackRef.current);
+      const receivingVideo = !ignoredRemoteVideoIdsRef.current.has(peerId);
+      const videoTransceiver = pc.addTransceiver("video", {
+        direction: sendingVideo
+          ? (receivingVideo ? "sendrecv" : "sendonly")
+          : (receivingVideo ? "recvonly" : "inactive"),
+      });
       const peer: PeerState = {
         pc,
         makingOffer: false,
         ignoreOffer: false,
         polite: selfId > peerId,
-        videoSender: null,
+        videoSender: videoTransceiver.sender,
+        videoTransceiver,
       };
       peersRef.current.set(peerId, peer);
 
-      if (localStreamRef.current) {
-        localStreamRef.current.getAudioTracks().forEach((track) => {
-          pc.addTrack(track, localStreamRef.current!);
-        });
-      } else {
-        // Mikrofon yok/reddedildi: yine de "recvonly" bir audio transceiver eklemezsek offer'da
-        // hiç audio m-line olmaz ve karşı taraf bize ses gönderemez.
-        pc.addTransceiver("audio", { direction: "recvonly" });
-      }
-      // Zaten yerel video (kamera/ekran) yayınlıyorsak yeni peer'e de ekle.
       if (videoTrackRef.current && localVideoStreamForSend()) {
-        peer.videoSender = pc.addTrack(videoTrackRef.current, localVideoStreamForSend()!);
+        void peer.videoSender.replaceTrack(videoTrackRef.current);
         void optimizeVideoSender(
           peer.videoSender,
           videoKindRef.current ?? "camera",
@@ -320,6 +329,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
 
       pc.onnegotiationneeded = async () => {
         try {
+          if (pc.signalingState !== "stable") return;
           peer.makingOffer = true;
           await pc.setLocalDescription();
           ws.send(JSON.stringify({ type: "offer", to: peerId, sdp: pc.localDescription?.sdp }));
@@ -520,7 +530,12 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
             const offerCollision = peer.makingOffer || pc.signalingState !== "stable";
             peer.ignoreOffer = !peer.polite && offerCollision;
             if (peer.ignoreOffer) break;
-            // setRemoteDescription çakışma anında (polite taraf) örtük rollback yapar.
+            // Polite eş yalnızca gerçekten yerel bir offer bekliyorsa rollback yapar.
+            // makingOffer=true iken durum hâlâ stable olabilir; stable durumda rollback
+            // çağırmak başlı başına InvalidStateError üretir.
+            if (offerCollision && pc.signalingState === "have-local-offer") {
+              await pc.setLocalDescription({ type: "rollback" });
+            }
             await pc.setRemoteDescription(description);
             await flushPendingIce(fromId, pc);
             await pc.setLocalDescription();
@@ -529,7 +544,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
           }
           case "answer": {
             const peer = peersRef.current.get(data.from as number);
-            if (peer) {
+            if (peer && peer.pc.signalingState === "have-local-offer") {
               await peer.pc.setRemoteDescription({ type: "answer", sdp: data.sdp as string });
               await flushPendingIce(data.from as number, peer.pc);
             }
@@ -628,16 +643,12 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         // Kullanıcı tarayıcı arayüzünden paylaşımı durdurursa temizle.
         track.onended = () => stopVideo();
 
-        for (const [, peer] of peersRef.current) {
-          if (peer.videoSender) {
-            // Zaten bir video gönderiyoruz: track'i değiştir (yeniden pazarlık gerekmez).
-            await peer.videoSender.replaceTrack(track);
-            await optimizeVideoSender(peer.videoSender, kind, currentSettings);
-          } else {
-            // İlk video: track ekle → onnegotiationneeded yeniden pazarlığı tetikler.
-            peer.videoSender = peer.pc.addTrack(track, stream);
-            await optimizeVideoSender(peer.videoSender, kind, currentSettings);
-          }
+        for (const [peerId, peer] of peersRef.current) {
+          await peer.videoSender.replaceTrack(track);
+          peer.videoTransceiver.direction = ignoredRemoteVideoIdsRef.current.has(peerId)
+            ? "sendonly"
+            : "sendrecv";
+          await optimizeVideoSender(peer.videoSender, kind, currentSettings);
         }
       } catch (err) {
         setError(`Video başlatılamadı: ${err instanceof Error ? err.message : String(err)}`);
@@ -659,9 +670,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         // Kaynak yeni tercihi tam desteklemiyorsa tarayıcının en yakın uygun değeri kullanılır.
       }
       for (const [, peer] of peersRef.current) {
-        if (peer.videoSender) {
-          await optimizeVideoSender(peer.videoSender, kind, currentSettings);
-        }
+        await optimizeVideoSender(peer.videoSender, kind, currentSettings);
       }
     }
 
@@ -672,15 +681,11 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       sendVideoStream = null;
       setLocalVideoStream(null);
       setVideoKind(null);
-      for (const [, peer] of peersRef.current) {
-        if (peer.videoSender) {
-          try {
-            peer.pc.removeTrack(peer.videoSender); // onnegotiationneeded yeniden pazarlığı tetikler
-          } catch {
-            // bağlantı kapanıyor olabilir
-          }
-          peer.videoSender = null;
-        }
+      for (const [peerId, peer] of peersRef.current) {
+        void peer.videoSender.replaceTrack(null);
+        peer.videoTransceiver.direction = ignoredRemoteVideoIdsRef.current.has(peerId)
+          ? "inactive"
+          : "recvonly";
       }
     }
 

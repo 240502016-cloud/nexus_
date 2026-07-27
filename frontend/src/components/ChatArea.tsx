@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, KeyboardEvent } from "react";
 
 import type { Channel, Message } from "../types";
 
@@ -89,7 +89,11 @@ export function ChatArea({
   function scrollToLatest(behavior: ScrollBehavior = "smooth") {
     const container = messagesRef.current;
     if (!container) return;
-    container.scrollTo({ top: container.scrollHeight, behavior });
+    if (behavior === "smooth") {
+      container.scrollTo({ top: container.scrollHeight, behavior });
+    } else {
+      container.scrollTop = container.scrollHeight;
+    }
     isNearBottomRef.current = true;
     setUnseenMessageCount(0);
   }
@@ -101,7 +105,18 @@ export function ChatArea({
     // Input'u ağ yanıtını beklemeden temizle; App mesajı aynı anda iyimser olarak listeye ekler.
     setDraft("");
     forceScrollToBottomRef.current = true;
-    await onSendMessage(content);
+    const pending = onSendMessage(content);
+    // İyimser mesajın React tarafından DOM'a işlendiği iki çizim turundan sonra kesin olarak
+    // en alta in. Ağ yanıtını beklemek kullanıcının kendi mesajını görmesini geciktirirdi.
+    requestAnimationFrame(() => requestAnimationFrame(() => scrollToLatest("auto")));
+    await pending;
+  }
+
+  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      event.currentTarget.form?.requestSubmit();
+    }
   }
 
   // API mesajları yeniden eskiye döner; sohbet için eskiden yeniye çeviriyoruz.
@@ -341,11 +356,13 @@ export function ChatArea({
       ) : null}
       {channel ? (
         <form className="chat-area__composer" onSubmit={handleSubmit}>
-          <input
+          <textarea
+            rows={1}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={handleComposerKeyDown}
             maxLength={20000}
-            placeholder={`#${channel.name} kanalına mesaj yaz`}
+            placeholder={`#${channel.name} kanalına mesaj yaz · Shift+Enter yeni satır`}
           />
           <button type="submit" disabled={!draft.trim()}>
             Gönder

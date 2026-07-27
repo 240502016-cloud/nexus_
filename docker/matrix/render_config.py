@@ -52,6 +52,8 @@ def build_config() -> dict:
         "signing_key_path": str(config_dir / f"{server_name}.signing.key"),
         "report_stats": False,
         "enable_registration": False,
+        # Normal sohbet hızını engellemeden kötüye kullanıma karşı makul bir burst sınırı.
+        "rc_message": {"per_second": 5, "burst_count": 50},
         "trusted_key_servers": [{"server_name": "matrix.org"}],
     }
 
@@ -69,4 +71,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

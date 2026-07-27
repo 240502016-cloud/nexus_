@@ -18,12 +18,28 @@ down_revision = None
 branch_labels = None
 depends_on = None
 
+_LATER_REVISION_TABLES = {
+    "ai_jobs",
+    "ai_bot_jobs",
+    "bot_plugin_links",
+    "chance_game_sessions",
+    "chance_wheels",
+    "friendships",
+}
+
 
 def upgrade() -> None:
-    tables = [table for table in Base.metadata.sorted_tables if table.name not in {"ai_jobs", "ai_bot_jobs"}]
+    # Bu migration güncel ORM metadata'sını kullandığından, sonraki revision'larda eklenen
+    # tablolar burada açıkça dışarıda tutulmalıdır. Aksi halde temiz kurulumda aynı tabloyu
+    # ilgili revision ikinci kez oluşturmaya çalışır.
+    tables = [
+        table for table in Base.metadata.sorted_tables if table.name not in _LATER_REVISION_TABLES
+    ]
     Base.metadata.create_all(bind=op.get_bind(), tables=tables)
 
 
 def downgrade() -> None:
-    tables = [table for table in Base.metadata.sorted_tables if table.name not in {"ai_jobs", "ai_bot_jobs"}]
+    tables = [
+        table for table in Base.metadata.sorted_tables if table.name not in _LATER_REVISION_TABLES
+    ]
     Base.metadata.drop_all(bind=op.get_bind(), tables=tables)

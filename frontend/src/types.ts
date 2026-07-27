@@ -14,6 +14,38 @@ export interface User {
   created_at: string;
 }
 
+export interface PublicUser {
+  id: number;
+  username: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  created_at: string;
+}
+
+export interface Friend {
+  friendship_id: number;
+  user: PublicUser;
+  since: string;
+}
+
+export interface FriendRequest {
+  id: number;
+  user: PublicUser;
+  direction: "incoming" | "outgoing";
+  created_at: string;
+}
+
+export interface FriendRequestList {
+  incoming: FriendRequest[];
+  outgoing: FriendRequest[];
+}
+
+export interface DirectConversation {
+  id: number;
+  friend: PublicUser;
+  created_at: string;
+}
+
 export interface Server {
   id: number;
   name: string;

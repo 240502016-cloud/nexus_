@@ -8,6 +8,7 @@ from app.core import schemas
 from app.core.auth import get_current_user
 from app.core.authz import ensure_server_member
 from app.core.matrix_client import MatrixError, matrix_client
+from app.core.matrix_rooms import is_not_in_room_error, repair_room_membership
 from app.core.models import BotServerLink, Channel, ChannelType, User
 from app.core.routers.gateway import notify_channel_message
 from app.database import get_db
@@ -24,6 +25,12 @@ def _get_text_channel(db: Session, channel_id: int) -> Channel:
     if not channel.matrix_room_id:
         raise HTTPException(status_code=404, detail="Kanalın Matrix odası bulunamadı")
     return channel
+
+
+def _repair_membership(channel: Channel, current_user: User) -> None:
+    if not channel.matrix_room_id:
+        return
+    repair_room_membership(channel.matrix_room_id, channel.server.owner, current_user)
 
 
 def _notify_bot_replies(
@@ -92,7 +99,24 @@ def send_message(
             txn_id=payload.client_id,
         )
     except MatrixError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        if not is_not_in_room_error(exc):
+            raise HTTPException(
+                status_code=502,
+                detail="Mesaj servisi geçici olarak kullanılamıyor; lütfen tekrar deneyin",
+            ) from exc
+        try:
+            _repair_membership(channel, current_user)
+            event_id = matrix_client.send_message(
+                current_user.matrix_access_token,
+                channel.matrix_room_id,
+                payload.content,
+                txn_id=payload.client_id,
+            )
+        except MatrixError as retry_exc:
+            raise HTTPException(
+                status_code=502,
+                detail="Mesaj kanalı üyeliği otomatik onarılamadı; lütfen sayfayı yenileyip tekrar deneyin",
+            ) from retry_exc
 
     message = schemas.MessageRead(
         event_id=event_id,
@@ -175,15 +199,33 @@ def list_messages(
             limit=limit,
             cursor=cursor,
         )
-        bot_matrix_ids = {
-            link.bot.matrix_user_id
-            for link in db.query(BotServerLink).filter(
-                BotServerLink.server_id == channel.server_id
-            )
-            if link.bot.matrix_user_id
-        }
-        for message in page["items"]:
-            message["is_bot"] = message.get("sender") in bot_matrix_ids
-        return page
     except MatrixError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        if not is_not_in_room_error(exc):
+            raise HTTPException(
+                status_code=502,
+                detail="Mesaj geçmişi geçici olarak yüklenemiyor; lütfen tekrar deneyin",
+            ) from exc
+        try:
+            _repair_membership(channel, current_user)
+            page = matrix_client.get_message_page(
+                current_user.matrix_access_token,
+                channel.matrix_room_id,
+                limit=limit,
+                cursor=cursor,
+            )
+        except MatrixError as retry_exc:
+            raise HTTPException(
+                status_code=502,
+                detail="Mesaj kanalı üyeliği otomatik onarılamadı; lütfen sayfayı yenileyip tekrar deneyin",
+            ) from retry_exc
+
+    bot_matrix_ids = {
+        link.bot.matrix_user_id
+        for link in db.query(BotServerLink).filter(
+            BotServerLink.server_id == channel.server_id
+        )
+        if link.bot.matrix_user_id
+    }
+    for message in page["items"]:
+        message["is_bot"] = message.get("sender") in bot_matrix_ids
+    return page

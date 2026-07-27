@@ -2,7 +2,7 @@ import os
 import re
 import secrets
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -164,7 +164,29 @@ def get_avatar(filename: str):
     return FileResponse(path, headers={"Cache-Control": "public, max-age=86400"})
 
 
-@router.get("/{user_id}", response_model=schemas.UserRead)
+@router.get("/search", response_model=list[schemas.PublicUserRead])
+def search_users(
+    q: str = Query(..., min_length=2, max_length=32),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    query = q.strip()
+    if len(query) < 2:
+        return []
+    return (
+        db.query(User)
+        .filter(
+            User.id != current_user.id,
+            User.is_active.is_(True),
+            User.username.ilike(f"%{query}%"),
+        )
+        .order_by(User.username.asc())
+        .limit(10)
+        .all()
+    )
+
+
+@router.get("/{user_id}", response_model=schemas.PublicUserRead)
 def get_user(
     user_id: int,
     current_user: User = Depends(get_current_user),

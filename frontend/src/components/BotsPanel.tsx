@@ -202,7 +202,11 @@ export function BotsPanel({ serverId, serverName, canManageBots, onClose }: Bots
                     <div>
                       <div>{plugin.name}</div>
                       {plugin.commands.length > 0 ? (
-                        <div className="bots-panel__plugin-commands">{plugin.commands.join(", ")}</div>
+                        <div className="bots-panel__command-list">
+                          {plugin.commands.map((command) => (
+                            <code key={command}>{command}</code>
+                          ))}
+                        </div>
                       ) : null}
                       {plugin.requires_bot_link ? (
                         <div className="bots-panel__plugin-note">
