@@ -90,6 +90,32 @@ def add_bot_to_server(
 server_bots_router = APIRouter(prefix="/servers/{server_id}/bots", tags=["bots"])
 
 
+@router.delete("/{bot_id}/servers/{server_id}", status_code=204)
+def remove_bot_from_server(
+    bot_id: int,
+    server_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    server = db.get(Server, server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="Sunucu bulunamadı")
+    ensure_server_owner(server, current_user)
+    link = db.get(BotServerLink, {"bot_id": bot_id, "server_id": server_id})
+    if link:
+        bot = link.bot
+        if bot.matrix_access_token:
+            for channel in server.channels:
+                if not channel.matrix_room_id:
+                    continue
+                try:
+                    matrix_client.leave_room(bot.matrix_access_token, channel.matrix_room_id)
+                except MatrixError:
+                    pass
+        db.delete(link)
+        db.commit()
+
+
 @server_bots_router.get("", response_model=list[schemas.BotRead])
 def list_server_bots(
     server_id: int,

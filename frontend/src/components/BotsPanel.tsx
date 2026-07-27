@@ -3,15 +3,17 @@ import type { FormEvent } from "react";
 
 import { ApiError, coreApi } from "../api/client";
 import type { Bot, PluginManifest } from "../types";
+import { Icon } from "./Icon";
 
 interface BotsPanelProps {
   serverId: number;
   serverName: string;
   canManageBots: boolean;
   onClose: () => void;
+  embedded?: boolean;
 }
 
-export function BotsPanel({ serverId, serverName, canManageBots, onClose }: BotsPanelProps) {
+export function BotsPanel({ serverId, serverName, canManageBots, onClose, embedded = false }: BotsPanelProps) {
   const [bots, setBots] = useState<Bot[]>([]);
   const [plugins, setPlugins] = useState<PluginManifest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -104,15 +106,30 @@ export function BotsPanel({ serverId, serverName, canManageBots, onClose }: Bots
     }
   }
 
-  return (
-    <div className="settings-overlay" onClick={onClose}>
-      <div className="settings-panel" onClick={(event) => event.stopPropagation()}>
+  async function removeBot(bot: Bot) {
+    if (!window.confirm(`${bot.name} bu sunucudan kaldırılsın mı?`)) return;
+    setBotPluginBusy(`remove:${bot.id}`);
+    try {
+      await coreApi.removeBotFromServer(bot.id, serverId);
+      setNotice(`${bot.name} sunucudan kaldırıldı.`);
+      loadAll();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Bot kaldırılamadı");
+    } finally {
+      setBotPluginBusy(null);
+    }
+  }
+
+  const body = (
+    <>
+      {!embedded ? (
         <header className="settings-panel__header">
           <h2>{serverName} — Botlar</h2>
           <button className="settings-panel__close" onClick={onClose} aria-label="Kapat">
-            ✕
+            <Icon name="close" />
           </button>
         </header>
+      ) : null}
 
         {loading ? (
           <div>Yükleniyor...</div>
@@ -152,6 +169,16 @@ export function BotsPanel({ serverId, serverName, canManageBots, onClose }: Bots
                             );
                           })}
                         </div>
+                      ) : null}
+                      {canManageBots ? (
+                        <button
+                          type="button"
+                          className="bots-panel__remove"
+                          disabled={botPluginBusy === `remove:${bot.id}`}
+                          onClick={() => void removeBot(bot)}
+                        >
+                          Sunucudan kaldır
+                        </button>
                       ) : null}
                     </li>
                   ))}
@@ -214,7 +241,10 @@ export function BotsPanel({ serverId, serverName, canManageBots, onClose }: Bots
                         </div>
                       ) : null}
                     </div>
-                    <button onClick={() => handleTogglePlugin(plugin)} disabled={pluginBusy === plugin.name}>
+                    <button
+                      onClick={() => handleTogglePlugin(plugin)}
+                      disabled={!canManageBots || pluginBusy === plugin.name}
+                    >
                       {plugin.enabled ? "Kaldır" : "Kur"}
                     </button>
                   </li>
@@ -223,7 +253,8 @@ export function BotsPanel({ serverId, serverName, canManageBots, onClose }: Bots
             </div>
           </>
         )}
-      </div>
-    </div>
+    </>
   );
+  if (embedded) return <div className="bots-panel bots-panel--embedded">{body}</div>;
+  return <div className="settings-overlay" onClick={onClose}><div className="settings-panel" onClick={(event) => event.stopPropagation()}>{body}</div></div>;
 }

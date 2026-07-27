@@ -159,6 +159,11 @@ async def _notify_voice_state(channel_id: int, recipients: set[int] | None = Non
         pass
 
 
+async def notify_voice_state(channel_id: int, recipients: set[int] | None = None) -> None:
+    """Yerleşik gerçek-zamanlı plugin'ler için güvenli roster yayın noktası."""
+    await _notify_voice_state(channel_id, recipients)
+
+
 router = APIRouter(tags=["voice"])
 
 
@@ -229,6 +234,7 @@ async def voice_socket(websocket: WebSocket, channel_id: int, token: str = Query
             "type": "peer-joined",
             "user_id": user_id,
             "username": username,
+            "avatar_url": avatar_url,
             "muted": False,
             "deafened": False,
         },

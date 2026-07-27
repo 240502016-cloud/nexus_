@@ -10,14 +10,16 @@ import { MembersPanel } from "./components/MembersPanel";
 import { ProfilePanel } from "./components/ProfilePanel";
 import { RegisterForm } from "./components/RegisterForm";
 import { ServerRail } from "./components/ServerRail";
+import { ServerSettingsPanel } from "./components/ServerSettingsPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { VideoStage } from "./components/VideoStage";
 import { useGateway } from "./hooks/useGateway";
 import { useVoiceChannel } from "./hooks/useVoiceChannel";
 import { playMessageNotification } from "./notifications";
-import type { VideoFrameRate, VideoQuality, VoiceSettings } from "./settings";
-import { loadVoiceSettings, saveVoiceSettings } from "./settings";
+import type { VoiceSettings } from "./settings";
+import { loadVoiceSettings } from "./settings";
 import type { Channel, ChannelType, Message, Server, User } from "./types";
+import { composeAttachmentMessage } from "./messageContent";
 
 const MESSAGE_LIMIT = 50;
 const MESSAGE_SYNC_CONNECTED_MS = 30_000;
@@ -30,6 +32,13 @@ function createMessageClientId(): string {
 }
 
 function mergeIncomingMessage(current: Message[], incoming: Message): Message[] {
+  if (current.some((message) => message.event_id === incoming.event_id)) {
+    return current.map((message) =>
+      message.event_id === incoming.event_id
+        ? { ...message, ...incoming, delivery_status: undefined }
+        : message,
+    );
+  }
   const withoutDuplicate = current.filter(
     (message) =>
       message.event_id !== incoming.event_id &&
@@ -76,6 +85,7 @@ export default function App() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [activeChannelId, setActiveChannelId] = useState<number | null>(null);
   const [activeVoiceChannelId, setActiveVoiceChannelId] = useState<number | null>(null);
+  const [activeVoiceServerId, setActiveVoiceServerId] = useState<number | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [messageCursor, setMessageCursor] = useState<string | null>(null);
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
@@ -83,17 +93,10 @@ export default function App() {
   const [voiceSettings, setVoiceSettings] = useState<VoiceSettings>(() => loadVoiceSettings());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [serverSettingsOpen, setServerSettingsOpen] = useState(false);
   const [callError, setCallError] = useState<string | null>(null);
-  const [customStatusDraft, setCustomStatusDraft] = useState("");
   const [voiceStageVisible, setVoiceStageVisible] = useState(true);
-  const [messageNotice, setMessageNotice] = useState<{
-    serverId: number;
-    channelId: number;
-    sender: string;
-    content: string;
-  } | null>(null);
   const [membersVisible, setMembersVisible] = useState(false);
-  const [directNotice, setDirectNotice] = useState<string | null>(null);
 
   // Sesli kanal ve gateway (presence + çağrı) hook'ları uygulama seviyesinde tutulur ki video
   // ana alanda, kontroller yan panelde gösterilebilsin ve çağrılar her yerde alınabilsin.
@@ -158,11 +161,6 @@ export default function App() {
     apply(voiceSettings.theme === "light");
   }, [voiceSettings.theme]);
 
-  // Sunucudan gelen kendi durumumuzla özel durum taslağını senkron tut.
-  useEffect(() => {
-    setCustomStatusDraft(gateway.selfStatus.custom);
-  }, [gateway.selfStatus.custom]);
-
   // İlk açılışta saklı bir token varsa oturumu doğrula.
   useEffect(() => {
     if (!getToken()) {
@@ -185,9 +183,8 @@ export default function App() {
     });
   }, [user]);
 
-  // Aktif sunucu değişince kanallarını çek. Sesli kanaldan da ayrıl.
+  // Metin kanalları arasında gezinmek mevcut ses bağlantısını etkilemez.
   useEffect(() => {
-    setActiveVoiceChannelId(null);
     if (!activeServerId) {
       setChannels([]);
       setActiveChannelId(null);
@@ -206,6 +203,7 @@ export default function App() {
         pendingVoiceJoinRef.current = null;
         if (list.some((c) => c.id === pending.channelId)) {
           setActiveVoiceChannelId(pending.channelId);
+          setActiveVoiceServerId(pending.serverId);
         }
       }
       const pendingText = pendingTextChannelRef.current;
@@ -314,9 +312,10 @@ export default function App() {
     if (!event || !user || event.senderId === user.id) return;
     if (gateway.selfStatus.status === "dnd") return;
     const sender = event.message.sender.replace(/^@/, "").split(":")[0];
-    if (voiceSettings.messageNotifications) setDirectNotice(`${sender}: ${event.message.content}`);
+    if (!document.hidden) return;
     if (voiceSettings.notificationSound) playMessageNotification();
     if (
+      document.hidden &&
       voiceSettings.desktopNotifications &&
       typeof Notification !== "undefined" &&
       Notification.permission === "granted"
@@ -328,6 +327,7 @@ export default function App() {
         });
         notification.onclick = () => {
           window.focus();
+          setProfileOpen(true);
           notification.close();
         };
       } catch {
@@ -344,17 +344,9 @@ export default function App() {
     const message = event?.message;
     if (!event || !message || !user || message.sender === user.matrix_user_id) return;
     if (gateway.selfStatus.status === "dnd") return;
-    if (event.channelId === activeChannelId && !document.hidden) return;
+    if (!document.hidden) return;
 
     const sender = message.sender.replace(/^@/, "").split(":")[0];
-    if (voiceSettings.messageNotifications) {
-      setMessageNotice({
-        serverId: event.serverId,
-        channelId: event.channelId,
-        sender,
-        content: message.content,
-      });
-    }
     if (voiceSettings.notificationSound) playMessageNotification();
     if (
       voiceSettings.desktopNotifications &&
@@ -368,28 +360,22 @@ export default function App() {
         });
         notification.onclick = () => {
           window.focus();
+          if (event.serverId === activeServerId) setActiveChannelId(event.channelId);
+          else {
+            pendingTextChannelRef.current = {
+              serverId: event.serverId,
+              channelId: event.channelId,
+            };
+            setActiveServerId(event.serverId);
+          }
           notification.close();
         };
       } catch {
-        /* sistem bildirimi kullanılamıyorsa kenar bildirimi devam eder */
+        /* sistem bildirimi kullanılamıyorsa sessizce devam et */
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gateway.channelMessage?.sequence]);
-
-  function openMessageNotice() {
-    if (!messageNotice) return;
-    if (messageNotice.serverId === activeServerId) {
-      setActiveChannelId(messageNotice.channelId);
-    } else {
-      pendingTextChannelRef.current = {
-        serverId: messageNotice.serverId,
-        channelId: messageNotice.channelId,
-      };
-      setActiveServerId(messageNotice.serverId);
-    }
-    setMessageNotice(null);
-  }
 
   async function handleLoadOlderMessages() {
     if (!activeChannelId || !messageCursor || olderMessagesLoading) return;
@@ -409,22 +395,6 @@ export default function App() {
     } finally {
       setOlderMessagesLoading(false);
     }
-  }
-
-  function updateVideoQuality(videoQuality: VideoQuality) {
-    setVoiceSettings((current) => {
-      const next = { ...current, videoQuality };
-      saveVoiceSettings(next);
-      return next;
-    });
-  }
-
-  function updateVideoFrameRate(videoFrameRate: VideoFrameRate) {
-    setVoiceSettings((current) => {
-      const next = { ...current, videoFrameRate };
-      saveVoiceSettings(next);
-      return next;
-    });
   }
 
   async function handleLogin(username: string, password: string) {
@@ -451,6 +421,9 @@ export default function App() {
   }
 
   function handleLogout() {
+    setProfileOpen(false);
+    setSettingsOpen(false);
+    setServerSettingsOpen(false);
     setToken(null);
     setUser(null);
     setServers([]);
@@ -458,6 +431,7 @@ export default function App() {
     setChannels([]);
     setActiveChannelId(null);
     setActiveVoiceChannelId(null);
+    setActiveVoiceServerId(null);
     setMessages([]);
   }
 
@@ -467,12 +441,12 @@ export default function App() {
     setActiveServerId(server.id);
   }
 
-  async function handleRenameServer(serverId: number) {
-    const server = servers.find((s) => s.id === serverId);
-    const name = window.prompt("Yeni sunucu adı:", server?.name ?? "");
-    if (name == null || !name.trim()) return;
+  async function handleUpdateServer(
+    serverId: number,
+    patch: { name: string; description: string | null },
+  ) {
     try {
-      const updated = await coreApi.updateServer(serverId, { name: name.trim() });
+      const updated = await coreApi.updateServer(serverId, patch);
       setServers((prev) => prev.map((s) => (s.id === serverId ? updated : s)));
     } catch (err) {
       setCallError(err instanceof Error ? err.message : "Sunucu yeniden adlandırılamadı");
@@ -480,6 +454,10 @@ export default function App() {
   }
 
   function dropServer(serverId: number) {
+    if (activeVoiceServerId === serverId) {
+      setActiveVoiceChannelId(null);
+      setActiveVoiceServerId(null);
+    }
     setServers((prev) => {
       const remaining = prev.filter((s) => s.id !== serverId);
       setActiveServerId((current) => (current === serverId ? (remaining[0]?.id ?? null) : current));
@@ -516,6 +494,7 @@ export default function App() {
     setChannels((prev) => [...prev, channel]);
     if (type === "voice") {
       setActiveVoiceChannelId(channel.id);
+      setActiveVoiceServerId(activeServerId);
     } else {
       setActiveChannelId(channel.id);
     }
@@ -523,7 +502,13 @@ export default function App() {
 
   function handleToggleVoice(channelId: number) {
     setVoiceStageVisible(true);
-    setActiveVoiceChannelId((current) => (current === channelId ? null : channelId));
+    if (activeVoiceChannelId === channelId) {
+      setActiveVoiceChannelId(null);
+      setActiveVoiceServerId(null);
+    } else {
+      setActiveVoiceChannelId(channelId);
+      setActiveVoiceServerId(activeServerId);
+    }
   }
 
   async function handleRenameChannel(channelId: number) {
@@ -550,6 +535,9 @@ export default function App() {
       setChannels((prev) => prev.filter((c) => c.id !== channelId));
       setActiveChannelId((current) => (current === channelId ? null : current));
       setActiveVoiceChannelId((current) => (current === channelId ? null : current));
+      if (activeVoiceChannelId === channelId && activeVoiceServerId === activeServerId) {
+        setActiveVoiceServerId(null);
+      }
     } catch (err) {
       setCallError(err instanceof Error ? err.message : "Kanal silinemedi");
     }
@@ -558,6 +546,7 @@ export default function App() {
   function joinVoiceChannel(serverId: number, channelId: number) {
     if (serverId === activeServerId) {
       setActiveVoiceChannelId(channelId);
+      setActiveVoiceServerId(serverId);
     } else {
       pendingVoiceJoinRef.current = { serverId, channelId };
       setActiveServerId(serverId);
@@ -575,6 +564,7 @@ export default function App() {
       return;
     }
     setActiveVoiceChannelId(targetChannel.id);
+    setActiveVoiceServerId(targetChannel.server_id);
     setVoiceStageVisible(true);
     gateway.inviteToCall(targetChannel.id, userId, username);
   }
@@ -584,21 +574,31 @@ export default function App() {
     if (call) joinVoiceChannel(call.serverId, call.channelId);
   }
 
-  async function handleSendMessage(content: string) {
+  async function handleSendMessage(content: string, file?: File) {
     if (!activeChannelId) return;
     const channelId = activeChannelId;
+    let outgoingContent = content;
+    if (file) {
+      try {
+        const attachment = await coreApi.uploadAttachment(file);
+        outgoingContent = composeAttachmentMessage(attachment, content);
+      } catch (err) {
+        setCallError(err instanceof Error ? err.message : "Dosya yüklenemedi");
+        return;
+      }
+    }
     const clientId = createMessageClientId();
     const optimistic: Message = {
       event_id: `pending-${clientId}`,
       sender: user?.matrix_user_id ?? `@${user?.username ?? "sen"}:nexus`,
-      content,
+      content: outgoingContent,
       origin_server_ts: Date.now(),
       client_id: clientId,
       delivery_status: "sending",
     };
     setMessages((current) => mergeIncomingMessage(current, optimistic));
     try {
-      const sent = await coreApi.sendMessage(channelId, content, clientId);
+      const sent = await coreApi.sendMessage(channelId, outgoingContent, clientId);
       if (activeChannelIdRef.current === channelId) {
         setMessages((current) =>
           sent.hidden
@@ -615,6 +615,27 @@ export default function App() {
         );
       }
       setCallError(err instanceof Error ? err.message : "Mesaj gönderilemedi");
+    }
+  }
+
+  async function handleEditMessage(eventId: string, content: string) {
+    if (!activeChannelId) return;
+    const channelId = activeChannelId;
+    const previous = messages.find((message) => message.event_id === eventId);
+    setMessages((current) =>
+      current.map((message) =>
+        message.event_id === eventId ? { ...message, content, edited: true } : message,
+      ),
+    );
+    try {
+      await coreApi.editMessage(channelId, eventId, content);
+    } catch (err) {
+      if (previous) {
+        setMessages((current) =>
+          current.map((message) => (message.event_id === eventId ? previous : message)),
+        );
+      }
+      setCallError(err instanceof Error ? err.message : "Mesaj düzenlenemedi");
     }
   }
 
@@ -682,7 +703,7 @@ export default function App() {
         channels={channels}
         activeChannelId={activeChannelId}
         onSelect={setActiveChannelId}
-        activeVoiceChannelId={activeVoiceChannelId}
+        activeVoiceChannelId={activeVoiceServerId === activeServerId ? activeVoiceChannelId : null}
         onToggleVoice={handleToggleVoice}
         currentUser={user}
         voiceSettings={voiceSettings}
@@ -691,15 +712,12 @@ export default function App() {
         onCreateChannel={handleCreateChannel}
         onRenameChannel={handleRenameChannel}
         onDeleteChannel={handleDeleteChannel}
-        onRenameServer={handleRenameServer}
-        onDeleteServer={handleDeleteServer}
-        onLeaveServer={handleLeaveServer}
+        onOpenServerSettings={() => setServerSettingsOpen(true)}
         voiceStates={gateway.voiceStates}
         onOpenProfile={() => setProfileOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
-        onLogout={handleLogout}
       />
-      <div className={voiceStageVisible ? "app-main" : "app-main app-main--chat-focus"}>
+      <div className={voiceStageVisible && voice.connected ? "app-main" : "app-main app-main--chat-focus"}>
         <header className="app-main__toolbar">
           <div className="app-main__context">
             <span>{activeServer?.name ?? "Nexus"}</span>
@@ -726,69 +744,19 @@ export default function App() {
               </button>
             ) : null}
             {voice.connected ? (
-              <>
-                <label className="quality-quick" title="Kamera ve ekran paylaşımı çözünürlüğü">
-                  <span>Kalite</span>
-                  <select
-                    value={voiceSettings.videoQuality}
-                    onChange={(event) => updateVideoQuality(event.target.value as VideoQuality)}
-                  >
-                    <option value="480p">480p</option>
-                    <option value="720p">720p</option>
-                    <option value="1080p">1080p</option>
-                  </select>
-                </label>
-                <label className="quality-quick" title="Kamera ve ekran paylaşımı kare hızı">
-                  <span>FPS</span>
-                  <select
-                    value={voiceSettings.videoFrameRate}
-                    onChange={(event) => updateVideoFrameRate(Number(event.target.value) as VideoFrameRate)}
-                  >
-                    <option value={30}>30</option>
-                    <option value={60}>60</option>
-                  </select>
-                </label>
-                <button
-                  type="button"
-                  className="toolbar-action"
-                  onClick={() => setVoiceStageVisible((visible) => !visible)}
-                >
-                  {voiceStageVisible ? "Sahneyi gizle" : "Canlı sahneyi göster"}
-                </button>
-              </>
+              <button
+                type="button"
+                className="toolbar-action"
+                onClick={() => setVoiceStageVisible((visible) => !visible)}
+              >
+                {voiceStageVisible ? "Sahneyi gizle" : "Canlı sahneyi göster"}
+              </button>
             ) : null}
-            <select
-              className="status-select"
-              value={gateway.selfStatus.status}
-              onChange={(event) =>
-                gateway.setStatus(event.target.value as typeof gateway.selfStatus.status, customStatusDraft)
-              }
-              title="Durumun"
-            >
-              <option value="online">Çevrimiçi</option>
-              <option value="idle">Boşta</option>
-              <option value="dnd">Rahatsız etmeyin</option>
-              <option value="invisible">Görünmez</option>
-            </select>
-            <input
-              className="status-custom"
-              placeholder="Özel durum"
-              value={customStatusDraft}
-              maxLength={128}
-              onChange={(event) => setCustomStatusDraft(event.target.value)}
-              onBlur={() => gateway.setStatus(gateway.selfStatus.status, customStatusDraft)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") gateway.setStatus(gateway.selfStatus.status, customStatusDraft);
-              }}
-            />
           </div>
         </header>
-        {voiceStageVisible ? <VideoStage
+        {voiceStageVisible && voice.connected ? <VideoStage
           currentUser={user}
           participants={voice.participants}
-          localVideoStream={voice.localVideoStream}
-          localVideoKind={voice.videoKind}
-          remoteStreams={voice.remoteStreams}
           voice={voice}
           qualityLabel={`${voiceSettings.videoQuality} · ${voiceSettings.videoFrameRate} FPS`}
           onHide={() => setVoiceStageVisible(false)}
@@ -801,6 +769,7 @@ export default function App() {
           messages={messages}
           currentMatrixUserId={user.matrix_user_id}
           onSendMessage={handleSendMessage}
+          onEditMessage={handleEditMessage}
           onDeleteMessage={handleDeleteMessage}
           onRetryMessage={handleRetryMessage}
           hasMoreMessages={hasMoreMessages}
@@ -816,6 +785,23 @@ export default function App() {
           socialEventSequence={gateway.socialEventSequence}
           onClose={() => setProfileOpen(false)}
           onOpenSettings={() => setSettingsOpen(true)}
+          onLogout={handleLogout}
+        />
+      ) : null}
+      {activeServer && serverSettingsOpen ? (
+        <ServerSettingsPanel
+          server={activeServer}
+          canManage={activeServer.owner_id === user.id}
+          onClose={() => setServerSettingsOpen(false)}
+          onSave={(patch) => handleUpdateServer(activeServer.id, patch)}
+          onDelete={() => {
+            setServerSettingsOpen(false);
+            void handleDeleteServer(activeServer.id);
+          }}
+          onLeave={() => {
+            setServerSettingsOpen(false);
+            void handleLeaveServer(activeServer.id);
+          }}
         />
       ) : null}
       {settingsOpen ? (
@@ -825,6 +811,8 @@ export default function App() {
           onUserUpdated={setUser}
           onClose={() => setSettingsOpen(false)}
           onChange={setVoiceSettings}
+          selfStatus={gateway.selfStatus}
+          onStatusChange={gateway.setStatus}
         />
       ) : null}
 
@@ -844,45 +832,6 @@ export default function App() {
       ) : null}
       {callError ? (
         <CallNoticeToast notice={{ kind: "error", text: callError }} onDismiss={() => setCallError(null)} />
-      ) : null}
-      {messageNotice ? (
-        <div className="message-notice" role="status">
-          <button type="button" className="message-notice__body" onClick={openMessageNotice}>
-            <strong>{messageNotice.sender}</strong>
-            <span>{messageNotice.content}</span>
-          </button>
-          <button
-            type="button"
-            className="message-notice__close"
-            onClick={() => setMessageNotice(null)}
-            aria-label="Bildirimi kapat"
-          >
-            ×
-          </button>
-        </div>
-      ) : null}
-      {directNotice ? (
-        <div className="message-notice message-notice--direct" role="status">
-          <button
-            type="button"
-            className="message-notice__body"
-            onClick={() => {
-              setDirectNotice(null);
-              setProfileOpen(true);
-            }}
-          >
-            <strong>Özel mesaj</strong>
-            <span>{directNotice}</span>
-          </button>
-          <button
-            type="button"
-            className="message-notice__close"
-            onClick={() => setDirectNotice(null)}
-            aria-label="Bildirimi kapat"
-          >
-            ×
-          </button>
-        </div>
       ) : null}
     </div>
   );

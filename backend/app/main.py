@@ -7,6 +7,7 @@ from app.core.event_loop import set_main_loop
 from app.core.models import Plugin
 from app.core.routers import (
     auth,
+    attachments,
     bots,
     channels,
     direct,
@@ -27,6 +28,7 @@ from app.services.ollama.requests import router as ai_router
 app = FastAPI(title="Nexus Core API")
 
 app.include_router(auth.router)
+app.include_router(attachments.router)
 app.include_router(users.router)
 app.include_router(servers.router)
 app.include_router(channels.router)

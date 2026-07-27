@@ -4,6 +4,7 @@
   "description": "Botu gerçekten sesli kanala katıp WebRTC üzerinden ses akıtan müzik kuyruğu",
   "entry_point": "main:handle_command",
   "permissions": ["voice.join", "voice.stream"],
+  "requires_bot_link": true,
   "commands": [
     "muzik-katil",
     "muzik-ayril",

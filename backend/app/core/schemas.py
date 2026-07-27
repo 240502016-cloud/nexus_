@@ -155,6 +155,10 @@ class MessageCreate(BaseModel):
     client_id: str | None = Field(default=None, min_length=8, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
 
 
+class MessageEdit(BaseModel):
+    content: str = Field(min_length=1, max_length=20000)
+
+
 class MessageRead(BaseModel):
     event_id: str
     sender: str
@@ -162,6 +166,7 @@ class MessageRead(BaseModel):
     origin_server_ts: int | None = None
     client_id: str | None = None
     is_bot: bool = False
+    edited: bool = False
     # Özel bot komutları (örn. gizli oyun hamlesi) Matrix'e yazılmaz. İstemci bu yanıtı
     # alınca iyimser komut balonunu kaldırır.
     hidden: bool = False
@@ -173,6 +178,15 @@ class MessagePage(BaseModel):
     items: list[MessageRead]
     next_cursor: str | None = None
     has_more: bool = False
+
+
+class AttachmentRead(BaseModel):
+    id: str
+    name: str
+    url: str
+    size: int
+    content_type: str
+    is_image: bool
 
 
 # ---- Friends / private conversations ----

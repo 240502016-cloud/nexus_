@@ -122,6 +122,15 @@ class MatrixClient:
         if not response.ok:
             raise MatrixError(f"Odaya katılınamadı: {response.status_code} {response.text}")
 
+    def leave_room(self, access_token: str, room_id: str) -> None:
+        response = self._request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{room_id}/leave",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        if not response.ok:
+            raise MatrixError(f"Odadan ayrılamadı: {response.status_code} {response.text}")
+
     def send_message(self, access_token: str, room_id: str, content: str, txn_id: str | None = None) -> str:
         """Odaya metin mesajı gönderir, event_id döner.
 
@@ -137,6 +146,33 @@ class MatrixClient:
         )
         if not response.ok:
             raise MatrixError(f"Mesaj gönderilemedi: {response.status_code} {response.text}")
+        return response.json()["event_id"]
+
+    def get_event(self, access_token: str, room_id: str, event_id: str) -> dict:
+        response = self._request(
+            "GET",
+            f"/_matrix/client/v3/rooms/{room_id}/event/{event_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        if not response.ok:
+            raise MatrixError(f"Mesaj bulunamadı: {response.status_code} {response.text}")
+        return response.json()
+
+    def edit_message(self, access_token: str, room_id: str, event_id: str, content: str) -> str:
+        txn_id = uuid.uuid4().hex
+        response = self._request(
+            "PUT",
+            f"/_matrix/client/v3/rooms/{room_id}/send/m.room.message/{txn_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={
+                "msgtype": "m.text",
+                "body": f"* {content}",
+                "m.new_content": {"msgtype": "m.text", "body": content},
+                "m.relates_to": {"rel_type": "m.replace", "event_id": event_id},
+            },
+        )
+        if not response.ok:
+            raise MatrixError(f"Mesaj düzenlenemedi: {response.status_code} {response.text}")
         return response.json()["event_id"]
 
     def get_message_page(
@@ -160,18 +196,39 @@ class MatrixClient:
             raise MatrixError(f"Mesajlar alınamadı: {response.status_code} {response.text}")
         payload = response.json()
         events = payload.get("chunk", [])
-        messages = [
-            {
-                "event_id": event["event_id"],
-                "sender": event["sender"],
-                "content": event.get("content", {}).get("body", ""),
-                "origin_server_ts": event["origin_server_ts"],
-            }
-            for event in events
-            if event.get("type") == "m.room.message"
-            # Silinmiş (redact edilmiş) mesajları listeye dahil etme.
-            and "redacted_because" not in event.get("unsigned", {})
-        ]
+        replacements: dict[str, dict] = {}
+        for event in events:
+            content = event.get("content", {})
+            relation = content.get("m.relates_to", {})
+            if relation.get("rel_type") == "m.replace" and relation.get("event_id"):
+                replacements.setdefault(relation["event_id"], content.get("m.new_content", content))
+
+        messages = []
+        for event in events:
+            if event.get("type") != "m.room.message":
+                continue
+            if "redacted_because" in event.get("unsigned", {}):
+                continue
+            content = event.get("content", {})
+            if content.get("m.relates_to", {}).get("rel_type") == "m.replace":
+                continue
+            latest = (
+                event.get("unsigned", {})
+                .get("m.relations", {})
+                .get("m.replace", {})
+                .get("latest_event", {})
+                .get("content", {})
+            )
+            replacement = replacements.get(event["event_id"]) or latest.get("m.new_content") or latest
+            messages.append(
+                {
+                    "event_id": event["event_id"],
+                    "sender": event["sender"],
+                    "content": (replacement or content).get("body", ""),
+                    "origin_server_ts": event["origin_server_ts"],
+                    "edited": bool(replacement),
+                }
+            )
         next_cursor = payload.get("end")
         return {
             "items": messages,

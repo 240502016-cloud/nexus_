@@ -2,6 +2,7 @@ import type { VoiceChannelState } from "../hooks/useVoiceChannel";
 import { comboLabel } from "../settings";
 import type { VoiceSettings } from "../settings";
 import type { User } from "../types";
+import { Icon } from "./Icon";
 
 interface VoicePanelProps {
   voice: VoiceChannelState;
@@ -20,7 +21,8 @@ export function VoicePanel({ voice, voiceSettings, onLeave }: VoicePanelProps) {
     connected,
     muted,
     deafened,
-    videoKind,
+    cameraEnabled,
+    screenShareEnabled,
     error,
     toggleMute,
     toggleDeafen,
@@ -44,31 +46,31 @@ export function VoicePanel({ voice, voiceSettings, onLeave }: VoicePanelProps) {
           onClick={toggleMute}
           title={muted ? "Susturmayı kaldır" : "Sustur"}
         >
-          {muted ? "🔇" : "🎤"}
+          <Icon name={muted ? "micOff" : "mic"} />
         </button>
         <button
           className={deafened ? "voice-ctrl voice-ctrl--danger" : "voice-ctrl"}
           onClick={toggleDeafen}
           title={deafened ? "Sağırlaştırmayı kaldır" : "Sağırlaştır"}
         >
-          {deafened ? "🚫" : "🎧"}
+          <Icon name={deafened ? "headphonesOff" : "headphones"} />
         </button>
         <button
-          className={videoKind === "camera" ? "voice-ctrl voice-ctrl--active" : "voice-ctrl"}
+          className={cameraEnabled ? "voice-ctrl voice-ctrl--active" : "voice-ctrl"}
           onClick={toggleCamera}
-          title={videoKind === "camera" ? "Kamerayı kapat" : "Kamerayı aç"}
+          title={cameraEnabled ? "Kamerayı kapat" : "Kamerayı aç"}
         >
-          📷
+          <Icon name="camera" />
         </button>
         <button
-          className={videoKind === "screen" ? "voice-ctrl voice-ctrl--active" : "voice-ctrl"}
+          className={screenShareEnabled ? "voice-ctrl voice-ctrl--active" : "voice-ctrl"}
           onClick={toggleScreenShare}
-          title={videoKind === "screen" ? "Ekran paylaşımını durdur" : "Ekran paylaş"}
+          title={screenShareEnabled ? "Ekran paylaşımını durdur" : "Ekran paylaş"}
         >
-          🖥️
+          <Icon name="screen" />
         </button>
         <button className="voice-ctrl voice-ctrl--leave" onClick={onLeave} title="Kanaldan ayrıl">
-          📴
+          <Icon name="phone" />
         </button>
       </div>
     </div>

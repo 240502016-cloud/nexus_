@@ -93,8 +93,18 @@ export interface Message {
   client_id?: string | null;
   hidden?: boolean;
   is_bot?: boolean;
+  edited?: boolean;
   // Yalnızca istemci tarafındaki iyimser mesajlarda kullanılır; API snapshot'larında bulunmaz.
   delivery_status?: "sending" | "failed";
+}
+
+export interface Attachment {
+  id: string;
+  name: string;
+  url: string;
+  size: number;
+  content_type: string;
+  is_image: boolean;
 }
 
 export interface MessagePage {

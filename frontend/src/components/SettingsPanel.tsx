@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { SINK_ID_SUPPORTED, useMediaDevices } from "../hooks/useMediaDevices";
+import type { SelfStatus } from "../hooks/useGateway";
 import type { KeyCombo, VoiceSettings } from "../settings";
 import {
   DEFAULT_VOICE_SETTINGS,
@@ -12,8 +13,9 @@ import {
 } from "../settings";
 import type { User } from "../types";
 import { AccountSettings } from "./AccountSettings";
+import { Icon } from "./Icon";
 
-type SettingsTab = "account" | "voice" | "notifications" | "appearance";
+type SettingsTab = "account" | "status" | "voice" | "notifications" | "appearance";
 
 interface SettingsPanelProps {
   settings: VoiceSettings;
@@ -21,6 +23,8 @@ interface SettingsPanelProps {
   onUserUpdated: (user: User) => void;
   onClose: () => void;
   onChange: (settings: VoiceSettings) => void;
+  selfStatus: SelfStatus;
+  onStatusChange: (status: SelfStatus["status"], custom: string) => void;
 }
 
 async function setElementSink(el: HTMLMediaElement, deviceId: string | null): Promise<void> {
@@ -39,10 +43,14 @@ export function SettingsPanel({
   onUserUpdated,
   onClose,
   onChange,
+  selfStatus,
+  onStatusChange,
 }: SettingsPanelProps) {
   const [settings, setSettings] = useState<VoiceSettings>(initialSettings);
   const [recording, setRecording] = useState(false);
   const [tab, setTab] = useState<SettingsTab>("account");
+  const [status, setStatus] = useState(selfStatus.status);
+  const [customStatus, setCustomStatus] = useState(selfStatus.custom);
   const [notifPermission, setNotifPermission] = useState<NotificationPermission | "unsupported">(
     typeof Notification === "undefined" ? "unsupported" : Notification.permission,
   );
@@ -206,6 +214,7 @@ export function SettingsPanel({
     stopCamPreview();
     saveVoiceSettings(settings);
     onChange(settings);
+    onStatusChange(status, customStatus.trim());
     onClose();
   }
 
@@ -219,11 +228,17 @@ export function SettingsPanel({
         <header className="settings-panel__header">
           <h2>Ayarlar</h2>
           <button className="settings-panel__close" onClick={onClose} aria-label="Kapat">
-            ✕
+            <Icon name="close" />
           </button>
         </header>
 
         <nav className="settings-panel__tabs">
+          <button
+            className={tab === "status" ? "settings-panel__tab active" : "settings-panel__tab"}
+            onClick={() => setTab("status")}
+          >
+            Durum
+          </button>
           <button
             className={tab === "account" ? "settings-panel__tab active" : "settings-panel__tab"}
             onClick={() => setTab("account")}
@@ -254,6 +269,25 @@ export function SettingsPanel({
           <AccountSettings currentUser={currentUser} onUserUpdated={onUserUpdated} />
         ) : (
           <>
+        {tab === "status" ? (
+          <div className="settings-panel__section">
+            <h3 className="settings-panel__section-title">Durum ve görünürlük</h3>
+            <label className="settings-panel__field">
+              <span>Durum</span>
+              <select value={status} onChange={(event) => setStatus(event.target.value as SelfStatus["status"])}>
+                <option value="online">Çevrimiçi</option>
+                <option value="idle">Boşta</option>
+                <option value="dnd">Rahatsız etmeyin</option>
+                <option value="invisible">Görünmez</option>
+              </select>
+            </label>
+            <label className="settings-panel__field">
+              <span>Özel durum</span>
+              <input value={customStatus} maxLength={128} onChange={(event) => setCustomStatus(event.target.value)} placeholder="Bugün ne yapıyorsun?" />
+            </label>
+            <p className="settings-panel__hint">Rahatsız etmeyin seçiliyken mesaj ve arama bildirimi gönderilmez.</p>
+          </div>
+        ) : null}
         {tab === "voice" ? (
           <>
         {/* Konuşma modu */}
@@ -333,7 +367,7 @@ export function SettingsPanel({
           </label>
           {SINK_ID_SUPPORTED ? (
             <div className="settings-panel__test-row">
-              <button onClick={testSpeaker}>Hoparlörü test et 🔊</button>
+              <button onClick={testSpeaker}><Icon name="volume" /> Hoparlörü test et</button>
             </div>
           ) : (
             <p className="settings-panel__hint">
@@ -464,15 +498,7 @@ export function SettingsPanel({
                 disabled={notifPermission !== "granted"}
                 onChange={(e) => update({ desktopNotifications: e.target.checked })}
               />
-              Mesajlar ve aramalar için sistem bildirimi
-            </label>
-            <label className="settings-panel__radio">
-              <input
-                type="checkbox"
-                checked={settings.messageNotifications}
-                onChange={(e) => update({ messageNotifications: e.target.checked })}
-              />
-              Yeni mesajda uygulama içi kenar bildirimi
+              Sekme arka plandayken mesajlar ve aramalar için sistem bildirimi
             </label>
             <label className="settings-panel__radio">
               <input

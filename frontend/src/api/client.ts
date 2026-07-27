@@ -3,6 +3,7 @@
 
 import type {
   Bot,
+  Attachment,
   Channel,
   ChannelType,
   DirectConversation,
@@ -129,6 +130,11 @@ export const coreApi = {
       method: "POST",
       body: JSON.stringify({ content, client_id: clientId }),
     }),
+  editDirectMessage: (conversationId: number, eventId: string, content: string) =>
+    request<Message>(
+      `/direct/conversations/${conversationId}/messages/${encodeURIComponent(eventId)}`,
+      { method: "PATCH", body: JSON.stringify({ content }) },
+    ),
 
   myServers: () => request<Server[]>("/servers"),
   createServer: (name: string) =>
@@ -167,6 +173,8 @@ export const coreApi = {
       `/servers/${serverId}/bots/${botId}/plugins/${encodeURIComponent(pluginName)}`,
       { method: "DELETE" },
     ),
+  removeBotFromServer: (botId: number, serverId: number) =>
+    request<void>(`/bots/${botId}/servers/${serverId}`, { method: "DELETE" }),
 
   listChannels: (serverId: number) => request<Channel[]>(`/servers/${serverId}/channels`),
   createChannel: (serverId: number, name: string, type: ChannelType = "text") =>
@@ -191,4 +199,14 @@ export const coreApi = {
     }),
   deleteMessage: (channelId: number, eventId: string) =>
     request<void>(`/channels/${channelId}/messages/${encodeURIComponent(eventId)}`, { method: "DELETE" }),
+  editMessage: (channelId: number, eventId: string, content: string) =>
+    request<Message>(`/channels/${channelId}/messages/${encodeURIComponent(eventId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ content }),
+    }),
+  uploadAttachment: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<Attachment>("/attachments", { method: "POST", body: form });
+  },
 };

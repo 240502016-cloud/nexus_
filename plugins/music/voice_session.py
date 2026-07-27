@@ -22,7 +22,9 @@ from aiortc import RTCPeerConnection, RTCSessionDescription
 from aiortc.contrib.media import MediaPlayer, MediaRelay
 from aiortc.sdp import candidate_from_sdp
 
-from app.core.routers.voice import voice_manager
+from app.core.models import Server
+from app.core.routers.voice import notify_voice_state, voice_manager
+from app.database import SessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +50,7 @@ def find_track(name: str) -> Path | None:
 def _track_duration_seconds(path: Path) -> float:
     container = av.open(str(path))
     try:
-        return float(container.duration) / av.time_base
+        return float(container.duration or 0) / av.time_base
     finally:
         container.close()
 
@@ -82,14 +84,37 @@ class MusicSession:
     # ---- Bağlantı yaşam döngüsü ----
 
     async def join(self) -> None:
-        existing_peers = await voice_manager.join(self.channel_id, self.virtual_id, self.bot_name, self._client)
+        db = SessionLocal()
+        try:
+            server = db.get(Server, self.server_id)
+            if server is None:
+                raise RuntimeError("Sunucu bulunamadı")
+            recipients = {member.user_id for member in server.members}
+            recipients.add(server.owner_id)
+        finally:
+            db.close()
+        await voice_manager.join(
+            self.channel_id,
+            self.server_id,
+            recipients,
+            self.virtual_id,
+            self.bot_name,
+            None,
+            self._client,
+        )
         await voice_manager.broadcast(
             self.channel_id,
-            {"type": "peer-joined", "user_id": self.virtual_id, "username": self.bot_name, "muted": False},
+            {
+                "type": "peer-joined",
+                "user_id": self.virtual_id,
+                "username": self.bot_name,
+                "avatar_url": None,
+                "muted": False,
+                "deafened": False,
+            },
             exclude_user_id=self.virtual_id,
         )
-        for peer in existing_peers:
-            await self._offer_to(peer["user_id"])
+        await notify_voice_state(self.channel_id)
 
     async def leave(self) -> None:
         if self._advance_task:
@@ -99,8 +124,10 @@ class MusicSession:
             await pc.close()
         self._peers.clear()
         self._player = None
+        recipients = voice_manager.recipients(self.channel_id)
         voice_manager.leave(self.channel_id, self.virtual_id)
         await voice_manager.broadcast(self.channel_id, {"type": "peer-left", "user_id": self.virtual_id})
+        await notify_voice_state(self.channel_id, recipients)
 
     # ---- Sinyalleşme (voice.py'deki WebSocket handler ile birebir aynı sözleşme) ----
 
@@ -196,7 +223,8 @@ class MusicSession:
         self._switch_all_tracks(self._relay.subscribe(self._player.audio))
 
         duration = _track_duration_seconds(self.current)
-        self._advance_task = asyncio.ensure_future(self._auto_advance_after(duration))
+        if duration > 0:
+            self._advance_task = asyncio.ensure_future(self._auto_advance_after(duration))
         return f"Şimdi çalıyor: {self.current.stem}"
 
     async def _auto_advance_after(self, duration_seconds: float) -> None:

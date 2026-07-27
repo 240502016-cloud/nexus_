@@ -106,9 +106,13 @@ class PluginRegistry:
     def load(self, manifest: PluginManifest) -> None:
         # Production never imports third-party plugin code into the Core API process.
         # The local path remains available only when explicitly selected for development.
+        # Bu üçü Core'un canlı servislerine (DB/AI kuyruğu/WebRTC) erişen, kaynak kodu
+        # platformla birlikte sürümlenen yerleşik plugin'lerdir. Diğer tüm plugin'ler
+        # üretimde izole sandbox'ta kalır.
+        trusted_core_plugins = {"ai_assistant", "moderation", "music"}
         handler = (
             load_handler(manifest)
-            if settings.plugin_execution_mode == "local"
+            if settings.plugin_execution_mode == "local" or manifest.name in trusted_core_plugins
             else _sandbox_handler(manifest)
         )
         private_commands = {command.casefold() for command in manifest.private_commands}

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
 
 import { ApiError, coreApi } from "../api/client";
+import { composeAttachmentMessage, parseAttachmentMessage } from "../messageContent";
 import type { DirectMessageEvent, PresenceInfo } from "../hooks/useGateway";
 import type {
   DirectConversation,
@@ -11,6 +12,8 @@ import type {
   PublicUser,
   User,
 } from "../types";
+import { AttachmentCard } from "./AttachmentCard";
+import { Icon } from "./Icon";
 
 type ProfileTab = "profile" | "friends" | "messages";
 
@@ -21,6 +24,7 @@ interface ProfilePanelProps {
   socialEventSequence: number;
   onClose: () => void;
   onOpenSettings: () => void;
+  onLogout: () => void;
 }
 
 function initial(name: string): string {
@@ -34,6 +38,13 @@ function clientId(): string {
 }
 
 function mergeMessage(current: Message[], incoming: Message): Message[] {
+  if (current.some((item) => item.event_id === incoming.event_id)) {
+    return current.map((item) =>
+      item.event_id === incoming.event_id
+        ? { ...item, ...incoming, delivery_status: undefined }
+        : item,
+    );
+  }
   return [
     incoming,
     ...current.filter(
@@ -51,6 +62,7 @@ export function ProfilePanel({
   socialEventSequence,
   onClose,
   onOpenSettings,
+  onLogout,
 }: ProfilePanelProps) {
   const [tab, setTab] = useState<ProfileTab>("profile");
   const [friends, setFriends] = useState<Friend[]>([]);
@@ -61,12 +73,23 @@ export function ProfilePanel({
   const [messageCursor, setMessageCursor] = useState<string | null>(null);
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [draft, setDraft] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [search, setSearch] = useState("");
   const [searchResults, setSearchResults] = useState<PublicUser[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const dmMessagesRef = useRef<HTMLDivElement | null>(null);
+  const dmComposerRef = useRef<HTMLTextAreaElement | null>(null);
+
+  function resizeComposer(element = dmComposerRef.current) {
+    if (!element) return;
+    element.style.height = "auto";
+    const lineHeight = Number.parseFloat(getComputedStyle(element).lineHeight) || 22;
+    const max = lineHeight * 8 + 24;
+    element.style.height = `${Math.min(element.scrollHeight, max)}px`;
+    element.style.overflowY = element.scrollHeight > max ? "auto" : "hidden";
+  }
 
   function loadSocial() {
     Promise.all([
@@ -208,24 +231,36 @@ export function ProfilePanel({
     event?.preventDefault();
     if (!selectedConversationId) return;
     const content = draft.trim();
-    if (!content) return;
+    if (!content && !selectedFile) return;
+    let outgoingContent = content;
+    if (selectedFile) {
+      try {
+        const attachment = await coreApi.uploadAttachment(selectedFile);
+        outgoingContent = composeAttachmentMessage(attachment, content);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Dosya yüklenemedi");
+        return;
+      }
+    }
     const id = clientId();
     const optimistic: Message = {
       event_id: `pending-${id}`,
       sender: currentUser.matrix_user_id ?? `@${currentUser.username}:nexus`,
-      content,
+      content: outgoingContent,
       origin_server_ts: Date.now(),
       client_id: id,
       delivery_status: "sending",
     };
     setDraft("");
+    setSelectedFile(null);
+    requestAnimationFrame(() => resizeComposer());
     setMessages((current) => mergeMessage(current, optimistic));
     requestAnimationFrame(() => {
       const container = dmMessagesRef.current;
       if (container) container.scrollTop = container.scrollHeight;
     });
     try {
-      const sent = await coreApi.sendDirectMessage(selectedConversationId, content, id);
+      const sent = await coreApi.sendDirectMessage(selectedConversationId, outgoingContent, id);
       setMessages((current) => mergeMessage(current, sent));
     } catch (err) {
       setMessages((current) =>
@@ -234,6 +269,18 @@ export function ProfilePanel({
         ),
       );
       setError(err instanceof Error ? err.message : "Özel mesaj gönderilemedi");
+    }
+  }
+
+  async function editDirectMessage(message: Message) {
+    if (!selectedConversationId) return;
+    const updated = window.prompt("Mesajı düzenle:", message.content);
+    if (updated == null || !updated.trim() || updated === message.content) return;
+    try {
+      const edited = await coreApi.editDirectMessage(selectedConversationId, message.event_id, updated.trim());
+      setMessages((current) => mergeMessage(current, edited));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Mesaj düzenlenemedi");
     }
   }
 
@@ -252,7 +299,7 @@ export function ProfilePanel({
             <span>NEXUS KİMLİĞİ</span>
             <h2>Profil ve arkadaşlar</h2>
           </div>
-          <button type="button" onClick={onClose} aria-label="Profil ekranını kapat">×</button>
+          <button type="button" onClick={onClose} aria-label="Profil ekranını kapat"><Icon name="close" /></button>
         </header>
 
         <nav className="profile-panel__tabs" aria-label="Profil bölümleri">
@@ -303,6 +350,15 @@ export function ProfilePanel({
                 }}
               >
                 Hesap bilgilerini düzenle
+              </button>
+              <button
+                type="button"
+                className="profile-panel__logout"
+                onClick={() => {
+                  if (window.confirm("Çıkış yapmak istediğinize emin misiniz?")) onLogout();
+                }}
+              >
+                <Icon name="logout" /> Çıkış yap
               </button>
             </div>
           ) : null}
@@ -438,21 +494,32 @@ export function ProfilePanel({
                             className={own ? "direct-message direct-message--own" : "direct-message"}
                           >
                             <small>{own ? "Sen" : selectedConversation.friend.username}</small>
-                            <span>{message.content}</span>
+                            {parseAttachmentMessage(message.content) ? (
+                              <AttachmentCard {...parseAttachmentMessage(message.content)!} />
+                            ) : (
+                              <span>{message.content}{message.edited ? <small> (düzenlendi)</small> : null}</span>
+                            )}
+                            {own && !message.delivery_status ? (
+                              <button className="direct-message__edit" type="button" onClick={() => void editDirectMessage(message)} title="Mesajı düzenle"><Icon name="edit" /></button>
+                            ) : null}
                             {message.delivery_status ? <em>{message.delivery_status === "sending" ? "Gönderiliyor…" : "Gönderilemedi"}</em> : null}
                           </div>
                         );
                       })}
                     </div>
                     <form className="direct-chat__composer" onSubmit={sendDirect}>
+                      <input id="direct-file-input" className="visually-hidden" type="file" onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)} />
+                      <label htmlFor="direct-file-input" className="composer-icon-button"><Icon name="paperclip" /></label>
+                      {selectedFile ? <span className="direct-chat__selected-file">{selectedFile.name}<button type="button" onClick={() => setSelectedFile(null)}><Icon name="close" /></button></span> : null}
                       <textarea
-                        rows={2}
+                        ref={dmComposerRef}
+                        rows={1}
                         value={draft}
-                        onChange={(event) => setDraft(event.target.value)}
+                        onChange={(event) => { setDraft(event.target.value); resizeComposer(event.target); }}
                         onKeyDown={handleDirectKeyDown}
                         placeholder="Mesaj yaz · Shift+Enter yeni satır"
                       />
-                      <button type="submit" disabled={!draft.trim()}>Gönder</button>
+                      <button type="submit" disabled={!draft.trim() && !selectedFile}><Icon name="send" /><span>Gönder</span></button>
                     </form>
                   </>
                 ) : (

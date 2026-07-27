@@ -2783,6 +2783,242 @@ button {
   }
 }
 
+/* 2026 canlı sahne, modern simgeler ve zengin mesaj bileşenleri */
+.icon {
+  width: 1.15rem;
+  height: 1.15rem;
+  flex: 0 0 auto;
+}
+
+.voice-roster__icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.voice-roster__icons span {
+  display: inline-flex;
+  color: var(--danger, #ff7185);
+}
+
+.voice-grid {
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  gap: 10px;
+  padding: 10px 16px;
+  grid-template-columns: 1fr;
+  grid-auto-rows: minmax(0, 1fr);
+}
+
+.voice-grid--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.voice-grid--3,
+.voice-grid--4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.voice-grid--5,
+.voice-grid--6,
+.voice-grid--7,
+.voice-grid--8,
+.voice-grid--9 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+.stage-person {
+  position: relative;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 120px;
+  border: 1px solid rgba(151, 126, 255, .22);
+  border-radius: 18px;
+  background: radial-gradient(circle at 50% 35%, #272343, #11131f 72%);
+  display: grid;
+  place-items: center;
+  isolation: isolate;
+}
+
+.stage-person--speaking {
+  border-color: #36e6a4;
+  box-shadow: 0 0 0 2px rgba(54, 230, 164, .24), 0 0 28px rgba(54, 230, 164, .12);
+}
+
+.stage-person__video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #070811;
+}
+
+.stage-person__video--mirror { transform: scaleX(-1); }
+
+.stage-person__avatar {
+  width: clamp(72px, 18%, 150px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 14px 42px rgba(0, 0, 0, .35);
+}
+
+.stage-person__initials {
+  width: clamp(72px, 18%, 150px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: clamp(1.6rem, 4vw, 3rem);
+  font-weight: 800;
+  background: linear-gradient(145deg, #8f6cff, #4d31b9);
+}
+
+.stage-person__meta {
+  position: absolute;
+  left: 12px;
+  bottom: 10px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 10px;
+  color: #fff;
+  background: rgba(5, 6, 14, .75);
+  backdrop-filter: blur(12px);
+}
+
+.stage-person__meta small { color: #bdaeff; font-weight: 800; }
+.stage-person__pause {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, .18);
+  background: rgba(5, 6, 14, .72);
+}
+
+.video-stage {
+  display: flex;
+  flex-direction: column;
+  min-height: min(52vh, 520px);
+}
+
+.video-stage:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  min-height: 100vh;
+}
+
+.video-stage:fullscreen .voice-grid { padding: 14px 24px; }
+.video-stage:fullscreen .video-stage__controls { position: relative; z-index: 5; }
+.stage-control .icon { width: 20px; height: 20px; }
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.chat-area__composer,
+.direct-chat__composer {
+  align-items: flex-end;
+  position: relative;
+}
+
+.chat-area__composer textarea,
+.direct-chat__composer textarea {
+  resize: none;
+  min-height: 44px;
+  max-height: 200px;
+  overflow-y: hidden;
+  line-height: 22px;
+}
+
+.composer-icon-button {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  color: var(--accent, #9b7cff);
+  background: rgba(143, 108, 255, .12);
+  border: 1px solid rgba(143, 108, 255, .2);
+}
+
+.chat-area__selected-file,
+.direct-chat__selected-file {
+  position: absolute;
+  left: 54px;
+  bottom: calc(100% + 6px);
+  max-width: 70%;
+  padding: 7px 9px;
+  border-radius: 9px;
+  background: #26233c;
+  color: #f7f5ff;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-area__selected-file button,
+.direct-chat__selected-file button {
+  display: grid;
+  padding: 2px;
+  background: transparent;
+}
+
+.chat-message__content { white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-message__actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: none;
+  gap: 4px;
+}
+.chat-message:hover .chat-message__actions { display: flex; }
+.chat-message__actions button,
+.direct-message__edit {
+  display: grid;
+  place-items: center;
+  padding: 6px;
+  color: var(--text-muted);
+  background: rgba(20, 20, 34, .88);
+}
+.chat-message__edit-form { display: grid; gap: 5px; }
+.chat-message__edit-form textarea { min-height: 72px; resize: vertical; }
+.chat-message__edit-form span,
+.chat-message__edited { color: var(--text-muted); font-size: .72rem; }
+
+.attachment-card { max-width: min(520px, 100%); display: grid; gap: 7px; }
+.attachment-card img { display: block; max-width: 100%; max-height: 420px; border-radius: 14px; object-fit: contain; background: #080913; }
+.attachment-card__file { display: flex; align-items: center; gap: 12px; padding: 13px; border-radius: 13px; background: rgba(125, 95, 230, .12); color: inherit; text-decoration: none; }
+.attachment-card__file .icon { width: 28px; height: 28px; color: #a88cff; }
+.attachment-card__file span { display: grid; }
+.attachment-card__file small { color: var(--text-muted); }
+.attachment-card p { margin: 0; white-space: pre-wrap; }
+
+.settings-panel__tab { display: inline-flex; align-items: center; gap: 7px; }
+.server-settings__form textarea { resize: vertical; }
+.server-settings__danger { margin-top: 20px; padding: 18px; border: 1px solid rgba(255, 87, 111, .32); border-radius: 14px; background: rgba(255, 87, 111, .07); }
+.server-settings__danger p { color: var(--text-muted); }
+.server-settings__danger button,
+.profile-panel__logout,
+.bots-panel__remove { color: #fff; background: #a9344a; }
+.profile-panel__logout { margin-top: 12px; display: inline-flex; align-items: center; gap: 8px; }
+.bots-panel--embedded { min-height: 0; overflow-y: auto; padding: 4px; }
+.bots-panel__bot-card { align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.panel-eyebrow { color: #9c85ff; font-size: .7rem; letter-spacing: .15em; font-weight: 800; }
+.direct-message { position: relative; }
+.direct-message__edit { position: absolute; right: 6px; top: 6px; opacity: 0; }
+.direct-message:hover .direct-message__edit { opacity: 1; }
+
+@media (max-width: 760px) {
+  .voice-grid--5,
+  .voice-grid--6,
+  .voice-grid--7,
+  .voice-grid--8,
+  .voice-grid--9 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stage-control span { display: none; }
+}
+
 /* ==========================================================================
    Social hub, private messages and final theme consistency
    ========================================================================== */

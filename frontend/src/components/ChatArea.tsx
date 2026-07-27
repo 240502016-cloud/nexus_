@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
 
 import type { Channel, Message } from "../types";
+import { parseAttachmentMessage } from "../messageContent";
+import { AttachmentCard } from "./AttachmentCard";
+import { Icon } from "./Icon";
 
 const GAME_EVENT_PREFIX = "NEXUS_GAME_EVENT:";
 
@@ -26,7 +29,8 @@ interface ChatAreaProps {
   channel: Channel | undefined;
   messages: Message[];
   currentMatrixUserId: string | null;
-  onSendMessage: (content: string) => Promise<void>;
+  onSendMessage: (content: string, file?: File) => Promise<void>;
+  onEditMessage: (eventId: string, content: string) => Promise<void>;
   onDeleteMessage: (eventId: string) => void;
   onRetryMessage: (clientId: string, content: string) => void;
   hasMoreMessages: boolean;
@@ -70,6 +74,7 @@ export function ChatArea({
   messages,
   currentMatrixUserId,
   onSendMessage,
+  onEditMessage,
   onDeleteMessage,
   onRetryMessage,
   hasMoreMessages,
@@ -77,6 +82,8 @@ export function ChatArea({
   onLoadOlder,
 }: ChatAreaProps) {
   const [draft, setDraft] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [editing, setEditing] = useState<{ eventId: string; content: string } | null>(null);
   const [gameActionBusy, setGameActionBusy] = useState<string | null>(null);
   const [unseenMessageCount, setUnseenMessageCount] = useState(0);
   const messagesRef = useRef<HTMLDivElement | null>(null);
@@ -85,6 +92,18 @@ export function ChatArea({
   const initializedChannelRef = useRef<number | null>(null);
   const isNearBottomRef = useRef(true);
   const forceScrollToBottomRef = useRef(false);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+
+  function resizeComposer(element = composerRef.current) {
+    if (!element) return;
+    element.style.height = "auto";
+    const style = window.getComputedStyle(element);
+    const lineHeight = Number.parseFloat(style.lineHeight) || 22;
+    const padding = Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom);
+    const maxHeight = lineHeight * 8 + padding;
+    element.style.height = `${Math.min(element.scrollHeight, maxHeight)}px`;
+    element.style.overflowY = element.scrollHeight > maxHeight ? "auto" : "hidden";
+  }
 
   function scrollToLatest(behavior: ScrollBehavior = "smooth") {
     const container = messagesRef.current;
@@ -101,15 +120,25 @@ export function ChatArea({
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     const content = draft.trim();
-    if (!content) return;
+    if (!content && !selectedFile) return;
     // Input'u ağ yanıtını beklemeden temizle; App mesajı aynı anda iyimser olarak listeye ekler.
     setDraft("");
+    const file = selectedFile ?? undefined;
+    setSelectedFile(null);
+    requestAnimationFrame(() => resizeComposer());
     forceScrollToBottomRef.current = true;
-    const pending = onSendMessage(content);
+    const pending = onSendMessage(content, file);
     // İyimser mesajın React tarafından DOM'a işlendiği iki çizim turundan sonra kesin olarak
     // en alta in. Ağ yanıtını beklemek kullanıcının kendi mesajını görmesini geciktirirdi.
     requestAnimationFrame(() => requestAnimationFrame(() => scrollToLatest("auto")));
     await pending;
+  }
+
+  async function saveEdit(event: FormEvent) {
+    event.preventDefault();
+    if (!editing?.content.trim()) return;
+    await onEditMessage(editing.eventId, editing.content.trim());
+    setEditing(null);
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -146,6 +175,8 @@ export function ChatArea({
     forceScrollToBottomRef.current = false;
     setUnseenMessageCount(0);
   }, [channel?.id]);
+
+  useEffect(() => resizeComposer(), [draft]);
 
   useEffect(() => {
     if (!channel || messages.length === 0) return;
@@ -206,7 +237,7 @@ export function ChatArea({
   return (
     <section className="chat-area">
       <header className="chat-area__header">
-        {channel ? `${channel.type === "voice" ? "🔊" : "#"} ${channel.name}` : "Bir kanal seçin"}
+        {channel ? <><Icon name={channel.type === "voice" ? "volume" : "hash"} /> {channel.name}</> : "Bir kanal seçin"}
       </header>
       <div
         className="chat-area__messages"
@@ -246,7 +277,23 @@ export function ChatArea({
             return (
               <div key={message.event_id} className={className}>
                 <span className="chat-message__sender">{displayName(message.sender)}</span>
-                {gameMessage ? (
+                {editing?.eventId === message.event_id ? (
+                  <form className="chat-message__edit-form" onSubmit={saveEdit}>
+                    <textarea
+                      autoFocus
+                      value={editing.content}
+                      onChange={(event) => setEditing({ ...editing, content: event.target.value })}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") setEditing(null);
+                        if (event.key === "Enter" && !event.shiftKey) {
+                          event.preventDefault();
+                          event.currentTarget.form?.requestSubmit();
+                        }
+                      }}
+                    />
+                    <span>Enter kaydet · Esc iptal · Shift+Enter yeni satır</span>
+                  </form>
+                ) : gameMessage ? (
                   <div
                     className={`chance-card chance-card--${gameMessage.event.game ?? gameMessage.event.type}`}
                   >
@@ -313,8 +360,13 @@ export function ChatArea({
                       )
                     ) : null}
                   </div>
+                ) : parseAttachmentMessage(message.content) ? (
+                  <AttachmentCard {...parseAttachmentMessage(message.content)!} />
                 ) : (
-                  <span className="chat-message__content">{message.content || "(silindi)"}</span>
+                  <span className="chat-message__content">
+                    {message.content || "(silindi)"}
+                    {message.edited ? <small className="chat-message__edited"> (düzenlendi)</small> : null}
+                  </span>
                 )}
                 {message.delivery_status === "sending" ? (
                   <span className="chat-message__delivery">Gönderiliyor…</span>
@@ -328,15 +380,26 @@ export function ChatArea({
                   </button>
                 ) : null}
                 {own && message.content && !message.delivery_status ? (
-                  <button
-                    className="chat-message__delete"
-                    title="Mesajı sil"
-                    onClick={() => {
-                      if (window.confirm("Bu mesaj silinsin mi?")) onDeleteMessage(message.event_id);
-                    }}
-                  >
-                    🗑️
-                  </button>
+                  <div className="chat-message__actions">
+                    {!gameMessage ? (
+                      <button
+                        type="button"
+                        title="Mesajı düzenle"
+                        onClick={() => setEditing({ eventId: message.event_id, content: message.content })}
+                      >
+                        <Icon name="edit" />
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      title="Mesajı sil"
+                      onClick={() => {
+                        if (window.confirm("Bu mesaj silinsin mi?")) onDeleteMessage(message.event_id);
+                      }}
+                    >
+                      <Icon name="trash" />
+                    </button>
+                  </div>
                 ) : null}
               </div>
             );
@@ -356,16 +419,38 @@ export function ChatArea({
       ) : null}
       {channel ? (
         <form className="chat-area__composer" onSubmit={handleSubmit}>
+          <input
+            id="chat-file-input"
+            className="visually-hidden"
+            type="file"
+            onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
+          />
+          <label className="composer-icon-button" htmlFor="chat-file-input" title="Fotoğraf veya dosya ekle">
+            <Icon name="paperclip" />
+          </label>
+          {selectedFile ? (
+            <span className="chat-area__selected-file">
+              {selectedFile.name}
+              <button type="button" onClick={() => setSelectedFile(null)} aria-label="Dosyayı kaldır">
+                <Icon name="close" />
+              </button>
+            </span>
+          ) : null}
           <textarea
+            ref={composerRef}
             rows={1}
             value={draft}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => {
+              setDraft(event.target.value);
+              resizeComposer(event.target);
+            }}
             onKeyDown={handleComposerKeyDown}
             maxLength={20000}
             placeholder={`#${channel.name} kanalına mesaj yaz · Shift+Enter yeni satır`}
           />
-          <button type="submit" disabled={!draft.trim()}>
-            Gönder
+          <button type="submit" disabled={!draft.trim() && !selectedFile}>
+            <Icon name="send" />
+            <span>Gönder</span>
           </button>
         </form>
       ) : null}

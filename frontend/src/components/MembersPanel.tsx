@@ -4,6 +4,7 @@ import type { FormEvent } from "react";
 import { ApiError, coreApi } from "../api/client";
 import type { PresenceInfo } from "../hooks/useGateway";
 import type { Friend, Member } from "../types";
+import { Icon } from "./Icon";
 
 interface MembersPanelProps {
   serverId: number;
@@ -97,7 +98,7 @@ export function MembersPanel({
           <span>TOPLULUK</span>
           <strong>Üyeler · {members.length}</strong>
         </div>
-        <button type="button" onClick={onClose} aria-label="Üye panelini kapat">×</button>
+        <button type="button" onClick={onClose} aria-label="Üye panelini kapat"><Icon name="close" /></button>
       </header>
 
       {loading ? (
@@ -131,7 +132,7 @@ export function MembersPanel({
                     disabled={!online}
                     onClick={() => onCallMember(member.id, member.username)}
                   >
-                    ARA
+                    <Icon name="phone" />
                   </button>
                 ) : null}
                 {canInvite && !isSelf ? (
@@ -140,7 +141,7 @@ export function MembersPanel({
                     title="Sunucudan çıkar"
                     onClick={() => handleKick(member.id, member.display_name ?? member.username)}
                   >
-                    ×
+                    <Icon name="close" />
                   </button>
                 ) : null}
               </li>

@@ -5,7 +5,7 @@ import type { VoiceRosterMember } from "../hooks/useGateway";
 import type { VoiceChannelState } from "../hooks/useVoiceChannel";
 import type { VoiceSettings } from "../settings";
 import type { Channel, ChannelType, Server, User } from "../types";
-import { BotsPanel } from "./BotsPanel";
+import { Icon } from "./Icon";
 import { VoicePanel } from "./VoicePanel";
 
 interface ChannelSidebarProps {
@@ -22,13 +22,10 @@ interface ChannelSidebarProps {
   onCreateChannel: (name: string, type: ChannelType) => Promise<void>;
   onRenameChannel?: (channelId: number) => void;
   onDeleteChannel?: (channelId: number) => void;
-  onRenameServer?: (serverId: number) => void;
-  onDeleteServer?: (serverId: number) => void;
-  onLeaveServer?: (serverId: number) => void;
+  onOpenServerSettings: () => void;
   voiceStates?: Map<number, VoiceRosterMember[]>;
   onOpenProfile: () => void;
   onOpenSettings: () => void;
-  onLogout: () => void;
 }
 
 function memberInitial(name: string): string {
@@ -54,11 +51,8 @@ function VoiceRoster({ members }: { members: VoiceRosterMember[] }) {
           )}
           <span className="voice-roster__name">{m.username}</span>
           <span className="voice-roster__icons">
-            {m.deafened ? (
-              <span title="Sağır">🎧⃠</span>
-            ) : m.muted ? (
-              <span title="Susturulmuş">🔇</span>
-            ) : null}
+            {m.muted ? <span title="Susturulmuş"><Icon name="micOff" /></span> : null}
+            {m.deafened ? <span title="Sağır"><Icon name="headphonesOff" /></span> : null}
           </span>
         </li>
       ))}
@@ -80,18 +74,14 @@ export function ChannelSidebar({
   onCreateChannel,
   onRenameChannel,
   onDeleteChannel,
-  onRenameServer,
-  onDeleteServer,
-  onLeaveServer,
+  onOpenServerSettings,
   voiceStates,
   onOpenProfile,
   onOpenSettings,
-  onLogout,
 }: ChannelSidebarProps) {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [type, setType] = useState<ChannelType>("text");
-  const [botsOpen, setBotsOpen] = useState(false);
 
   async function handleCreate(event: FormEvent) {
     event.preventDefault();
@@ -108,39 +98,9 @@ export function ChannelSidebar({
         <span>{server?.name ?? "Sunucu seçin"}</span>
         {server ? (
           <span className="channel-sidebar__header-actions">
-            <button
-              className="channel-sidebar__members-button"
-              onClick={() => setBotsOpen(true)}
-              title="Botlar"
-            >
-              🤖
+            <button className="channel-sidebar__members-button" onClick={onOpenServerSettings} title="Sunucu ayarları">
+              <Icon name="settings" />
             </button>
-            {canCreateChannel ? (
-              <>
-                <button
-                  className="channel-sidebar__members-button"
-                  onClick={() => onRenameServer?.(server.id)}
-                  title="Sunucuyu yeniden adlandır"
-                >
-                  ✏️
-                </button>
-                <button
-                  className="channel-sidebar__members-button"
-                  onClick={() => onDeleteServer?.(server.id)}
-                  title="Sunucuyu sil"
-                >
-                  🗑️
-                </button>
-              </>
-            ) : (
-              <button
-                className="channel-sidebar__members-button"
-                onClick={() => onLeaveServer?.(server.id)}
-                title="Sunucudan ayrıl"
-              >
-                🚪
-              </button>
-            )}
           </span>
         ) : null}
       </header>
@@ -159,7 +119,7 @@ export function ChannelSidebar({
                   }
                   onClick={() => (isVoice ? onToggleVoice(channel.id) : onSelect(channel.id))}
                 >
-                  <span className="channel-item__icon">{isVoice ? "🔊" : "#"}</span>
+                  <span className="channel-item__icon"><Icon name={isVoice ? "volume" : "hash"} /></span>
                   {channel.name}
                 </button>
                 {canCreateChannel ? (
@@ -169,14 +129,14 @@ export function ChannelSidebar({
                       title="Yeniden adlandır"
                       onClick={() => onRenameChannel?.(channel.id)}
                     >
-                      ✏️
+                      <Icon name="edit" />
                     </button>
                     <button
                       className="channel-row__action"
                       title="Kanalı sil"
                       onClick={() => onDeleteChannel?.(channel.id)}
                     >
-                      🗑️
+                      <Icon name="trash" />
                     </button>
                   </span>
                 ) : null}
@@ -219,7 +179,7 @@ export function ChannelSidebar({
                   checked={type === "voice"}
                   onChange={() => setType("voice")}
                 />
-                🔊 Ses
+                <Icon name="volume" /> Ses
               </label>
             </div>
             <div className="channel-sidebar__create-actions">
@@ -248,30 +208,11 @@ export function ChannelSidebar({
           <strong>{currentUser.display_name || currentUser.username}</strong>
           <span>@{currentUser.username}</span>
         </button>
-        <button type="button" className="user-dock__action" onClick={onOpenProfile} title="Profil ve arkadaşlar">
-          PRO
-        </button>
         <button type="button" className="user-dock__action" onClick={onOpenSettings} title="Ayarlar">
-          AYR
-        </button>
-        <button
-          type="button"
-          className="user-dock__action user-dock__action--logout"
-          onClick={onLogout}
-          title="Çıkış yap"
-        >
-          ÇIK
+          <Icon name="settings" />
         </button>
       </div>
 
-      {server && botsOpen ? (
-        <BotsPanel
-          serverId={server.id}
-          serverName={server.name}
-          canManageBots={canCreateChannel}
-          onClose={() => setBotsOpen(false)}
-        />
-      ) : null}
     </aside>
   );
 }

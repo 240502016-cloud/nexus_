@@ -1,338 +1,167 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { VoiceChannelState, VoiceParticipant, VideoKind } from "../hooks/useVoiceChannel";
+import type { RemoteVideoStream, VoiceChannelState, VoiceParticipant } from "../hooks/useVoiceChannel";
 import type { User } from "../types";
+import { Icon } from "./Icon";
 
-interface VideoSource {
-  id: string;
-  userId: number | null;
-  stream: MediaStream;
-  label: string;
-  muted: boolean;
-  mirror: boolean;
-  badge: string;
+function initials(name: string): string {
+  return name.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
 }
 
-interface VideoTileProps extends VideoSource {
-  compact?: boolean;
-  selected?: boolean;
-  onSelect?: () => void;
+function hasVideo(stream: MediaStream | null): stream is MediaStream {
+  return Boolean(stream?.getVideoTracks().some((track) =>
+    track.readyState === "live" && !track.muted && track.enabled,
+  ));
 }
 
-function VideoTile({
+function MediaTile({
   stream,
+  name,
+  avatar,
   label,
-  muted,
-  mirror,
-  badge,
-  compact = false,
-  selected = false,
-  onSelect,
-}: VideoTileProps) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-
+  mirror = false,
+  speaking = false,
+  onPause,
+  paused = false,
+}: {
+  stream: MediaStream | null;
+  name: string;
+  avatar?: string | null;
+  label?: string;
+  mirror?: boolean;
+  speaking?: boolean;
+  onPause?: () => void;
+  paused?: boolean;
+}) {
+  const ref = useRef<HTMLVideoElement | null>(null);
   useEffect(() => {
-    const el = videoRef.current;
-    if (el && el.srcObject !== stream) {
-      el.srcObject = stream;
-    }
+    if (ref.current && stream && ref.current.srcObject !== stream) ref.current.srcObject = stream;
   }, [stream]);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        video.pause(); // ses ayrı <audio> öğesinden sürer; görünmeyen video GPU tüketmez.
-      } else {
-        void video.play().catch(() => {});
-      }
-    };
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
-  }, []);
-
   return (
-    <button
-      type="button"
-      className={[
-        "video-tile",
-        compact ? "video-tile--compact" : "video-tile--primary",
-        selected ? "video-tile--selected" : "",
-      ]
-        .filter(Boolean)
-        .join(" ")}
-      onClick={onSelect}
-      aria-label={compact ? `${label} görüntüsünü büyüt` : `${label} görüntüsü`}
-    >
-      <video
-        ref={videoRef}
-        autoPlay
-        playsInline
-        muted={muted}
-        className={mirror ? "video-tile__video video-tile__video--mirror" : "video-tile__video"}
-      />
-      <span className="video-tile__label">
-        <span className="video-tile__badge">{badge}</span>
-        {label}
-      </span>
-    </button>
+    <article className={speaking ? "stage-person stage-person--speaking" : "stage-person"}>
+      {hasVideo(stream) ? (
+        <video ref={ref} autoPlay playsInline muted className={mirror ? "stage-person__video stage-person__video--mirror" : "stage-person__video"} />
+      ) : avatar ? (
+        <img className="stage-person__avatar" src={avatar} alt="" />
+      ) : (
+        <span className="stage-person__initials">{initials(name)}</span>
+      )}
+      <div className="stage-person__meta">
+        <span>{name}</span>
+        {label ? <small>{label}</small> : null}
+      </div>
+      {onPause && (hasVideo(stream) || paused) ? (
+        <button type="button" className="stage-person__pause" onClick={onPause}>
+          {paused ? "İzlemeyi aç" : "İzlemeyi kapat"}
+        </button>
+      ) : null}
+    </article>
   );
-}
-
-function hasVideo(stream: MediaStream): boolean {
-  return stream.getVideoTracks().some((track) => track.readyState === "live");
-}
-
-interface StageControlsProps {
-  voice: VoiceChannelState;
-  isFullscreen: boolean;
-  onToggleFullscreen: () => void;
-  onLeave: () => void;
-  onHide: () => void;
-}
-
-function StageControls({ voice, isFullscreen, onToggleFullscreen, onLeave, onHide }: StageControlsProps) {
-  return (
-    <div className="video-stage__controls" aria-label="Görüşme kontrolleri">
-      <button
-        type="button"
-        className={voice.muted ? "stage-control stage-control--danger" : "stage-control"}
-        onClick={voice.toggleMute}
-        title={voice.muted ? "Mikrofonu aç" : "Mikrofonu kapat"}
-      >
-        <span className="stage-control__icon" aria-hidden="true">{voice.muted ? "M!" : "MIC"}</span>
-        <span>{voice.muted ? "Sesi aç" : "Sustur"}</span>
-      </button>
-      <button
-        type="button"
-        className={voice.deafened ? "stage-control stage-control--danger" : "stage-control"}
-        onClick={voice.toggleDeafen}
-        title={voice.deafened ? "Gelen sesi aç" : "Gelen sesi kapat"}
-      >
-        <span className="stage-control__icon" aria-hidden="true">AUD</span>
-        <span>{voice.deafened ? "Sesi aç" : "Sağırlaştır"}</span>
-      </button>
-      <button
-        type="button"
-        className={voice.videoKind === "camera" ? "stage-control stage-control--active" : "stage-control"}
-        onClick={voice.toggleCamera}
-        title={voice.videoKind === "camera" ? "Kamerayı kapat" : "Kamerayı aç"}
-      >
-        <span className="stage-control__icon" aria-hidden="true">CAM</span>
-        <span>Kamera</span>
-      </button>
-      <button
-        type="button"
-        className={voice.videoKind === "screen" ? "stage-control stage-control--active" : "stage-control"}
-        onClick={voice.toggleScreenShare}
-        title={voice.videoKind === "screen" ? "Ekran paylaşımını durdur" : "Ekran paylaş"}
-      >
-        <span className="stage-control__icon" aria-hidden="true">SHR</span>
-        <span>Paylaş</span>
-      </button>
-      <span className="video-stage__control-separator" />
-      <button type="button" className="stage-control" onClick={onHide} title="Sahneyi kapat ve mesajları büyüt">
-        <span className="stage-control__icon" aria-hidden="true">TXT</span>
-        <span>Sahneyi gizle</span>
-      </button>
-      <button
-        type="button"
-        className="stage-control"
-        onClick={onToggleFullscreen}
-        title={isFullscreen ? "Tam ekrandan çık" : "Tam ekran"}
-      >
-        <span className="stage-control__icon stage-control__icon--wide" aria-hidden="true">
-          {isFullscreen ? "EXIT" : "FULL"}
-        </span>
-        <span>{isFullscreen ? "Küçült" : "Tam ekran"}</span>
-      </button>
-      <button
-        type="button"
-        className="stage-control stage-control--leave"
-        onClick={onLeave}
-        title="Ses kanalından ayrıl"
-      >
-        <span className="stage-control__icon" aria-hidden="true">END</span>
-        <span>Ayrıl</span>
-      </button>
-    </div>
-  );
-}
-
-interface VideoStageProps {
-  currentUser: User;
-  participants: VoiceParticipant[];
-  localVideoStream: MediaStream | null;
-  localVideoKind: VideoKind;
-  remoteStreams: Map<number, MediaStream>;
-  voice: VoiceChannelState;
-  onLeave: () => void;
-  onHide: () => void;
-  qualityLabel: string;
 }
 
 export function VideoStage({
   currentUser,
   participants,
-  localVideoStream,
-  localVideoKind,
-  remoteStreams,
   voice,
   onLeave,
   onHide,
   qualityLabel,
-}: VideoStageProps) {
+}: {
+  currentUser: User;
+  participants: VoiceParticipant[];
+  voice: VoiceChannelState;
+  onLeave: () => void;
+  onHide: () => void;
+  qualityLabel: string;
+}) {
   const stageRef = useRef<HTMLDivElement | null>(null);
-  const [focusedId, setFocusedId] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const remotes = useMemo(() => [...voice.remoteStreams.values()], [voice.remoteStreams]);
+  const streamFor = (userId: number, kind: "camera" | "screen") =>
+    remotes.find((item: RemoteVideoStream) => item.userId === userId && item.kind === kind)?.stream ?? null;
 
-  const sources = useMemo<VideoSource[]>(() => {
-    const nameOf = (userId: number) =>
-      participants.find((participant) => participant.user_id === userId)?.username ?? `#${userId}`;
-
-    const remote: VideoSource[] = Array.from(remoteStreams.entries())
-      .filter(([userId, stream]) => hasVideo(stream) && !voice.ignoredRemoteVideoIds.has(userId))
-      .map(([userId, stream]) => ({
-        id: `remote-${userId}`,
-        userId,
-        stream,
-        label: nameOf(userId),
-        muted: true,
-        mirror: false,
-        badge: "LIVE",
-      }));
-
-    const local =
-      localVideoStream && hasVideo(localVideoStream)
-        ? [
-            {
-              id: "local",
-              userId: null,
-              stream: localVideoStream,
-              label: `${currentUser.display_name || currentUser.username} (sen)`,
-              muted: true,
-              mirror: localVideoKind === "camera",
-              badge: localVideoKind === "screen" ? "EKRAN" : "KAMERA",
-            } satisfies VideoSource,
-          ]
-        : [];
-
-    // İzleyici için uzak yayın varsayılan odak, yalnızca kendi yayını varsa yerel görüntü odak olur.
-    return [...remote, ...local];
-  }, [
-    currentUser.display_name,
-    currentUser.username,
-    localVideoKind,
-    localVideoStream,
-    participants,
-    remoteStreams,
-    voice.ignoredRemoteVideoIds,
-  ]);
-
-  const pausedRemoteIds = Array.from(voice.ignoredRemoteVideoIds).filter((userId) =>
-    remoteStreams.has(userId),
-  );
-
-  const sourceIds = sources.map((source) => source.id).join("|");
-
-  useEffect(() => {
-    setFocusedId((current) =>
-      current && sources.some((source) => source.id === current) ? current : (sources[0]?.id ?? null),
-    );
-  }, [sourceIds]);
+  const tiles = [
+    {
+      key: "self",
+      name: `${currentUser.display_name || currentUser.username} (sen)`,
+      avatar: currentUser.avatar_url,
+      stream: voice.localCameraStream,
+      mirror: true,
+      speaking: false,
+    },
+    ...participants.map((participant) => ({
+      key: `user-${participant.user_id}`,
+      name: participant.username,
+      avatar: participant.avatar_url,
+      stream: voice.ignoredRemoteVideoIds.has(participant.user_id)
+        ? null
+        : streamFor(participant.user_id, "camera"),
+      mirror: false,
+      speaking: participant.speaking,
+      userId: participant.user_id,
+      paused: voice.ignoredRemoteVideoIds.has(participant.user_id),
+    })),
+    ...(voice.localScreenStream ? [{
+      key: "self-screen",
+      name: `${currentUser.display_name || currentUser.username} ekranı`,
+      avatar: null,
+      stream: voice.localScreenStream,
+      mirror: false,
+      speaking: false,
+      label: "EKRAN",
+    }] : []),
+    ...remotes.filter((item) =>
+      item.kind === "screen" &&
+      hasVideo(item.stream) &&
+      !voice.ignoredRemoteVideoIds.has(item.userId),
+    ).map((item) => ({
+      key: `screen-${item.userId}`,
+      name: `${participants.find((p) => p.user_id === item.userId)?.username ?? "Katılımcı"} ekranı`,
+      avatar: null,
+      stream: item.stream,
+      mirror: false,
+      speaking: false,
+      label: "EKRAN",
+      userId: item.userId,
+    })),
+  ];
 
   useEffect(() => {
-    const handleFullscreenChange = () => setIsFullscreen(document.fullscreenElement === stageRef.current);
-    document.addEventListener("fullscreenchange", handleFullscreenChange);
-    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    const handler = () => setIsFullscreen(document.fullscreenElement === stageRef.current);
+    document.addEventListener("fullscreenchange", handler);
+    return () => document.removeEventListener("fullscreenchange", handler);
   }, []);
 
-  if (sources.length === 0 && pausedRemoteIds.length === 0) return null;
-
-  const focused = sources.find((source) => source.id === focusedId) ?? sources[0] ?? null;
-  const nameOf = (userId: number) =>
-    participants.find((participant) => participant.user_id === userId)?.username ?? `#${userId}`;
-
   async function toggleFullscreen() {
-    const stage = stageRef.current;
-    if (!stage) return;
-    try {
-      if (document.fullscreenElement === stage) {
-        await document.exitFullscreen();
-      } else {
-        await stage.requestFullscreen();
-      }
-    } catch {
-      // Tarayıcı veya kullanıcı tam ekran isteğini engellerse mevcut düzen kullanılmaya devam eder.
-    }
+    if (!stageRef.current) return;
+    if (document.fullscreenElement) await document.exitFullscreen();
+    else await stageRef.current.requestFullscreen();
   }
 
   return (
-    <div className="video-stage" ref={stageRef}>
-      <div className="video-stage__ambient" />
-      <div className="video-stage__header">
-        <div>
-          <span className="video-stage__eyebrow">CANLI SAHNE</span>
-          <strong>{focused?.label ?? "Yayın izleme kapalı"}</strong>
-        </div>
-        <div className="video-stage__header-actions">
-          {focused?.userId ? (
-            <button
-              type="button"
-              className="video-stage__watch-toggle"
-              onClick={() => voice.toggleRemoteVideo(focused.userId!)}
-            >
-              İzlemeyi kapat · veri tasarrufu
-            </button>
-          ) : null}
-          <span className="video-stage__quality">
-            <span className="video-stage__live-dot" />
-            {qualityLabel}
-          </span>
-        </div>
+    <section className="video-stage" ref={stageRef}>
+      <header className="video-stage__header">
+        <div><span className="video-stage__eyebrow">SESLİ SAHNE</span><strong>{tiles.length} katılımcı/yayın</strong></div>
+        <span className="video-stage__quality"><span className="video-stage__live-dot" />{qualityLabel}</span>
+      </header>
+      <div className={`voice-grid voice-grid--${Math.min(tiles.length, 9)}`}>
+        {tiles.map(({ key, ...tile }) => (
+          <MediaTile
+            key={key}
+            {...tile}
+            onPause={"userId" in tile && tile.userId ? () => voice.toggleRemoteVideo(tile.userId!) : undefined}
+          />
+        ))}
       </div>
-
-      <div className="video-stage__viewport">
-        {focused ? (
-          <VideoTile {...focused} />
-        ) : (
-          <div className="video-stage__paused">
-            <strong>Görüntü aktarımı durduruldu</strong>
-            <span>Bu yayınlar yeniden açılana kadar internet kullanmaz.</span>
-          </div>
-        )}
-        {sources.length > 1 ? (
-          <div className="video-stage__filmstrip" aria-label="Diğer yayınlar">
-            {sources.map((source) => (
-              <VideoTile
-                key={source.id}
-                {...source}
-                compact
-                selected={source.id === focused?.id}
-                onSelect={() => setFocusedId(source.id)}
-              />
-            ))}
-          </div>
-        ) : null}
-        {pausedRemoteIds.length ? (
-          <div className="video-stage__paused-list" aria-label="İzlenmeyen yayınlar">
-            {pausedRemoteIds.map((userId) => (
-              <button key={userId} type="button" onClick={() => voice.toggleRemoteVideo(userId)}>
-                ▶ {nameOf(userId)} yayınını izle
-              </button>
-            ))}
-          </div>
-        ) : null}
+      <div className="video-stage__controls" aria-label="Görüşme kontrolleri">
+        <button className={voice.muted ? "stage-control stage-control--danger" : "stage-control"} onClick={voice.toggleMute}><Icon name={voice.muted ? "micOff" : "mic"} /><span>{voice.muted ? "Sesi aç" : "Sustur"}</span></button>
+        <button className={voice.deafened ? "stage-control stage-control--danger" : "stage-control"} onClick={voice.toggleDeafen}><Icon name={voice.deafened ? "headphonesOff" : "headphones"} /><span>{voice.deafened ? "Dinle" : "Sağırlaştır"}</span></button>
+        <button className={voice.cameraEnabled ? "stage-control stage-control--active" : "stage-control"} onClick={voice.toggleCamera}><Icon name="camera" /><span>Kamera</span></button>
+        <button className={voice.screenShareEnabled ? "stage-control stage-control--active" : "stage-control"} onClick={voice.toggleScreenShare}><Icon name="screen" /><span>Paylaş</span></button>
+        <button className="stage-control" onClick={onHide}><Icon name="hash" /><span>Sahneyi gizle</span></button>
+        <button className="stage-control" onClick={() => void toggleFullscreen()}><Icon name="screen" /><span>{isFullscreen ? "Küçült" : "Tam ekran"}</span></button>
+        <button className="stage-control stage-control--leave" onClick={onLeave}><Icon name="phone" /><span>Ayrıl</span></button>
       </div>
-
-      <StageControls
-        voice={voice}
-        isFullscreen={isFullscreen}
-        onToggleFullscreen={toggleFullscreen}
-        onLeave={onLeave}
-        onHide={onHide}
-      />
-    </div>
+    </section>
   );
 }

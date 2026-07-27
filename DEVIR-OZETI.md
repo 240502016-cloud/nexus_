@@ -287,3 +287,47 @@ docker compose up -d matrix backend ai-worker plugin-sandbox frontend
 
 Arkadaşın bilgisayarında önerilen yol yine `Arkadas-Sunucuyu-Guncelle.cmd`; sunucu yöneticisi tüm
 imajları yeniden oluşturduğu için Matrix spam ayarı ve `0006_social_graph` migration'ı da uygulanır.
+
+---
+
+## 10. 27 Temmuz 2026 — Zengin mesajlar, kalıcı ses oturumu ve dinamik sahne
+
+- Kanal ve birebir sohbetlerde fotoğraf/dosya yükleme eklendi. Dosyalar kalıcı
+  `attachment_data` Docker volume'unda tutulur; yükleme üst sınırı 25 MB'dir. Resimler lazy-load
+  önizlenir, diğer dosyalar güvenli indirme kartı olarak görünür.
+- Kullanıcı kendi kanal ve özel mesajlarını düzenleyebilir. Düzenleme Matrix `m.replace` ilişkisiyle
+  saklanır; geçmişte ayrı bir mesaj oluşturmaz ve gateway üzerinden diğer istemcilere anında yansır.
+- Kanal mesaj kutusu ve özel mesaj kutusu Shift+Enter ile satır açar, içeriğe göre büyür ve sekiz
+  satırdan sonra kendi içinde kaydırılır.
+- Kamera ve ekran paylaşımı iki ayrı, sırası sabit WebRTC transceiver üzerinden aynı anda çalışır.
+  Biri kapatılınca diğeri kesilmez. Kapanan kamera karesi ekranda donmuş kalmaz; profil fotoğrafı
+  veya kullanıcı baş harfleri geri gelir.
+- Sesli sahne kamera/yayın olmasa da tüm katılımcıları gösterir. Katılımcı sayısına göre 1x1, 2'li,
+  2x2 veya 3 sütunlu dinamik ızgaraya geçer; ekran paylaşımları ayrı canlı döşemedir.
+- Metin kanalına veya başka sunucunun metin kanalına gitmek ses oturumunu artık kapatmaz. Oturum
+  yalnız başka bir ses kanalına geçince, açıkça ayrılınca, atılınca veya tarayıcı kapanınca biter.
+- Uygulama içi sağ-üst mesaj bildirimleri kaldırıldı. Mesaj sesi ve sistem bildirimi yalnız sekme
+  arka plandayken çalışır; Rahatsız Etmeyin bütün bildirim yollarını kapatır. Yeni-mesaj aşağı oku
+  aynen korunmuştur.
+- Kalite/FPS ve durum/özel durum ana araç çubuğundan kaldırılıp Ayarlar'a taşındı. Kalite seçenekleri
+  Ayarlar → Ses ve Video altında 480p/720p/1080p ve 30/60 FPS olarak kalır.
+- Bot yönetimi, sunucu adı/açıklaması, sunucudan ayrılma ve sunucu silme tek temalı **Sunucu
+  Ayarları** penceresine taşındı. Bot artık sunucudan kaldırılabilir ve Matrix odalarından ayrılır.
+- Profil ekranına onay isteyen çıkış düğmesi eklendi. Ses, kanal, ayar, düzenleme, dosya ve yönetim
+  kontrolleri ortak modern SVG simge setine geçirildi; mute/deafen işaretleri ayrı ve çakışmasızdır.
+- Müzik botunun üretimde çalışmamasının iki nedeni düzeltildi: canlı WebRTC yöneticisiyle eski
+  çağrı sözleşmesi güncellendi ve çift-offer glare kaldırıldı. Core servisine erişmesi gereken
+  yerleşik `music`, `ai_assistant` ve `moderation` plugin'leri yalnız tam ad eşleşmeli güven listesiyle
+  yerelde; diğer tüm plugin'ler sandbox içinde çalışır. `music` artık açıkça bir bota bağlanmalıdır.
+
+### Deploy
+
+Migration yoktur; yeni kalıcı attachment volume Compose tarafından otomatik oluşturulur:
+
+```text
+docker compose build backend frontend
+docker compose up -d backend ai-worker plugin-sandbox frontend
+```
+
+Doğrulama: 24 backend testi, frontend TypeScript lint ve production build başarılı. Giriş ekranı
+uygulama içi tarayıcıda 16:9 görünümde ayrıca kontrol edildi.

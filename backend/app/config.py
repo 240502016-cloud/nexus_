@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     turn_auth_secret: str = ""
     turn_credential_ttl_seconds: int = 3600
 
+    attachment_dir: str = "/srv/attachments"
+    attachment_max_bytes: int = 25 * 1024 * 1024
+
     model_config = SettingsConfigDict(env_file="../.env", env_file_encoding="utf-8", extra="ignore")
 
     @property

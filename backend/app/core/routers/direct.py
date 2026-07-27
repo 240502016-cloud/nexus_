@@ -181,3 +181,53 @@ def send_direct_message(
         message.model_dump(),
     )
     return message
+
+
+@router.patch(
+    "/conversations/{conversation_id}/messages/{event_id}",
+    response_model=schemas.MessageRead,
+)
+def edit_direct_message(
+    conversation_id: int,
+    event_id: str,
+    payload: schemas.MessageEdit,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    friendship = _get_conversation(db, conversation_id, current_user.id)
+    if (
+        not friendship.matrix_room_id
+        or not current_user.matrix_access_token
+        or not current_user.matrix_user_id
+    ):
+        raise HTTPException(status_code=409, detail="Özel mesaj odası hazır değil")
+    try:
+        original = matrix_client.get_event(
+            current_user.matrix_access_token, friendship.matrix_room_id, event_id
+        )
+        if original.get("sender") != current_user.matrix_user_id:
+            raise HTTPException(status_code=403, detail="Yalnızca kendi mesajınızı düzenleyebilirsiniz")
+        matrix_client.edit_message(
+            current_user.matrix_access_token,
+            friendship.matrix_room_id,
+            event_id,
+            payload.content,
+        )
+    except HTTPException:
+        raise
+    except MatrixError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    message = schemas.MessageRead(
+        event_id=event_id,
+        sender=current_user.matrix_user_id,
+        content=payload.content,
+        edited=True,
+    )
+    friend = friendship.other_user(current_user.id)
+    notify_direct_message(
+        friendship.id,
+        {current_user.id, friend.id},
+        current_user.id,
+        message.model_dump(),
+    )
+    return message

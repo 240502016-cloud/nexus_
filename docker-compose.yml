@@ -235,6 +235,7 @@ services:
       MATRIX_HOMESERVER_URL: http://matrix:8008
       PLUGIN_EXECUTION_MODE: sandbox
       PLUGIN_SANDBOX_URL: http://plugin-sandbox:8091
+      ATTACHMENT_DIR: /srv/attachments
     depends_on:
       postgres:
         condition: service_healthy
@@ -264,6 +265,7 @@ services:
     volumes:
       # Profil fotoğrafları burada kalıcı saklanır (read-only kök fs'te yazılabilir tek yer).
       - avatar_data:/srv/avatars
+      - attachment_data:/srv/attachments
     security_opt:
       - no-new-privileges:true
     cpus: 2.0
@@ -346,3 +348,4 @@ volumes:
   caddy_data:
   caddy_config:
   avatar_data:
+  attachment_data:
