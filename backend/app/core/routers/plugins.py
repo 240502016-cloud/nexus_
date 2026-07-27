@@ -29,6 +29,7 @@ def list_plugins(current_user: User = Depends(get_current_user), db: Session = D
             commands=manifest.commands,
             installed=name in installed,
             enabled=bool(installed.get(name) and installed[name].enabled),
+            requires_bot_link=manifest.requires_bot_link,
         )
         for name, manifest in manifests.items()
     ]
@@ -61,6 +62,7 @@ def install_plugin(name: str, current_user: User = Depends(get_current_user), db
         commands=manifest.commands,
         installed=True,
         enabled=True,
+        requires_bot_link=manifest.requires_bot_link,
     )
 
 
@@ -79,7 +81,7 @@ def run_command(payload: schemas.PluginCommandRequest, current_user: User = Depe
     result = plugin_registry.get_handler(payload.command)
     if not result:
         raise HTTPException(status_code=404, detail=f"'{payload.command}' komutu için kurulu/etkin plugin yok")
-    plugin_name, handler = result
+    plugin_name, handler = result.plugin_name, result.handler
 
     context = PluginContext(
         command=payload.command, args=payload.args, user_id=current_user.id, username=current_user.username

@@ -7,8 +7,9 @@ from app.core import schemas
 from app.core.auth import get_current_user
 from app.core.authz import ensure_server_member, ensure_server_owner
 from app.core.matrix_client import MatrixError, matrix_client
-from app.core.models import Bot, BotServerLink, Server, User
+from app.core.models import Bot, BotPluginLink, BotServerLink, Plugin, Server, User
 from app.database import get_db
+from app.plugins_engine.loader import discover_manifests
 
 router = APIRouter(prefix="/bots", tags=["bots"])
 
@@ -102,3 +103,65 @@ def list_server_bots(
 
     links = db.query(BotServerLink).filter(BotServerLink.server_id == server_id).all()
     return [link.bot for link in links]
+
+
+def _get_owned_server_bot(db: Session, server_id: int, bot_id: int, current_user: User) -> Bot:
+    server = db.get(Server, server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="Sunucu bulunamadı")
+    ensure_server_owner(server, current_user)
+    link = db.get(BotServerLink, {"bot_id": bot_id, "server_id": server_id})
+    if not link:
+        raise HTTPException(status_code=404, detail="Bot bu sunucuda değil")
+    return link.bot
+
+
+@server_bots_router.post("/{bot_id}/plugins/{plugin_name}", status_code=201)
+def link_plugin_to_bot(
+    server_id: int,
+    bot_id: int,
+    plugin_name: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    bot = _get_owned_server_bot(db, server_id, bot_id, current_user)
+    manifest = discover_manifests().get(plugin_name)
+    record = db.query(Plugin).filter(Plugin.name == plugin_name, Plugin.enabled.is_(True)).first()
+    if not manifest or not record:
+        raise HTTPException(status_code=409, detail="Plugin önce kurulup etkinleştirilmeli")
+    if not manifest.requires_bot_link:
+        raise HTTPException(status_code=409, detail="Bu plugin bota özel bağlantı gerektirmiyor")
+
+    occupied = (
+        db.query(BotPluginLink)
+        .join(BotServerLink, BotServerLink.bot_id == BotPluginLink.bot_id)
+        .filter(
+            BotServerLink.server_id == server_id,
+            BotPluginLink.plugin_name == plugin_name,
+            BotPluginLink.bot_id != bot.id,
+        )
+        .first()
+    )
+    if occupied:
+        raise HTTPException(status_code=409, detail="Bu plugin sunucuda başka bir bota bağlı")
+
+    existing = db.get(BotPluginLink, {"bot_id": bot.id, "plugin_name": plugin_name})
+    if not existing:
+        db.add(BotPluginLink(bot_id=bot.id, plugin_name=plugin_name))
+        db.commit()
+    return {"status": "ok"}
+
+
+@server_bots_router.delete("/{bot_id}/plugins/{plugin_name}", status_code=204)
+def unlink_plugin_from_bot(
+    server_id: int,
+    bot_id: int,
+    plugin_name: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    bot = _get_owned_server_bot(db, server_id, bot_id, current_user)
+    link = db.get(BotPluginLink, {"bot_id": bot.id, "plugin_name": plugin_name})
+    if link:
+        db.delete(link)
+        db.commit()

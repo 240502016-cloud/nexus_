@@ -34,6 +34,12 @@ plugins/<plugin_adi>/
 `entry_point` formatı: `"<modül_dosyası>:<fonksiyon_adı>"`, örn. `"main:handle_command"`.
 Fonksiyon bir `app.plugins_engine.context.PluginContext` alır, bir string döner.
 
+Manifestteki ek güvenli yönlendirme alanları:
+
+- `requires_bot_link`: plugin yalnız `BotPluginLink` ile bağlandığı özel botta çalışır.
+- `private_commands`: komut Matrix'e yazılmadan doğrudan bot motoruna iletilir.
+- `colon_commands`: `ekleçark: elma` gibi prefixsiz iki nokta söz dizimine izin verir.
+
 ## Yükleme akışı (`backend/app/plugins_engine/`)
 
 1. `loader.discover_manifests()` — bu klasörü tarar, her `plugin.json`'ı okur/doğrular
@@ -76,6 +82,10 @@ hata (import veya çalışma zamanı) sadece o plugine yansır, Core API çökme
   sessiz kalmıyor. `/muzik-sonraki` ve `/muzik-ayril` da doğrulandı. Bu çalışma sırasında
   `useVoiceChannel.ts`'de mikrofonsuz (sadece dinleyici) katılımı engelleyen iki pre-existing
   bug da düzeltildi (bkz. ROADMAP.md Aşama 6).
+- **`chance_games`** — bota özel bağlanan Şans Ustası: etkileşimli davet kartlı Taş Kağıt
+  Makas, Yazı Tura ve kullanıcı başına kalıcı/ağırlıklı Çarkıfelek. Gizli hamle komutları
+  Matrix'e hiç gönderilmez; durum Core API tarafından PostgreSQL'de tutulur. Ayrıntılar:
+  [`chance_games/README.md`](chance_games/README.md).
 
 Hepsi Bot Engine üzerinden gerçek uçtan uca test edildi: bir bot sunucuya eklendi, kanala
 `/komut` yazıldı, bot kendi gerçek Matrix hesabıyla (ya da `music` için kendi WebRTC bağlantısıyla)
@@ -86,7 +96,7 @@ Bot motoru bölümü).
 
 - `permissions` alanı şu an sadece dokümantasyon amaçlı; gerçek bir onay/izin uygulaması yok
   (herhangi bir giriş yapmış kullanıcı plugin kurup kaldırabiliyor — platform admin rolü eksik)
-- `@bot` mention formatı (şu an sadece `/komut` prefix'i çalışıyor)
+- Plugin izinleri için kullanıcıya kurulum öncesi ayrıntılı onay ekranı
 > Production sandbox'ında backend/Matrix/DB'ye doğrudan import yapan plugin'ler, açıkça
 > tanımlı güvenli Plugin API'ye taşınana kadar çalıştırılmaz. Mevcut uçtan uca senaryolar
 > `PLUGIN_EXECUTION_MODE=local` geliştirme moduna aittir.

@@ -122,6 +122,16 @@ export const coreApi = {
     request<Bot>("/bots", { method: "POST", body: JSON.stringify({ name, command_prefix: commandPrefix }) }),
   addBotToServer: (botId: number, serverId: number) =>
     request<{ status: string }>(`/bots/${botId}/servers/${serverId}`, { method: "POST" }),
+  linkPluginToBot: (serverId: number, botId: number, pluginName: string) =>
+    request<{ status: string }>(
+      `/servers/${serverId}/bots/${botId}/plugins/${encodeURIComponent(pluginName)}`,
+      { method: "POST" },
+    ),
+  unlinkPluginFromBot: (serverId: number, botId: number, pluginName: string) =>
+    request<void>(
+      `/servers/${serverId}/bots/${botId}/plugins/${encodeURIComponent(pluginName)}`,
+      { method: "DELETE" },
+    ),
 
   listChannels: (serverId: number) => request<Channel[]>(`/servers/${serverId}/channels`),
   createChannel: (serverId: number, name: string, type: ChannelType = "text") =>

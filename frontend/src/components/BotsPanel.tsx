@@ -16,10 +16,12 @@ export function BotsPanel({ serverId, serverName, canManageBots, onClose }: Bots
   const [plugins, setPlugins] = useState<PluginManifest[]>([]);
   const [loading, setLoading] = useState(true);
   const [botName, setBotName] = useState("");
+  const [selectedPluginName, setSelectedPluginName] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [pluginBusy, setPluginBusy] = useState<string | null>(null);
+  const [botPluginBusy, setBotPluginBusy] = useState<string | null>(null);
 
   function loadAll() {
     setLoading(true);
@@ -44,8 +46,16 @@ export function BotsPanel({ serverId, serverName, canManageBots, onClose }: Bots
     try {
       const bot = await coreApi.createBot(trimmed);
       await coreApi.addBotToServer(bot.id, serverId);
-      setNotice(`${trimmed} botu oluşturuldu ve sunucuya eklendi.`);
+      if (selectedPluginName) {
+        await coreApi.linkPluginToBot(serverId, bot.id, selectedPluginName);
+      }
+      setNotice(
+        selectedPluginName
+          ? `${trimmed} botu oluşturuldu; ${selectedPluginName} bağlandı.`
+          : `${trimmed} botu oluşturuldu ve sunucuya eklendi.`,
+      );
       setBotName("");
+      setSelectedPluginName("");
       loadAll();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Bot oluşturulamadı");
@@ -53,6 +63,29 @@ export function BotsPanel({ serverId, serverName, canManageBots, onClose }: Bots
       setCreating(false);
     }
   }
+
+  async function handleToggleBotPlugin(bot: Bot, plugin: PluginManifest) {
+    const busyKey = `${bot.id}:${plugin.name}`;
+    setBotPluginBusy(busyKey);
+    setError(null);
+    setNotice(null);
+    try {
+      if (bot.plugin_names.includes(plugin.name)) {
+        await coreApi.unlinkPluginFromBot(serverId, bot.id, plugin.name);
+        setNotice(`${plugin.name}, ${bot.name} botundan kaldırıldı.`);
+      } else {
+        await coreApi.linkPluginToBot(serverId, bot.id, plugin.name);
+        setNotice(`${plugin.name}, ${bot.name} botuna bağlandı.`);
+      }
+      loadAll();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Bot plugin bağlantısı değiştirilemedi");
+    } finally {
+      setBotPluginBusy(null);
+    }
+  }
+
+  const dedicatedPlugins = plugins.filter((plugin) => plugin.enabled && plugin.requires_bot_link);
 
   async function handleTogglePlugin(plugin: PluginManifest) {
     setPluginBusy(plugin.name);
@@ -92,8 +125,34 @@ export function BotsPanel({ serverId, serverName, canManageBots, onClose }: Bots
               ) : (
                 <ul className="members-panel__list">
                   {bots.map((bot) => (
-                    <li key={bot.id}>
-                      {bot.name} <span className="bots-panel__prefix">({bot.command_prefix})</span>
+                    <li key={bot.id} className="bots-panel__bot-card">
+                      <div>
+                        <strong>{bot.name}</strong>{" "}
+                        <span className="bots-panel__prefix">({bot.command_prefix})</span>
+                        <div className="bots-panel__plugin-commands">
+                          {bot.plugin_names.length > 0
+                            ? `Bağlı: ${bot.plugin_names.join(", ")}`
+                            : "Bota özel plugin bağlı değil"}
+                        </div>
+                      </div>
+                      {canManageBots && dedicatedPlugins.length > 0 ? (
+                        <div className="bots-panel__bot-actions">
+                          {dedicatedPlugins.map((plugin) => {
+                            const linked = bot.plugin_names.includes(plugin.name);
+                            const busyKey = `${bot.id}:${plugin.name}`;
+                            return (
+                              <button
+                                type="button"
+                                key={plugin.name}
+                                disabled={botPluginBusy === busyKey}
+                                onClick={() => handleToggleBotPlugin(bot, plugin)}
+                              >
+                                {linked ? `${plugin.name} kaldır` : `${plugin.name} bağla`}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : null}
                     </li>
                   ))}
                 </ul>
@@ -109,6 +168,23 @@ export function BotsPanel({ serverId, serverName, canManageBots, onClose }: Bots
                   onChange={(event) => setBotName(event.target.value)}
                   placeholder="bot-adi"
                 />
+                {dedicatedPlugins.length > 0 ? (
+                  <>
+                    <label htmlFor="new-bot-plugin">Bota özel plugin (isteğe bağlı)</label>
+                    <select
+                      id="new-bot-plugin"
+                      value={selectedPluginName}
+                      onChange={(event) => setSelectedPluginName(event.target.value)}
+                    >
+                      <option value="">Plugin bağlama</option>
+                      {dedicatedPlugins.map((plugin) => (
+                        <option key={plugin.name} value={plugin.name}>
+                          {plugin.name}
+                        </option>
+                      ))}
+                    </select>
+                  </>
+                ) : null}
                 <button type="submit" disabled={creating || !botName.trim()}>
                   {creating ? "Oluşturuluyor..." : "Oluştur"}
                 </button>
@@ -127,6 +203,11 @@ export function BotsPanel({ serverId, serverName, canManageBots, onClose }: Bots
                       <div>{plugin.name}</div>
                       {plugin.commands.length > 0 ? (
                         <div className="bots-panel__plugin-commands">{plugin.commands.join(", ")}</div>
+                      ) : null}
+                      {plugin.requires_bot_link ? (
+                        <div className="bots-panel__plugin-note">
+                          Kurulduktan sonra yukarıdaki bir bota bağlanmalıdır.
+                        </div>
                       ) : null}
                     </div>
                     <button onClick={() => handleTogglePlugin(plugin)} disabled={pluginBusy === plugin.name}>

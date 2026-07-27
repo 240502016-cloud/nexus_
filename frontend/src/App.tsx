@@ -433,7 +433,11 @@ export default function App() {
     try {
       const sent = await coreApi.sendMessage(channelId, content, clientId);
       if (activeChannelIdRef.current === channelId) {
-        setMessages((current) => mergeIncomingMessage(current, sent));
+        setMessages((current) =>
+          sent.hidden
+            ? current.filter((message) => message.client_id !== clientId)
+            : mergeIncomingMessage(current, sent),
+        );
       }
     } catch (err) {
       if (activeChannelIdRef.current === channelId) {

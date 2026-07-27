@@ -181,3 +181,41 @@ Bu güncelleme hem backend hem frontend içerir:
 docker compose build backend frontend
 docker compose up -d backend ai-worker plugin-sandbox frontend
 ```
+
+---
+
+## 7. 27 Temmuz 2026 — Şans Ustası oyun botu
+
+### Eklenen oyunlar
+- **Taş · Kağıt · Makas:** `/takama @kullanıcı` daveti, ekranda Kabul/Reddet kartı,
+  `/kabul <kod>` alternatifi ve kabulden sonra otomatik komut rehberi.
+- `/taş`, `/kağıt`, `/makas` hamleleri **Matrix'e hiç yazılmaz**. İlk oyuncunun seçimi
+  rakip tamamlayana kadar PostgreSQL'de gizli kalır; iki hamle aynı anda açıklanır.
+- **Yazı · Tura:** `/yazıtura` tek kişilik; `/yazıtura @kullanıcı` davetli düello.
+- **Çarkıfelek:** kullanıcı+kanal başına kalıcı çark; `/ekleçark`, `ekleçark: elma`,
+  `/çarkliste`, `/çıkarçark`, `/temizleçark`, `/çark`. Ağırlıklı seçenek:
+  `/ekleçark elma | 3`.
+
+### Güvenlik / dayanıklılık
+- Rastgelelik sunucu tarafında `secrets` ile sağlanır; harici/ücretli API yoktur.
+- Davet 2 dakika, aktif karşılaşma 5 dakika zaman aşımlıdır.
+- Kullanıcı aynı anda tek açık oyunda olabilir; kendine davet ve sunucu dışı etiket reddedilir.
+- Oyunlar ve çarklar backend yeniden başladığında kaybolmaz (`0005_chance_games` migration).
+- `chance_games` yalnız açıkça bağlandığı botta çalışır; aynı sunucuda ikinci bağ engellenir.
+- Yapılandırılmış oyun kartları yalnız backend'in `is_bot` olarak doğruladığı mesajlarda açılır.
+- Sandbox DB anahtarı almaz; yalnız doğrulanmış eylem zarfı Core oyun servisine iletilir.
+
+### Yönetim ekranından etkinleştirme
+1. **Botlar → Platform pluginleri → `chance_games` → Kur**
+2. Yeni bot oluştururken **Bota özel plugin: `chance_games`** seç; veya mevcut botta
+   **chance_games bağla** düğmesini kullan.
+3. Sohbette `/şans` ile tam rehberi aç.
+
+### Deploy (migration içerir)
+```
+docker compose build backend frontend
+docker compose run --rm migrate
+docker compose up -d backend ai-worker plugin-sandbox frontend
+```
+
+Doğrulama: 16 backend testi, frontend TypeScript lint ve production build başarılı.

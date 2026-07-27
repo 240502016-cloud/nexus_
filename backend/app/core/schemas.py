@@ -147,6 +147,10 @@ class MessageRead(BaseModel):
     content: str
     origin_server_ts: int | None = None
     client_id: str | None = None
+    is_bot: bool = False
+    # Özel bot komutları (örn. gizli oyun hamlesi) Matrix'e yazılmaz. İstemci bu yanıtı
+    # alınca iyimser komut balonunu kaldırır.
+    hidden: bool = False
 
 
 # ---- Plugin ----
@@ -157,10 +161,11 @@ class PluginManifestRead(BaseModel):
     name: str
     version: str
     description: str | None = None
-    permissions: list[str] = []
-    commands: list[str] = []
+    permissions: list[str] = Field(default_factory=list)
+    commands: list[str] = Field(default_factory=list)
     installed: bool = False
     enabled: bool = False
+    requires_bot_link: bool = False
 
 
 class PluginCommandRequest(BaseModel):
@@ -191,3 +196,4 @@ class BotRead(BaseModel):
     matrix_user_id: str | None = None
     is_active: bool
     created_at: datetime
+    plugin_names: list[str] = Field(default_factory=list)

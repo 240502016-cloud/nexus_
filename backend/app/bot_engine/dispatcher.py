@@ -5,10 +5,11 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 from app.core.matrix_client import MatrixError, matrix_client
-from app.core.models import Bot, BotServerLink, Channel
+from app.core.models import Bot, BotPluginLink, BotServerLink, Channel
 from app.core.rate_limit import RateLimiter
 from app.plugins_engine.context import PluginContext
-from app.plugins_engine.loader import plugin_registry
+from app.plugins_engine.loader import RegisteredCommand, plugin_registry
+from app.services.chance_games import handle_chance_command, parse_action
 from app.services.ollama.models import QueuedAiResponse
 
 # Kullanıcı başına 10 saniyede en fazla 5 komut - plugin'lerin (özellikle Ollama gibi
@@ -54,6 +55,15 @@ def parse_command(content: str, prefix: str) -> tuple[str, str] | None:
     if not body:
         return None
     command, _, args = body.partition(" ")
+    return command.rstrip(":"), args.strip()
+
+
+def parse_colon_command(content: str) -> tuple[str, str] | None:
+    """Açıkça izin veren pluginler için ``ekleçark: elma`` söz dizimini ayrıştırır."""
+    command, separator, args = content.partition(":")
+    command = command.strip()
+    if not separator or not command or not args.strip() or any(char.isspace() for char in command):
+        return None
     return command, args.strip()
 
 
@@ -73,6 +83,15 @@ def parse_mention(content: str, bot_names: list[str]) -> tuple[str, str] | None:
     return None
 
 
+def _bot_can_run(db: Session, bot: Bot, entry: RegisteredCommand) -> bool:
+    if not entry.requires_bot_link:
+        return True
+    return (
+        db.get(BotPluginLink, {"bot_id": bot.id, "plugin_name": entry.plugin_name})
+        is not None
+    )
+
+
 def _run_command(
     db: Session, bot: Bot, event: MessageEvent, command: str, args: str
 ) -> BotReply:
@@ -82,7 +101,7 @@ def _run_command(
     elif not _command_limiter.allow(str(event.sender_id)):
         output = "Çok hızlı komut gönderiyorsunuz, birkaç saniye bekleyin."
     else:
-        _plugin_name, handler = handler_entry
+        command = handler_entry.command
         context = PluginContext(
             command=command,
             args=args,
@@ -95,14 +114,19 @@ def _run_command(
             bot_name=bot.name,
         )
         try:
-            raw_output = handler(context)
+            raw_output = handler_entry.handler(context)
             if isinstance(raw_output, QueuedAiResponse):
                 return BotReply(
                     bot_name=bot.name,
                     content=f"AI isteği kuyruğa alındı (job_id={raw_output.job_id}).",
                     send_matrix=False,
                 )
-            output = str(raw_output)
+            if handler_entry.plugin_name == "chance_games" and parse_action(
+                raw_output, command, args
+            ):
+                output = handle_chance_command(db, context)
+            else:
+                output = str(raw_output)
         except Exception as exc:  # plugin kodu güvenilmez; botun cevap veremediğini bildir
             output = f"({bot.name} hata: {exc})"
 
@@ -119,6 +143,38 @@ def _run_command(
         event_id=event_id,
         matrix_user_id=bot.matrix_user_id,
     )
+
+
+def is_private_message_event(db: Session, event: MessageEvent) -> bool:
+    """Mesajın Matrix'e hiç yazılmadan çalıştırılması gereken bot komutu olup olmadığını söyler."""
+    bot_links = [
+        link
+        for link in db.query(BotServerLink).filter(
+            BotServerLink.server_id == event.channel.server_id
+        )
+        if link.bot.is_active
+    ]
+    if not bot_links:
+        return False
+
+    mention = parse_mention(event.content, [link.bot.name for link in bot_links])
+    if mention:
+        mentioned_name, remainder = mention
+        first_word, _, _rest = remainder.partition(" ")
+        entry = plugin_registry.get_handler(first_word.rstrip(":")) if first_word else None
+        bot = next(
+            link.bot for link in bot_links if link.bot.name.casefold() == mentioned_name.casefold()
+        )
+        return bool(entry and entry.is_private and _bot_can_run(db, bot, entry))
+
+    for link in bot_links:
+        parsed = parse_command(event.content, link.bot.command_prefix)
+        if not parsed:
+            continue
+        entry = plugin_registry.get_handler(parsed[0])
+        if entry and entry.is_private and _bot_can_run(db, link.bot, entry):
+            return True
+    return False
 
 
 def handle_message_event(db: Session, event: MessageEvent) -> list[BotReply]:
@@ -143,24 +199,38 @@ def handle_message_event(db: Session, event: MessageEvent) -> list[BotReply]:
         bot = next(link.bot for link in bot_links if link.bot.name.lower() == mentioned_name.lower())
 
         first_word, _, rest = remainder.partition(" ")
-        if first_word and plugin_registry.get_handler(first_word):
-            command, args = first_word, rest.strip()
-        elif plugin_registry.get_handler(_FREEFORM_FALLBACK_COMMAND):
-            command, args = _FREEFORM_FALLBACK_COMMAND, remainder
+        entry = plugin_registry.get_handler(first_word.rstrip(":")) if first_word else None
+        if entry and _bot_can_run(db, bot, entry):
+            command, args = entry.command, rest.strip()
         else:
-            return [BotReply(bot_name=bot.name, content=f"'{remainder}' komutunu tanımıyorum.")]
+            fallback = plugin_registry.get_handler(_FREEFORM_FALLBACK_COMMAND)
+            if fallback and _bot_can_run(db, bot, fallback):
+                command, args = fallback.command, remainder
+            else:
+                return []
 
         return [_run_command(db, bot, event, command, args)]
 
     replies: list[BotReply] = []
+    handled_dedicated_plugins: set[str] = set()
     for link in bot_links:
         bot = link.bot
         parsed = parse_command(event.content, bot.command_prefix)
         if not parsed:
+            candidate = parse_colon_command(event.content)
+            candidate_entry = plugin_registry.get_handler(candidate[0]) if candidate else None
+            if candidate and candidate_entry and candidate_entry.allow_colon_syntax:
+                parsed = candidate
+        if not parsed:
             continue
         command, args = parsed
-        if not plugin_registry.get_handler(command):
+        entry = plugin_registry.get_handler(command)
+        if not entry or not _bot_can_run(db, bot, entry):
             continue
-        replies.append(_run_command(db, bot, event, command, args))
+        if entry.requires_bot_link and entry.plugin_name in handled_dedicated_plugins:
+            continue
+        replies.append(_run_command(db, bot, event, entry.command, args))
+        if entry.requires_bot_link:
+            handled_dedicated_plugins.add(entry.plugin_name)
 
     return replies

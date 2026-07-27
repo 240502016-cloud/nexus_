@@ -3,6 +3,25 @@ import type { FormEvent } from "react";
 
 import type { Channel, Message } from "../types";
 
+const GAME_EVENT_PREFIX = "NEXUS_GAME_EVENT:";
+
+interface GameMessageEvent {
+  type: string;
+  challenge_id?: string;
+  game?: string;
+  game_label?: string;
+  challenger?: string;
+  opponent?: string;
+  result?: string;
+  winner?: string | null;
+  entry_count?: number;
+}
+
+interface ParsedGameMessage {
+  event: GameMessageEvent;
+  body: string;
+}
+
 interface ChatAreaProps {
   channel: Channel | undefined;
   messages: Message[];
@@ -17,6 +36,32 @@ function displayName(matrixUserId: string): string {
   return matrixUserId.replace(/^@/, "").split(":")[0];
 }
 
+function parseGameMessage(content: string): ParsedGameMessage | null {
+  if (!content.startsWith(GAME_EVENT_PREFIX)) return null;
+  const [header, ...bodyLines] = content.split("\n");
+  try {
+    const event = JSON.parse(header.slice(GAME_EVENT_PREFIX.length)) as GameMessageEvent;
+    if (!event || typeof event.type !== "string") return null;
+    return { event, body: bodyLines.join("\n") };
+  } catch {
+    return null;
+  }
+}
+
+function gameCardTitle(event: GameMessageEvent): string {
+  if (event.type === "invite") return "Düello daveti";
+  if (event.type === "accepted") return "Karşılaşma başladı";
+  if (event.type === "move_locked") return "Hamle kilitlendi";
+  if (event.type === "result" && event.game === "rps") return "Hamleler açıldı";
+  if (event.type === "result" && event.game === "coin") return "Yazı · Tura";
+  if (event.type === "wheel_result") return "Çarkıfelek sonucu";
+  if (event.type === "wheel_updated") return "Çark güncellendi";
+  if (event.type === "rejected") return "Davet reddedildi";
+  if (event.type === "cancelled") return "Davet iptal edildi";
+  if (event.type === "expired") return "Süre doldu";
+  return "Şans Ustası";
+}
+
 export function ChatArea({
   channel,
   messages,
@@ -26,6 +71,7 @@ export function ChatArea({
   onRetryMessage,
 }: ChatAreaProps) {
   const [draft, setDraft] = useState("");
+  const [gameActionBusy, setGameActionBusy] = useState<string | null>(null);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -38,6 +84,32 @@ export function ChatArea({
 
   // API mesajları yeniden eskiye döner; sohbet için eskiden yeniye çeviriyoruz.
   const ordered = [...messages].reverse();
+  const parsedMessages = ordered.map((message) => ({
+    message,
+    // Yapılandırılmış kart protokolü yalnızca backend'in doğruladığı gerçek bot mesajlarında
+    // yorumlanır; normal kullanıcı aynı prefix'i yazarak sahte davet kartı üretemez.
+    gameMessage: message.is_bot ? parseGameMessage(message.content) : null,
+  }));
+  const resolvedChallengeIds = new Set(
+    parsedMessages
+      .filter(({ gameMessage }) =>
+        ["accepted", "result", "rejected", "cancelled", "expired"].includes(
+          gameMessage?.event.type ?? "",
+        ),
+      )
+      .map(({ gameMessage }) => gameMessage?.event.challenge_id)
+      .filter((id): id is string => Boolean(id)),
+  );
+  const currentUsername = currentMatrixUserId ? displayName(currentMatrixUserId).toLocaleLowerCase("tr") : "";
+
+  async function runGameAction(challengeId: string, command: string) {
+    setGameActionBusy(`${challengeId}:${command}`);
+    try {
+      await onSendMessage(command);
+    } finally {
+      setGameActionBusy(null);
+    }
+  }
 
   return (
     <section className="chat-area">
@@ -48,7 +120,7 @@ export function ChatArea({
         {!channel ? null : ordered.length === 0 ? (
           <p className="chat-area__placeholder">Henüz mesaj yok. İlk mesajı sen yaz.</p>
         ) : (
-          ordered.map((message) => {
+          parsedMessages.map(({ message, gameMessage }) => {
             const own = message.sender === currentMatrixUserId || Boolean(message.delivery_status);
             const className = [
               "chat-message",
@@ -61,7 +133,76 @@ export function ChatArea({
             return (
               <div key={message.event_id} className={className}>
                 <span className="chat-message__sender">{displayName(message.sender)}</span>
-                <span className="chat-message__content">{message.content || "(silindi)"}</span>
+                {gameMessage ? (
+                  <div
+                    className={`chance-card chance-card--${gameMessage.event.game ?? gameMessage.event.type}`}
+                  >
+                    <div className="chance-card__eyebrow">
+                      <span className="chance-card__icon">
+                        {gameMessage.event.game === "wheel"
+                          ? "🎡"
+                          : gameMessage.event.game === "coin"
+                            ? "🪙"
+                            : "🎲"}
+                      </span>
+                      {gameCardTitle(gameMessage.event)}
+                    </div>
+                    <div className="chance-card__body">{gameMessage.body}</div>
+                    {gameMessage.event.type === "invite" && gameMessage.event.challenge_id ? (
+                      resolvedChallengeIds.has(gameMessage.event.challenge_id) ? (
+                        <span className="chance-card__status">Davet yanıtlandı</span>
+                      ) : gameMessage.event.opponent?.toLocaleLowerCase("tr") === currentUsername ? (
+                        <div className="chance-card__actions">
+                          <button
+                            type="button"
+                            disabled={gameActionBusy !== null}
+                            onClick={() =>
+                              runGameAction(
+                                gameMessage.event.challenge_id!,
+                                `/kabul ${gameMessage.event.challenge_id}`,
+                              )
+                            }
+                          >
+                            Kabul et
+                          </button>
+                          <button
+                            type="button"
+                            className="chance-card__secondary"
+                            disabled={gameActionBusy !== null}
+                            onClick={() =>
+                              runGameAction(
+                                gameMessage.event.challenge_id!,
+                                `/reddet ${gameMessage.event.challenge_id}`,
+                              )
+                            }
+                          >
+                            Reddet
+                          </button>
+                        </div>
+                      ) : gameMessage.event.challenger?.toLocaleLowerCase("tr") === currentUsername ? (
+                        <div className="chance-card__actions">
+                          <button
+                            type="button"
+                            className="chance-card__secondary"
+                            disabled={gameActionBusy !== null}
+                            onClick={() =>
+                              runGameAction(
+                                gameMessage.event.challenge_id!,
+                                `/iptal ${gameMessage.event.challenge_id}`,
+                              )
+                            }
+                          >
+                            Daveti iptal et
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="chance-card__status">Rakibin yanıtı bekleniyor</span>
+                      )
+                    ) : null}
+                  </div>
+                ) : (
+                  <span className="chat-message__content">{message.content || "(silindi)"}</span>
+                )}
                 {message.delivery_status === "sending" ? (
                   <span className="chat-message__delivery">Gönderiliyor…</span>
                 ) : message.delivery_status === "failed" && message.client_id ? (

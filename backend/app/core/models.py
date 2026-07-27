@@ -3,7 +3,20 @@ from __future__ import annotations
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, Enum as SAEnum, ForeignKey, Integer, String, Table, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Enum as SAEnum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Table,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.permissions import Permission
@@ -137,6 +150,9 @@ class Plugin(Base):
     version: Mapped[str] = mapped_column(String(32))
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     installed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    bot_links: Mapped[list["BotPluginLink"]] = relationship(
+        back_populates="plugin", cascade="all, delete-orphan"
+    )
 
 
 class Bot(Base):
@@ -156,6 +172,13 @@ class Bot(Base):
     server_links: Mapped[list["BotServerLink"]] = relationship(
         back_populates="bot", cascade="all, delete-orphan"
     )
+    plugin_links: Mapped[list["BotPluginLink"]] = relationship(
+        back_populates="bot", cascade="all, delete-orphan"
+    )
+
+    @property
+    def plugin_names(self) -> list[str]:
+        return sorted(link.plugin_name for link in self.plugin_links)
 
 
 class BotServerLink(Base):
@@ -170,3 +193,71 @@ class BotServerLink(Base):
 
     bot: Mapped["Bot"] = relationship(back_populates="server_links")
     server: Mapped["Server"] = relationship()
+
+
+class BotPluginLink(Base):
+    """Bota özel plugin bağı; şans oyunları gibi bot kimliği gerektiren pluginler içindir."""
+
+    __tablename__ = "bot_plugin_links"
+
+    bot_id: Mapped[int] = mapped_column(ForeignKey("bots.id", ondelete="CASCADE"), primary_key=True)
+    plugin_name: Mapped[str] = mapped_column(
+        ForeignKey("plugins.name", ondelete="CASCADE"), primary_key=True
+    )
+    linked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    bot: Mapped["Bot"] = relationship(back_populates="plugin_links")
+    plugin: Mapped["Plugin"] = relationship(back_populates="bot_links")
+
+
+class ChanceGameSession(Base):
+    """İki oyunculu şans oyunu daveti ve gizli hamlelerinin kalıcı durumu."""
+
+    __tablename__ = "chance_game_sessions"
+    __table_args__ = (
+        Index("ix_chance_game_open", "server_id", "status"),
+        Index("ix_chance_game_participants", "challenger_id", "opponent_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(String(16), unique=True, index=True)
+    game_type: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"))
+    channel_id: Mapped[int] = mapped_column(ForeignKey("channels.id", ondelete="CASCADE"))
+    challenger_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    opponent_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    challenger_move: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    opponent_move: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    outcome: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    challenger: Mapped["User"] = relationship(foreign_keys=[challenger_id])
+    opponent: Mapped["User"] = relationship(foreign_keys=[opponent_id])
+    server: Mapped["Server"] = relationship()
+    channel: Mapped["Channel"] = relationship()
+
+
+class ChanceWheel(Base):
+    """Her kullanıcı ve kanal için ayrı, yeniden başlatmada kaybolmayan çark."""
+
+    __tablename__ = "chance_wheels"
+    __table_args__ = (
+        UniqueConstraint("channel_id", "owner_id", name="uq_chance_wheel_channel_owner"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"))
+    channel_id: Mapped[int] = mapped_column(ForeignKey("channels.id", ondelete="CASCADE"))
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    entries: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    owner: Mapped["User"] = relationship()
+    server: Mapped["Server"] = relationship()
+    channel: Mapped["Channel"] = relationship()

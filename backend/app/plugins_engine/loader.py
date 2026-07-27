@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 from typing import Callable
@@ -20,6 +21,16 @@ class PluginLoadError(RuntimeError):
 
 
 _ENTRY_POINT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*:[A-Za-z_][A-Za-z0-9_]*$")
+
+
+@dataclass(frozen=True)
+class RegisteredCommand:
+    command: str
+    plugin_name: str
+    handler: Callable
+    is_private: bool = False
+    requires_bot_link: bool = False
+    allow_colon_syntax: bool = False
 
 
 def discover_manifests() -> dict[str, PluginManifest]:
@@ -89,7 +100,7 @@ class PluginRegistry:
     """
 
     def __init__(self) -> None:
-        self._handlers: dict[str, tuple[str, Callable]] = {}  # command -> (plugin_name, handler)
+        self._handlers: dict[str, RegisteredCommand] = {}
         self._loaded_plugins: set[str] = set()
 
     def load(self, manifest: PluginManifest) -> None:
@@ -100,21 +111,33 @@ class PluginRegistry:
             if settings.plugin_execution_mode == "local"
             else _sandbox_handler(manifest)
         )
+        private_commands = {command.casefold() for command in manifest.private_commands}
+        colon_commands = {command.casefold() for command in manifest.colon_commands}
         for command in manifest.commands:
-            self._handlers[command] = (manifest.name, handler)
+            normalized = command.casefold()
+            self._handlers[normalized] = RegisteredCommand(
+                command=command,
+                plugin_name=manifest.name,
+                handler=handler,
+                is_private=normalized in private_commands,
+                requires_bot_link=manifest.requires_bot_link,
+                allow_colon_syntax=normalized in colon_commands,
+            )
         self._loaded_plugins.add(manifest.name)
 
     def unload(self, plugin_name: str) -> None:
         self._handlers = {
-            command: (name, handler) for command, (name, handler) in self._handlers.items() if name != plugin_name
+            command: entry
+            for command, entry in self._handlers.items()
+            if entry.plugin_name != plugin_name
         }
         self._loaded_plugins.discard(plugin_name)
 
     def is_loaded(self, plugin_name: str) -> bool:
         return plugin_name in self._loaded_plugins
 
-    def get_handler(self, command: str) -> tuple[str, Callable] | None:
-        return self._handlers.get(command)
+    def get_handler(self, command: str) -> RegisteredCommand | None:
+        return self._handlers.get(command.casefold())
 
 
 plugin_registry = PluginRegistry()

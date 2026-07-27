@@ -59,6 +59,8 @@ export interface Message {
   content: string;
   origin_server_ts: number | null;
   client_id?: string | null;
+  hidden?: boolean;
+  is_bot?: boolean;
   // Yalnızca istemci tarafındaki iyimser mesajlarda kullanılır; API snapshot'larında bulunmaz.
   delivery_status?: "sending" | "failed";
 }
@@ -70,6 +72,7 @@ export interface Bot {
   matrix_user_id: string | null;
   is_active: boolean;
   created_at: string;
+  plugin_names: string[];
 }
 
 export interface PluginManifest {
@@ -80,6 +83,7 @@ export interface PluginManifest {
   commands: string[];
   installed: boolean;
   enabled: boolean;
+  requires_bot_link: boolean;
 }
 
 export interface LoginResponse {
