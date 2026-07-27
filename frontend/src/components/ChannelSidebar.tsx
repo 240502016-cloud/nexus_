@@ -29,6 +29,8 @@ interface ChannelSidebarProps {
   presences?: Map<number, PresenceInfo>;
   voiceStates?: Map<number, VoiceRosterMember[]>;
   onCallMember?: (userId: number, username: string) => void;
+  onOpenSettings: () => void;
+  onLogout: () => void;
 }
 
 function memberInitial(name: string): string {
@@ -86,6 +88,8 @@ export function ChannelSidebar({
   presences,
   voiceStates,
   onCallMember,
+  onOpenSettings,
+  onLogout,
 }: ChannelSidebarProps) {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
@@ -242,6 +246,31 @@ export function ChannelSidebar({
           </button>
         )
       ) : null}
+
+      <div className="user-dock">
+        {currentUser.avatar_url ? (
+          <img className="user-dock__avatar" src={currentUser.avatar_url} alt="" />
+        ) : (
+          <span className="user-dock__avatar user-dock__avatar--empty">
+            {memberInitial(currentUser.display_name || currentUser.username)}
+          </span>
+        )}
+        <div className="user-dock__identity">
+          <strong>{currentUser.display_name || currentUser.username}</strong>
+          <span>@{currentUser.username}</span>
+        </div>
+        <button type="button" className="user-dock__action" onClick={onOpenSettings} title="Ayarlar">
+          AYR
+        </button>
+        <button
+          type="button"
+          className="user-dock__action user-dock__action--logout"
+          onClick={onLogout}
+          title="Çıkış yap"
+        >
+          ÇIK
+        </button>
+      </div>
 
       {server && membersOpen ? (
         <MembersPanel

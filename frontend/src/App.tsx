@@ -398,14 +398,62 @@ export default function App() {
         presences={gateway.presences}
         voiceStates={gateway.voiceStates}
         onCallMember={handleCallMember}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onLogout={handleLogout}
       />
       <div className="app-main">
+        <header className="app-main__toolbar">
+          <div className="app-main__context">
+            <span>{activeServer?.name ?? "Nexus"}</span>
+            <strong>
+              {activeChannel
+                ? `${activeChannel.type === "voice" ? "Ses" : "#"} ${activeChannel.name}`
+                : "Genel görünüm"}
+            </strong>
+          </div>
+          <div className="app-main__toolbar-actions">
+            {voice.connected ? (
+              <span className="connection-pill">
+                <span className="connection-pill__dot" />
+                Ses bağlı
+              </span>
+            ) : null}
+            <select
+              className="status-select"
+              value={gateway.selfStatus.status}
+              onChange={(event) =>
+                gateway.setStatus(event.target.value as typeof gateway.selfStatus.status, customStatusDraft)
+              }
+              title="Durumun"
+            >
+              <option value="online">Çevrimiçi</option>
+              <option value="idle">Boşta</option>
+              <option value="dnd">Rahatsız etmeyin</option>
+              <option value="invisible">Görünmez</option>
+            </select>
+            <input
+              className="status-custom"
+              placeholder="Özel durum"
+              value={customStatusDraft}
+              maxLength={128}
+              onChange={(event) => setCustomStatusDraft(event.target.value)}
+              onBlur={() => gateway.setStatus(gateway.selfStatus.status, customStatusDraft)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") gateway.setStatus(gateway.selfStatus.status, customStatusDraft);
+              }}
+            />
+          </div>
+        </header>
         <VideoStage
           currentUser={user}
           participants={voice.participants}
           localVideoStream={voice.localVideoStream}
           localVideoKind={voice.videoKind}
           remoteStreams={voice.remoteStreams}
+          voice={voice}
+          onLeave={() => {
+            if (activeVoiceChannelId) handleToggleVoice(activeVoiceChannelId);
+          }}
         />
         <ChatArea
           channel={activeChannel}
@@ -414,38 +462,6 @@ export default function App() {
           onSendMessage={handleSendMessage}
           onDeleteMessage={handleDeleteMessage}
         />
-      </div>
-      <div className="app-shell__top-actions">
-        <select
-          className="status-select"
-          value={gateway.selfStatus.status}
-          onChange={(e) =>
-            gateway.setStatus(e.target.value as typeof gateway.selfStatus.status, customStatusDraft)
-          }
-          title="Durumun"
-        >
-          <option value="online">🟢 Çevrimiçi</option>
-          <option value="idle">🟡 Boşta</option>
-          <option value="dnd">⛔ Rahatsız etmeyin</option>
-          <option value="invisible">⚫ Görünmez</option>
-        </select>
-        <input
-          className="status-custom"
-          placeholder="Özel durum"
-          value={customStatusDraft}
-          maxLength={128}
-          onChange={(e) => setCustomStatusDraft(e.target.value)}
-          onBlur={() => gateway.setStatus(gateway.selfStatus.status, customStatusDraft)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") gateway.setStatus(gateway.selfStatus.status, customStatusDraft);
-          }}
-        />
-        <button className="settings-button" onClick={() => setSettingsOpen(true)} title="Ayarlar">
-          ⚙️
-        </button>
-        <button className="logout-button" onClick={handleLogout} title={`${user.username} olarak çıkış yap`}>
-          Çıkış ({user.username})
-        </button>
       </div>
       {settingsOpen ? (
         <SettingsPanel

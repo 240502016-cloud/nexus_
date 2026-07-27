@@ -2,7 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { SINK_ID_SUPPORTED, useMediaDevices } from "../hooks/useMediaDevices";
 import type { KeyCombo, VoiceSettings } from "../settings";
-import { DEFAULT_VOICE_SETTINGS, comboIsEmpty, comboLabel, isModifierCode, saveVoiceSettings } from "../settings";
+import {
+  DEFAULT_VOICE_SETTINGS,
+  VIDEO_QUALITY_PRESETS,
+  comboIsEmpty,
+  comboLabel,
+  isModifierCode,
+  saveVoiceSettings,
+} from "../settings";
 import type { User } from "../types";
 import { AccountSettings } from "./AccountSettings";
 
@@ -107,8 +114,15 @@ export function SettingsPanel({
   const startCamPreview = useCallback(async () => {
     stopCamPreview();
     try {
+      const preset = VIDEO_QUALITY_PRESETS[settings.videoQuality];
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: settings.cameraDeviceId ? { deviceId: { exact: settings.cameraDeviceId } } : true,
+        video: {
+          ...(settings.cameraDeviceId ? { deviceId: { exact: settings.cameraDeviceId } } : {}),
+          width: { ideal: preset.width, max: preset.width },
+          height: { ideal: preset.height, max: preset.height },
+          frameRate: { ideal: settings.videoFrameRate, max: settings.videoFrameRate },
+          aspectRatio: { ideal: 16 / 9 },
+        },
       });
       camStreamRef.current = stream;
       if (videoRef.current) videoRef.current.srcObject = stream;
@@ -116,7 +130,7 @@ export function SettingsPanel({
     } catch {
       setCamPreviewing(false);
     }
-  }, [settings.cameraDeviceId, stopCamPreview]);
+  }, [settings.cameraDeviceId, settings.videoFrameRate, settings.videoQuality, stopCamPreview]);
 
   const testSpeaker = useCallback(async () => {
     const ctx = new AudioContext();
@@ -341,6 +355,37 @@ export function SettingsPanel({
               ))}
             </select>
           </label>
+          <div className="settings-panel__quality-grid">
+            <label className="settings-panel__field">
+              <span>Görüntü kalitesi</span>
+              <select
+                value={settings.videoQuality}
+                onChange={(event) =>
+                  update({ videoQuality: event.target.value as VoiceSettings["videoQuality"] })
+                }
+              >
+                <option value="480p">480p · Veri tasarrufu</option>
+                <option value="720p">720p · Dengeli</option>
+                <option value="1080p">1080p · Yüksek kalite</option>
+              </select>
+            </label>
+            <label className="settings-panel__field">
+              <span>Kare hızı</span>
+              <select
+                value={settings.videoFrameRate}
+                onChange={(event) =>
+                  update({ videoFrameRate: Number(event.target.value) as VoiceSettings["videoFrameRate"] })
+                }
+              >
+                <option value={30}>30 FPS · Dengeli</option>
+                <option value={60}>60 FPS · Akıcı</option>
+              </select>
+            </label>
+          </div>
+          <p className="settings-panel__hint">
+            Bu tercih hem kameraya hem ekran paylaşımına uygulanır. 1080p/60 FPS daha fazla bağlantı
+            hızı ve işlem gücü kullanır; hiçbir seçenek ücretli servis gerektirmez.
+          </p>
           <div className="settings-panel__test-row">
             <button onClick={camPreviewing ? stopCamPreview : startCamPreview}>
               {camPreviewing ? "Önizlemeyi kapat" : "Kamera önizleme"}

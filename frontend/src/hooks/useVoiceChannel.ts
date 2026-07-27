@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { coreApi, getToken } from "../api/client";
+import { VIDEO_QUALITY_PRESETS } from "../settings";
 import type { VoiceSettings } from "../settings";
 import { usePushToTalk } from "./usePushToTalk";
 
@@ -53,6 +54,46 @@ interface PeerState {
 
 const SPEAKING_THRESHOLD = 12;
 
+function buildCameraConstraints(vs: VoiceSettings, deviceId: string | null): MediaTrackConstraints {
+  const preset = VIDEO_QUALITY_PRESETS[vs.videoQuality];
+  return {
+    ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+    width: { ideal: preset.width, max: preset.width },
+    height: { ideal: preset.height, max: preset.height },
+    frameRate: { ideal: vs.videoFrameRate, max: vs.videoFrameRate },
+    aspectRatio: { ideal: 16 / 9 },
+  };
+}
+
+function buildScreenConstraints(vs: VoiceSettings): MediaTrackConstraints {
+  const preset = VIDEO_QUALITY_PRESETS[vs.videoQuality];
+  return {
+    width: { ideal: preset.width, max: preset.width },
+    height: { ideal: preset.height, max: preset.height },
+    frameRate: { ideal: vs.videoFrameRate, max: vs.videoFrameRate },
+  };
+}
+
+async function optimizeVideoSender(
+  sender: RTCRtpSender,
+  kind: Exclude<VideoKind, null>,
+  vs: VoiceSettings,
+): Promise<void> {
+  try {
+    const preset = VIDEO_QUALITY_PRESETS[vs.videoQuality];
+    const baseBitrate = kind === "screen" ? preset.screenBitrate : preset.cameraBitrate;
+    const frameRateMultiplier = vs.videoFrameRate === 60 ? 1.25 : 1;
+    const parameters = sender.getParameters();
+    if (!parameters.encodings?.length) parameters.encodings = [{}];
+    parameters.encodings[0].maxBitrate = Math.round(baseBitrate * frameRateMultiplier);
+    parameters.encodings[0].maxFramerate = vs.videoFrameRate;
+    parameters.degradationPreference = "maintain-resolution";
+    await sender.setParameters(parameters);
+  } catch {
+    // Bazı tarayıcılar kodlayıcı parametrelerinin bir kısmını desteklemez; varsayılan uyarlama sürer.
+  }
+}
+
 export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSettings) {
   const [connected, setConnected] = useState(false);
   const [participants, setParticipants] = useState<VoiceParticipant[]>([]);
@@ -67,6 +108,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
   const wsRef = useRef<WebSocket | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null); // mikrofon (audio)
   const videoTrackRef = useRef<MediaStreamTrack | null>(null); // yerel kamera/ekran track'i
+  const videoKindRef = useRef<VideoKind>(null);
   const peersRef = useRef<Map<number, PeerState>>(new Map());
   const pendingIceRef = useRef<Map<number, RTCIceCandidateInit[]>>(new Map());
   const audioElsRef = useRef<Map<number, HTMLAudioElement>>(new Map());
@@ -80,6 +122,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
   const videoControlRef = useRef<{
     startVideo: (kind: "camera" | "screen") => Promise<void>;
     stopVideo: () => void;
+    applyQuality: () => Promise<void>;
   } | null>(null);
   // Görüşme sırasında canlı mikrofon geçişi için köprü (connect effect'i içinde tanımlanır).
   const micControlRef = useRef<{ switchMic: () => Promise<void> } | null>(null);
@@ -132,6 +175,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     localStreamRef.current = null;
     videoTrackRef.current?.stop();
     videoTrackRef.current = null;
+    videoKindRef.current = null;
     setConnected(false);
     setParticipants([]);
     setMuted(false);
@@ -198,6 +242,11 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       // Zaten yerel video (kamera/ekran) yayınlıyorsak yeni peer'e de ekle.
       if (videoTrackRef.current && localVideoStreamForSend()) {
         peer.videoSender = pc.addTrack(videoTrackRef.current, localVideoStreamForSend()!);
+        void optimizeVideoSender(
+          peer.videoSender,
+          videoKindRef.current ?? "camera",
+          voiceSettingsRef.current,
+        );
       }
 
       pc.onnegotiationneeded = async () => {
@@ -444,19 +493,34 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     // Video başlatma/durdurma yardımcıları connect kapsamında tanımlanır (peersRef üzerinden çalışır).
     async function startVideo(kind: "camera" | "screen") {
       try {
-        const camId = voiceSettingsRef.current.cameraDeviceId;
+        const currentSettings = voiceSettingsRef.current;
+        const camId = currentSettings.cameraDeviceId;
         const stream =
           kind === "camera"
             ? await navigator.mediaDevices.getUserMedia({
-                video: camId ? { deviceId: { exact: camId } } : true,
+                video: buildCameraConstraints(currentSettings, camId),
               })
-            : await navigator.mediaDevices.getDisplayMedia({ video: true });
+            : await navigator.mediaDevices.getDisplayMedia({
+                video: buildScreenConstraints(currentSettings),
+                audio: false,
+              });
         const track = stream.getVideoTracks()[0];
         if (!track) return;
 
-        const switching = videoTrackRef.current !== null;
+        track.contentHint = kind === "screen" ? "detail" : "motion";
+        try {
+          await track.applyConstraints(
+            kind === "screen"
+              ? buildScreenConstraints(currentSettings)
+              : buildCameraConstraints(currentSettings, camId),
+          );
+        } catch {
+          // Kaynağın desteklediği en yüksek mevcut çözünürlük ve kare hızı kullanılmaya devam eder.
+        }
+
         videoTrackRef.current?.stop();
         videoTrackRef.current = track;
+        videoKindRef.current = kind;
         sendVideoStream = stream;
         setLocalVideoStream(stream);
         setVideoKind(kind);
@@ -468,20 +532,43 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
           if (peer.videoSender) {
             // Zaten bir video gönderiyoruz: track'i değiştir (yeniden pazarlık gerekmez).
             await peer.videoSender.replaceTrack(track);
+            await optimizeVideoSender(peer.videoSender, kind, currentSettings);
           } else {
             // İlk video: track ekle → onnegotiationneeded yeniden pazarlığı tetikler.
             peer.videoSender = peer.pc.addTrack(track, stream);
+            await optimizeVideoSender(peer.videoSender, kind, currentSettings);
           }
         }
-        void switching;
       } catch (err) {
         setError(`Video başlatılamadı: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    async function applyQuality() {
+      const track = videoTrackRef.current;
+      const kind = videoKindRef.current;
+      if (!track || !kind) return;
+      const currentSettings = voiceSettingsRef.current;
+      try {
+        await track.applyConstraints(
+          kind === "screen"
+            ? buildScreenConstraints(currentSettings)
+            : buildCameraConstraints(currentSettings, null),
+        );
+      } catch {
+        // Kaynak yeni tercihi tam desteklemiyorsa tarayıcının en yakın uygun değeri kullanılır.
+      }
+      for (const [, peer] of peersRef.current) {
+        if (peer.videoSender) {
+          await optimizeVideoSender(peer.videoSender, kind, currentSettings);
+        }
       }
     }
 
     function stopVideo() {
       videoTrackRef.current?.stop();
       videoTrackRef.current = null;
+      videoKindRef.current = null;
       sendVideoStream = null;
       setLocalVideoStream(null);
       setVideoKind(null);
@@ -519,7 +606,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       }
     }
 
-    videoControlRef.current = { startVideo, stopVideo };
+    videoControlRef.current = { startVideo, stopVideo, applyQuality };
     micControlRef.current = { switchMic };
 
     connect();
@@ -581,6 +668,11 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     voiceSettings.echoCancellation,
     voiceSettings.autoGainControl,
   ]);
+
+  // Çözünürlük/FPS tercihi değişince devam eden kamera veya ekran paylaşımına anında uygula.
+  useEffect(() => {
+    if (connected && videoKindRef.current) void videoControlRef.current?.applyQuality();
+  }, [connected, voiceSettings.videoFrameRate, voiceSettings.videoQuality]);
 
   const toggleMute = useCallback(() => {
     // Deafen açıkken mute'u tek başına değiştirmek Discord'da mümkün değil; önce deafen'i kapat.

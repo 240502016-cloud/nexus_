@@ -1,5 +1,35 @@
 export type VoiceMode = "toggle" | "ptt";
 export type ThemeMode = "dark" | "light" | "system";
+export type VideoQuality = "480p" | "720p" | "1080p";
+export type VideoFrameRate = 30 | 60;
+
+export interface VideoQualityPreset {
+  width: number;
+  height: number;
+  cameraBitrate: number;
+  screenBitrate: number;
+}
+
+export const VIDEO_QUALITY_PRESETS: Record<VideoQuality, VideoQualityPreset> = {
+  "480p": {
+    width: 854,
+    height: 480,
+    cameraBitrate: 1_800_000,
+    screenBitrate: 2_500_000,
+  },
+  "720p": {
+    width: 1280,
+    height: 720,
+    cameraBitrate: 3_500_000,
+    screenBitrate: 5_000_000,
+  },
+  "1080p": {
+    width: 1920,
+    height: 1080,
+    cameraBitrate: 6_000_000,
+    screenBitrate: 8_000_000,
+  },
+};
 
 export interface KeyCombo {
   ctrl: boolean;
@@ -15,6 +45,9 @@ export interface VoiceSettings {
   inputDeviceId: string | null;
   outputDeviceId: string | null;
   cameraDeviceId: string | null;
+  // Kamera ve ekran paylaşımı için ücretsiz, tarayıcı tabanlı WebRTC kalite tercihleri.
+  videoQuality: VideoQuality;
+  videoFrameRate: VideoFrameRate;
   // Ses işleme (getUserMedia MediaTrackConstraints'e uygulanır).
   noiseSuppression: boolean;
   echoCancellation: boolean;
@@ -36,6 +69,8 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   inputDeviceId: null,
   outputDeviceId: null,
   cameraDeviceId: null,
+  videoQuality: "1080p",
+  videoFrameRate: 60,
   noiseSuppression: true,
   echoCancellation: true,
   autoGainControl: true,
@@ -68,6 +103,9 @@ export function loadVoiceSettings(): VoiceSettings {
       inputDeviceId: stringOrNull(parsed.inputDeviceId),
       outputDeviceId: stringOrNull(parsed.outputDeviceId),
       cameraDeviceId: stringOrNull(parsed.cameraDeviceId),
+      videoQuality:
+        parsed.videoQuality === "480p" || parsed.videoQuality === "720p" ? parsed.videoQuality : "1080p",
+      videoFrameRate: parsed.videoFrameRate === 30 ? 30 : 60,
       noiseSuppression: boolWithDefault(parsed.noiseSuppression, true),
       echoCancellation: boolWithDefault(parsed.echoCancellation, true),
       autoGainControl: boolWithDefault(parsed.autoGainControl, true),
