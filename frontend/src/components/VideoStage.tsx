@@ -166,9 +166,6 @@ export function VideoStage({
   const focusedTile = focusedTileKey
     ? tiles.find((tile) => tile.key === focusedTileKey) ?? null
     : null;
-  const otherTiles = focusedTile
-    ? tiles.filter((tile) => tile.key !== focusedTile.key)
-    : [];
 
   useEffect(() => {
     if (focusedTileKey && !tiles.some((tile) => tile.key === focusedTileKey)) {
@@ -211,14 +208,7 @@ export function VideoStage({
       </header>
       {focusedTile ? (
         <div className="voice-focus-layout">
-          <div className="voice-focus-layout__main">
-            {renderTile(focusedTile, true)}
-          </div>
-          {otherTiles.length ? (
-            <div className="voice-focus-layout__strip" aria-label="Diğer sahne katılımcıları">
-              {otherTiles.map((tile) => renderTile(tile))}
-            </div>
-          ) : null}
+          {renderTile(focusedTile, true)}
         </div>
       ) : (
         <div className={`voice-grid voice-grid--${Math.min(tiles.length, 9)}`}>
