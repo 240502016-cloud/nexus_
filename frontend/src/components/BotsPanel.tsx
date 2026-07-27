@@ -131,128 +131,152 @@ export function BotsPanel({ serverId, serverName, canManageBots, onClose, embedd
         </header>
       ) : null}
 
-        {loading ? (
-          <div>Yükleniyor...</div>
-        ) : (
-          <>
-            <div className="settings-panel__section">
-              <strong>Bu sunucudaki botlar</strong>
-              {bots.length === 0 ? (
-                <div className="members-panel__empty">Henüz bot eklenmemiş.</div>
-              ) : (
-                <ul className="members-panel__list">
-                  {bots.map((bot) => (
-                    <li key={bot.id} className="bots-panel__bot-card">
+      <div className="bots-panel__intro">
+        <div className="bots-panel__intro-icon"><Icon name="bot" /></div>
+        <div>
+          <span className="panel-eyebrow">OTOMASYON MERKEZİ</span>
+          <h3>Botlar ve platform eklentileri</h3>
+          <p>Botları sunucuya ekleyin, yeteneklerini bağlayın ve kullanılabilir komutları tek ekrandan yönetin.</p>
+        </div>
+        <span className="bots-panel__summary">{bots.length} bot · {plugins.filter((plugin) => plugin.enabled).length} etkin</span>
+      </div>
+
+      {error ? <div className="members-panel__error bots-panel__feedback">{error}</div> : null}
+      {notice ? <div className="members-panel__notice bots-panel__feedback">{notice}</div> : null}
+
+      {loading ? (
+        <div className="bots-panel__loading">Botlar ve eklentiler yükleniyor…</div>
+      ) : (
+        <div className="bots-panel__content">
+          <section className="bots-panel__section">
+            <header className="bots-panel__section-header">
+              <div><span>SUNUCU BOTLARI</span><h3>Aktif botlar</h3></div>
+              <b>{bots.length}</b>
+            </header>
+            {bots.length === 0 ? (
+              <div className="bots-panel__empty"><Icon name="bot" /><span>Henüz bot eklenmemiş.</span></div>
+            ) : (
+              <ul className="bots-panel__bot-grid">
+                {bots.map((bot) => (
+                  <li key={bot.id} className="bots-panel__bot-card">
+                    <div className="bots-panel__bot-identity">
+                      <span className="bots-panel__bot-avatar"><Icon name="bot" /></span>
                       <div>
-                        <strong>{bot.name}</strong>{" "}
-                        <span className="bots-panel__prefix">({bot.command_prefix})</span>
-                        <div className="bots-panel__plugin-commands">
-                          {bot.plugin_names.length > 0
-                            ? `Bağlı: ${bot.plugin_names.join(", ")}`
-                            : "Bota özel plugin bağlı değil"}
-                        </div>
+                        <strong>{bot.name}</strong>
+                        <span>Komut öneki: <code>{bot.command_prefix}</code></span>
                       </div>
-                      {canManageBots && dedicatedPlugins.length > 0 ? (
-                        <div className="bots-panel__bot-actions">
-                          {dedicatedPlugins.map((plugin) => {
-                            const linked = bot.plugin_names.includes(plugin.name);
-                            const busyKey = `${bot.id}:${plugin.name}`;
-                            return (
-                              <button
-                                type="button"
-                                key={plugin.name}
-                                disabled={botPluginBusy === busyKey}
-                                onClick={() => handleToggleBotPlugin(bot, plugin)}
-                              >
-                                {linked ? `${plugin.name} kaldır` : `${plugin.name} bağla`}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ) : null}
-                      {canManageBots ? (
-                        <button
-                          type="button"
-                          className="bots-panel__remove"
-                          disabled={botPluginBusy === `remove:${bot.id}`}
-                          onClick={() => void removeBot(bot)}
-                        >
-                          Sunucudan kaldır
-                        </button>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            {canManageBots ? (
-              <form className="settings-panel__section" onSubmit={handleCreateBot}>
-                <label htmlFor="new-bot-name">Yeni bot oluştur ve sunucuya ekle</label>
-                <input
-                  id="new-bot-name"
-                  value={botName}
-                  onChange={(event) => setBotName(event.target.value)}
-                  placeholder="bot-adi"
-                />
-                {dedicatedPlugins.length > 0 ? (
-                  <>
-                    <label htmlFor="new-bot-plugin">Bota özel plugin (isteğe bağlı)</label>
-                    <select
-                      id="new-bot-plugin"
-                      value={selectedPluginName}
-                      onChange={(event) => setSelectedPluginName(event.target.value)}
-                    >
-                      <option value="">Plugin bağlama</option>
-                      {dedicatedPlugins.map((plugin) => (
-                        <option key={plugin.name} value={plugin.name}>
-                          {plugin.name}
-                        </option>
-                      ))}
-                    </select>
-                  </>
-                ) : null}
-                <button type="submit" disabled={creating || !botName.trim()}>
-                  {creating ? "Oluşturuluyor..." : "Oluştur"}
-                </button>
-              </form>
-            ) : null}
-
-            {error ? <div className="members-panel__error">{error}</div> : null}
-            {notice ? <div className="members-panel__notice">{notice}</div> : null}
-
-            <div className="settings-panel__section">
-              <strong>Platform pluginleri</strong>
-              <ul className="bots-panel__plugin-list">
-                {plugins.map((plugin) => (
-                  <li key={plugin.name} className="bots-panel__plugin">
-                    <div>
-                      <div>{plugin.name}</div>
-                      {plugin.commands.length > 0 ? (
-                        <div className="bots-panel__command-list">
-                          {plugin.commands.map((command) => (
-                            <code key={command}>{command}</code>
-                          ))}
-                        </div>
-                      ) : null}
-                      {plugin.requires_bot_link ? (
-                        <div className="bots-panel__plugin-note">
-                          Kurulduktan sonra yukarıdaki bir bota bağlanmalıdır.
-                        </div>
-                      ) : null}
                     </div>
-                    <button
-                      onClick={() => handleTogglePlugin(plugin)}
-                      disabled={!canManageBots || pluginBusy === plugin.name}
-                    >
-                      {plugin.enabled ? "Kaldır" : "Kur"}
-                    </button>
+                    <div className="bots-panel__plugin-commands">
+                      {bot.plugin_names.length > 0
+                        ? bot.plugin_names.map((name) => <span key={name}>{name}</span>)
+                        : <em>Bota özel eklenti bağlı değil</em>}
+                    </div>
+                    {canManageBots && dedicatedPlugins.length > 0 ? (
+                      <div className="bots-panel__bot-actions">
+                        {dedicatedPlugins.map((plugin) => {
+                          const linked = bot.plugin_names.includes(plugin.name);
+                          const busyKey = `${bot.id}:${plugin.name}`;
+                          return (
+                            <button
+                              type="button"
+                              key={plugin.name}
+                              className={linked ? "is-linked" : ""}
+                              disabled={botPluginBusy === busyKey}
+                              onClick={() => handleToggleBotPlugin(bot, plugin)}
+                            >
+                              {linked ? `${plugin.name} bağlantısını kaldır` : `${plugin.name} bağla`}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                    {canManageBots ? (
+                      <button
+                        type="button"
+                        className="bots-panel__remove"
+                        disabled={botPluginBusy === `remove:${bot.id}`}
+                        onClick={() => void removeBot(bot)}
+                      >
+                        Sunucudan kaldır
+                      </button>
+                    ) : null}
                   </li>
                 ))}
               </ul>
-            </div>
-          </>
-        )}
+            )}
+          </section>
+
+          {canManageBots ? (
+            <form className="bots-panel__create-card" onSubmit={handleCreateBot}>
+              <header><span className="bots-panel__create-icon"><Icon name="bot" /></span><div><span>YENİ BOT</span><h3>Sunucuya bot ekle</h3></div></header>
+              <div className="bots-panel__create-fields">
+                <label htmlFor="new-bot-name">
+                  <span>Bot adı</span>
+                  <input
+                    id="new-bot-name"
+                    value={botName}
+                    onChange={(event) => setBotName(event.target.value)}
+                    placeholder="Örn. Nexus Müzik"
+                    autoComplete="off"
+                  />
+                </label>
+                <label htmlFor="new-bot-plugin">
+                  <span>Başlangıç eklentisi</span>
+                  <select
+                    id="new-bot-plugin"
+                    value={selectedPluginName}
+                    onChange={(event) => setSelectedPluginName(event.target.value)}
+                  >
+                    <option value="">Şimdilik bağlama</option>
+                    {dedicatedPlugins.map((plugin) => (
+                      <option key={plugin.name} value={plugin.name}>{plugin.name}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <button className="bots-panel__create-button" type="submit" disabled={creating || !botName.trim()}>
+                <Icon name="bot" /> {creating ? "Oluşturuluyor…" : "Botu oluştur"}
+              </button>
+            </form>
+          ) : null}
+
+          <section className="bots-panel__section bots-panel__section--plugins">
+            <header className="bots-panel__section-header">
+              <div><span>YETENEK KÜTÜPHANESİ</span><h3>Platform eklentileri</h3></div>
+              <b>{plugins.length}</b>
+            </header>
+            <ul className="bots-panel__plugin-list">
+              {plugins.map((plugin) => (
+                <li key={plugin.name} className={plugin.enabled ? "bots-panel__plugin is-enabled" : "bots-panel__plugin"}>
+                  <header className="bots-panel__plugin-header">
+                    <div className="bots-panel__plugin-title">
+                      <span className="bots-panel__plugin-icon"><Icon name="settings" /></span>
+                      <div><strong>{plugin.name}</strong><span>{plugin.enabled ? "Etkin" : "Kurulu değil"}</span></div>
+                    </div>
+                    <button
+                      type="button"
+                      className={plugin.enabled ? "bots-panel__plugin-toggle is-remove" : "bots-panel__plugin-toggle"}
+                      onClick={() => handleTogglePlugin(plugin)}
+                      disabled={!canManageBots || pluginBusy === plugin.name}
+                    >
+                      {pluginBusy === plugin.name ? "İşleniyor…" : plugin.enabled ? "Kaldır" : "Kur"}
+                    </button>
+                  </header>
+                  <p>{plugin.description || "Bu eklenti için açıklama bulunmuyor."}</p>
+                  {plugin.commands.length > 0 ? (
+                    <div className="bots-panel__command-list">
+                      {plugin.commands.map((command) => <code key={command}>/{command}</code>)}
+                    </div>
+                  ) : <span className="bots-panel__no-command">Komut gerektirmez</span>}
+                  {plugin.requires_bot_link ? (
+                    <div className="bots-panel__plugin-note"><Icon name="bot" /> Etkinleştirildikten sonra bir bota bağlanmalıdır.</div>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </section>
+        </div>
+      )}
     </>
   );
   if (embedded) return <div className="bots-panel bots-panel--embedded">{body}</div>;

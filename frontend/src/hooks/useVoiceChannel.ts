@@ -71,7 +71,6 @@ function buildCameraConstraints(vs: VoiceSettings, deviceId: string | null): Med
     width: { ideal: preset.width, max: preset.width },
     height: { ideal: preset.height, max: preset.height },
     frameRate: { ideal: vs.videoFrameRate, max: vs.videoFrameRate },
-    aspectRatio: { ideal: 16 / 9 },
   };
 }
 

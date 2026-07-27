@@ -319,6 +319,14 @@ imajları yeniden oluşturduğu için Matrix spam ayarı ve `0006_social_graph` 
   çağrı sözleşmesi güncellendi ve çift-offer glare kaldırıldı. Core servisine erişmesi gereken
   yerleşik `music`, `ai_assistant` ve `moderation` plugin'leri yalnız tam ad eşleşmeli güven listesiyle
   yerelde; diğer tüm plugin'ler sandbox içinde çalışır. `music` artık açıkça bir bota bağlanmalıdır.
+- Tek kişilik kamera görünümünde zorunlu 16:9 kırpma kaldırıldı; kameranın doğal oranı korunur ve
+  görüntü `contain` ile saç/çene dahil bütünüyle sahneye sığar. Ekran paylaşımı da üst-alt kenarları
+  kesmeden aynı kuralla gösterilir.
+- Kamera kapalıyken ekran paylaşımı açılırsa gereksiz profil döşemesi kaldırılıp yerini yayın alır.
+  Kamera ve ekran gerçekten aynı anda açıksa iki canlı kaynak ayrı döşemeler olarak korunur.
+- Mesaj düzenleme/silme simgeleri 27px kontrol ve 13px simge boyutuna küçültüldü.
+- Sunucu Ayarları → Botlar ekranı baştan düzenlendi: temalı bot oluşturma formu, aktif/pasif buton
+  durumları, bot kartları ve açıklama/komutları okunabilen iki sütunlu platform plugin kartları eklendi.
 
 ### Deploy
 

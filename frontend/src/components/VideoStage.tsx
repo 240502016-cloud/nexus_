@@ -81,15 +81,21 @@ export function VideoStage({
     remotes.find((item: RemoteVideoStream) => item.userId === userId && item.kind === kind)?.stream ?? null;
 
   const tiles = [
-    {
+    ...(!hasVideo(voice.localScreenStream) || hasVideo(voice.localCameraStream) ? [{
       key: "self",
       name: `${currentUser.display_name || currentUser.username} (sen)`,
       avatar: currentUser.avatar_url,
       stream: voice.localCameraStream,
       mirror: true,
       speaking: false,
-    },
-    ...participants.map((participant) => ({
+    }] : []),
+    ...participants.filter((participant) => {
+      if (voice.ignoredRemoteVideoIds.has(participant.user_id)) return true;
+      const camera = streamFor(participant.user_id, "camera");
+      const screen = streamFor(participant.user_id, "screen");
+      // Kamera yokken ekran paylaşımı yapan kişinin profil kartını ayrıca göstermeye gerek yok.
+      return !hasVideo(screen) || hasVideo(camera);
+    }).map((participant) => ({
       key: `user-${participant.user_id}`,
       name: participant.username,
       avatar: participant.avatar_url,
