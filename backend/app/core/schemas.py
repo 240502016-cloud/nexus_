@@ -153,6 +153,14 @@ class MessageRead(BaseModel):
     hidden: bool = False
 
 
+class MessagePage(BaseModel):
+    """Matrix geçmişinin cursor tabanlı, geriye doğru sayfalanmış bölümü."""
+
+    items: list[MessageRead]
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
 # ---- Plugin ----
 # plugins/<isim>/plugin.json dosya sisteminde yaşar; installed/enabled durumu Postgres'te.
 

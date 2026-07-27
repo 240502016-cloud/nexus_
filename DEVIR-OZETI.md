@@ -198,6 +198,26 @@ docker compose up -d backend ai-worker plugin-sandbox frontend
 
 ### Güvenlik / dayanıklılık
 - Rastgelelik sunucu tarafında `secrets` ile sağlanır; harici/ücretli API yoktur.
+
+---
+
+## 8. 27 Temmuz 2026 — Bant tasarrufu, kalıcı geçmiş ve uyarlanabilir çalışma alanı
+
+- İzleyici, her uzak kamera/ekran yayınını ayrı ayrı kapatabilir. Bu işlem yalnızca videoyu
+  gizlemez; WebRTC alıcı yönünü yeniden pazarlıkla kapatarak gereksiz video trafiğini durdurur.
+- Canlı sahne tamamen gizlenebilir; mesaj alanı tüm ana çalışma alanını kullanır. Tam ekrandaki
+  mikrofon, gelen ses, kamera, paylaşım ve ayrılma kontrolleri korunur.
+- Kamera/ekran kalitesi ana araç çubuğunda görünür: 480p, 720p, 1080p ve 30/60 FPS.
+- Matrix mesaj geçmişi cursor ile 50'şer yüklenir. Eski mesajlar yukarı kaydırıldıkça lazy-load
+  edilir; DOM tarafında `content-visibility` ile uzun geçmişin çizim maliyeti azaltılır.
+- Ses kanalları metin kanalı değildir: yeni ses kanallarına Matrix odası açılmaz; eski ses
+  kanallarında da mesaj gönderme/listeleme API tarafından reddedilir.
+- Mesajlar için uygulama içi kenar bildirimi, kısa bildirim sesi ve izin verilirse işletim sistemi
+  bildirimi eklendi. **Rahatsız etmeyin** durumunda mesaj ve çağrı bildirimleri tamamen kapalıdır.
+- Üye görünümü eski büyük modal yerine açılıp kapanan 224px paneldir; botlar ayrı tutulur.
+- En soldaki sunucu çubuğu 22px kapalı başlar ve fare/fokus geldiğinde açılır.
+- Tema kontrastı, form kontrolleri, bot kartları, durum metinleri ve bildirimler koyu/açık modda
+  okunabilir renk çiftleriyle güncellendi.
 - Davet 2 dakika, aktif karşılaşma 5 dakika zaman aşımlıdır.
 - Kullanıcı aynı anda tek açık oyunda olabilir; kendine davet ve sunucu dışı etiket reddedilir.
 - Oyunlar ve çarklar backend yeniden başladığında kaybolmaz (`0005_chance_games` migration).

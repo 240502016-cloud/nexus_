@@ -103,6 +103,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
   const [localVideoStream, setLocalVideoStream] = useState<MediaStream | null>(null);
   // user_id -> uzak medya akışı (ses + varsa video). VideoStage bunları render eder.
   const [remoteStreams, setRemoteStreams] = useState<Map<number, MediaStream>>(new Map());
+  const [ignoredRemoteVideoIds, setIgnoredRemoteVideoIds] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -115,6 +116,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
   // Her peer için tek bir birleşik uzak MediaStream. Ses ve video ayrı MSID'lerle gelse de
   // aynı stream'de biriktirilir; böylece video eklenince ses stream'i ezilmez (Hata 1).
   const remoteMediaRef = useRef<Map<number, MediaStream>>(new Map());
+  const ignoredRemoteVideoIdsRef = useRef<Set<number>>(new Set());
   const mutedRef = useRef(false);
   const deafenedRef = useRef(false);
   const preDeafenMutedRef = useRef(false); // deafen açılmadan önceki mute durumu
@@ -160,6 +162,39 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     [applyMuted],
   );
 
+  const setRemoteVideoEnabled = useCallback((peerId: number, enabled: boolean) => {
+    const next = new Set(ignoredRemoteVideoIdsRef.current);
+    if (enabled) next.delete(peerId);
+    else next.add(peerId);
+    ignoredRemoteVideoIdsRef.current = next;
+    setIgnoredRemoteVideoIds(next);
+
+    remoteMediaRef.current.get(peerId)?.getVideoTracks().forEach((track) => {
+      track.enabled = enabled;
+    });
+
+    // Yalnızca videoyu DOM'dan gizlemek veri akışını durdurmaz. Alıcı yönünü kapatarak
+    // WebRTC yeniden pazarlığında karşı tarafın bu kullanıcıya video göndermesini keseriz.
+    const peer = peersRef.current.get(peerId);
+    peer?.pc.getTransceivers().forEach((transceiver) => {
+      if (transceiver.receiver.track.kind !== "video") return;
+      if (enabled) {
+        if (transceiver.direction === "inactive") transceiver.direction = "recvonly";
+        else if (transceiver.direction === "sendonly") transceiver.direction = "sendrecv";
+      } else {
+        if (transceiver.direction === "recvonly") transceiver.direction = "inactive";
+        else if (transceiver.direction === "sendrecv") transceiver.direction = "sendonly";
+      }
+    });
+  }, []);
+
+  const toggleRemoteVideo = useCallback(
+    (peerId: number) => {
+      setRemoteVideoEnabled(peerId, ignoredRemoteVideoIdsRef.current.has(peerId));
+    },
+    [setRemoteVideoEnabled],
+  );
+
   const cleanup = useCallback(() => {
     wsRef.current?.close();
     wsRef.current = null;
@@ -183,6 +218,8 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     setVideoKind(null);
     setLocalVideoStream(null);
     setRemoteStreams(new Map());
+    ignoredRemoteVideoIdsRef.current = new Set();
+    setIgnoredRemoteVideoIds(new Set());
     mutedRef.current = false;
     deafenedRef.current = false;
   }, []);
@@ -311,6 +348,9 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         const stream = ms;
         if (!stream.getTracks().includes(event.track)) {
           stream.addTrack(event.track);
+        }
+        if (event.track.kind === "video") {
+          event.track.enabled = !ignoredRemoteVideoIdsRef.current.has(peerId);
         }
 
         // Ses her zaman gizli <audio> ile çalınır (video <video muted> ile gösterilir → çift ses olmaz).
@@ -813,11 +853,13 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     videoKind,
     localVideoStream,
     remoteStreams,
+    ignoredRemoteVideoIds,
     error,
     toggleMute,
     toggleDeafen,
     toggleCamera,
     toggleScreenShare,
+    toggleRemoteVideo,
     disconnect: cleanup,
   };
 }

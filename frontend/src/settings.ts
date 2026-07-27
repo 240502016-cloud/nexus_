@@ -53,7 +53,9 @@ export interface VoiceSettings {
   echoCancellation: boolean;
   autoGainControl: boolean;
   // Bildirimler.
-  desktopNotifications: boolean; // gelen çağrı için masaüstü bildirimi
+  desktopNotifications: boolean; // mesaj ve çağrı için işletim sistemi bildirimi
+  messageNotifications: boolean; // uygulama içi kenar bildirimi
+  notificationSound: boolean; // yeni mesaj sesi
   callRingtone: boolean; // gelen çağrıda zil sesi
   // Görünüm.
   theme: ThemeMode;
@@ -75,6 +77,8 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   echoCancellation: true,
   autoGainControl: true,
   desktopNotifications: false,
+  messageNotifications: true,
+  notificationSound: true,
   callRingtone: true,
   theme: "dark",
 };
@@ -110,6 +114,8 @@ export function loadVoiceSettings(): VoiceSettings {
       echoCancellation: boolWithDefault(parsed.echoCancellation, true),
       autoGainControl: boolWithDefault(parsed.autoGainControl, true),
       desktopNotifications: boolWithDefault(parsed.desktopNotifications, false),
+      messageNotifications: boolWithDefault(parsed.messageNotifications, true),
+      notificationSound: boolWithDefault(parsed.notificationSound, true),
       callRingtone: boolWithDefault(parsed.callRingtone, true),
       theme: parsed.theme === "light" || parsed.theme === "system" ? parsed.theme : "dark",
     };

@@ -5,6 +5,7 @@ import type { User } from "../types";
 
 interface VideoSource {
   id: string;
+  userId: number | null;
   stream: MediaStream;
   label: string;
   muted: boolean;
@@ -88,9 +89,10 @@ interface StageControlsProps {
   isFullscreen: boolean;
   onToggleFullscreen: () => void;
   onLeave: () => void;
+  onHide: () => void;
 }
 
-function StageControls({ voice, isFullscreen, onToggleFullscreen, onLeave }: StageControlsProps) {
+function StageControls({ voice, isFullscreen, onToggleFullscreen, onLeave, onHide }: StageControlsProps) {
   return (
     <div className="video-stage__controls" aria-label="Görüşme kontrolleri">
       <button
@@ -130,6 +132,10 @@ function StageControls({ voice, isFullscreen, onToggleFullscreen, onLeave }: Sta
         <span>Paylaş</span>
       </button>
       <span className="video-stage__control-separator" />
+      <button type="button" className="stage-control" onClick={onHide} title="Sahneyi kapat ve mesajları büyüt">
+        <span className="stage-control__icon" aria-hidden="true">TXT</span>
+        <span>Sahneyi gizle</span>
+      </button>
       <button
         type="button"
         className="stage-control"
@@ -162,6 +168,8 @@ interface VideoStageProps {
   remoteStreams: Map<number, MediaStream>;
   voice: VoiceChannelState;
   onLeave: () => void;
+  onHide: () => void;
+  qualityLabel: string;
 }
 
 export function VideoStage({
@@ -172,6 +180,8 @@ export function VideoStage({
   remoteStreams,
   voice,
   onLeave,
+  onHide,
+  qualityLabel,
 }: VideoStageProps) {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const [focusedId, setFocusedId] = useState<string | null>(null);
@@ -182,9 +192,10 @@ export function VideoStage({
       participants.find((participant) => participant.user_id === userId)?.username ?? `#${userId}`;
 
     const remote: VideoSource[] = Array.from(remoteStreams.entries())
-      .filter(([, stream]) => hasVideo(stream))
+      .filter(([userId, stream]) => hasVideo(stream) && !voice.ignoredRemoteVideoIds.has(userId))
       .map(([userId, stream]) => ({
         id: `remote-${userId}`,
+        userId,
         stream,
         label: nameOf(userId),
         muted: true,
@@ -197,6 +208,7 @@ export function VideoStage({
         ? [
             {
               id: "local",
+              userId: null,
               stream: localVideoStream,
               label: `${currentUser.display_name || currentUser.username} (sen)`,
               muted: true,
@@ -208,7 +220,19 @@ export function VideoStage({
 
     // İzleyici için uzak yayın varsayılan odak, yalnızca kendi yayını varsa yerel görüntü odak olur.
     return [...remote, ...local];
-  }, [currentUser.display_name, currentUser.username, localVideoKind, localVideoStream, participants, remoteStreams]);
+  }, [
+    currentUser.display_name,
+    currentUser.username,
+    localVideoKind,
+    localVideoStream,
+    participants,
+    remoteStreams,
+    voice.ignoredRemoteVideoIds,
+  ]);
+
+  const pausedRemoteIds = Array.from(voice.ignoredRemoteVideoIds).filter((userId) =>
+    remoteStreams.has(userId),
+  );
 
   const sourceIds = sources.map((source) => source.id).join("|");
 
@@ -224,9 +248,11 @@ export function VideoStage({
     return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
   }, []);
 
-  if (sources.length === 0) return null;
+  if (sources.length === 0 && pausedRemoteIds.length === 0) return null;
 
-  const focused = sources.find((source) => source.id === focusedId) ?? sources[0];
+  const focused = sources.find((source) => source.id === focusedId) ?? sources[0] ?? null;
+  const nameOf = (userId: number) =>
+    participants.find((participant) => participant.user_id === userId)?.username ?? `#${userId}`;
 
   async function toggleFullscreen() {
     const stage = stageRef.current;
@@ -248,16 +274,34 @@ export function VideoStage({
       <div className="video-stage__header">
         <div>
           <span className="video-stage__eyebrow">CANLI SAHNE</span>
-          <strong>{focused.label}</strong>
+          <strong>{focused?.label ?? "Yayın izleme kapalı"}</strong>
         </div>
-        <span className="video-stage__quality">
-          <span className="video-stage__live-dot" />
-          HD canlı
-        </span>
+        <div className="video-stage__header-actions">
+          {focused?.userId ? (
+            <button
+              type="button"
+              className="video-stage__watch-toggle"
+              onClick={() => voice.toggleRemoteVideo(focused.userId!)}
+            >
+              İzlemeyi kapat · veri tasarrufu
+            </button>
+          ) : null}
+          <span className="video-stage__quality">
+            <span className="video-stage__live-dot" />
+            {qualityLabel}
+          </span>
+        </div>
       </div>
 
       <div className="video-stage__viewport">
-        <VideoTile {...focused} />
+        {focused ? (
+          <VideoTile {...focused} />
+        ) : (
+          <div className="video-stage__paused">
+            <strong>Görüntü aktarımı durduruldu</strong>
+            <span>Bu yayınlar yeniden açılana kadar internet kullanmaz.</span>
+          </div>
+        )}
         {sources.length > 1 ? (
           <div className="video-stage__filmstrip" aria-label="Diğer yayınlar">
             {sources.map((source) => (
@@ -265,9 +309,18 @@ export function VideoStage({
                 key={source.id}
                 {...source}
                 compact
-                selected={source.id === focused.id}
+                selected={source.id === focused?.id}
                 onSelect={() => setFocusedId(source.id)}
               />
+            ))}
+          </div>
+        ) : null}
+        {pausedRemoteIds.length ? (
+          <div className="video-stage__paused-list" aria-label="İzlenmeyen yayınlar">
+            {pausedRemoteIds.map((userId) => (
+              <button key={userId} type="button" onClick={() => voice.toggleRemoteVideo(userId)}>
+                ▶ {nameOf(userId)} yayınını izle
+              </button>
             ))}
           </div>
         ) : null}
@@ -278,6 +331,7 @@ export function VideoStage({
         isFullscreen={isFullscreen}
         onToggleFullscreen={toggleFullscreen}
         onLeave={onLeave}
+        onHide={onHide}
       />
     </div>
   );

@@ -26,7 +26,7 @@ def list_members(
 ):
     server = _get_server(db, server_id)
     ensure_server_member(db, server, current_user)
-    return [
+    members = [
         schemas.MemberRead(
             id=membership.user.id,
             username=membership.user.username,
@@ -36,6 +36,18 @@ def list_members(
         )
         for membership in server.members
     ]
+    if all(member.id != server.owner_id for member in members):
+        members.insert(
+            0,
+            schemas.MemberRead(
+                id=server.owner.id,
+                username=server.owner.username,
+                display_name=server.owner.display_name,
+                avatar_url=server.owner.avatar_url,
+                joined_at=server.owner.created_at,
+            ),
+        )
+    return members
 
 
 @router.post("", status_code=201)

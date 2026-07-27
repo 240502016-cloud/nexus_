@@ -1,12 +1,11 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 
-import type { PresenceInfo, VoiceRosterMember } from "../hooks/useGateway";
+import type { VoiceRosterMember } from "../hooks/useGateway";
 import type { VoiceChannelState } from "../hooks/useVoiceChannel";
 import type { VoiceSettings } from "../settings";
 import type { Channel, ChannelType, Server, User } from "../types";
 import { BotsPanel } from "./BotsPanel";
-import { MembersPanel } from "./MembersPanel";
 import { VoicePanel } from "./VoicePanel";
 
 interface ChannelSidebarProps {
@@ -26,9 +25,7 @@ interface ChannelSidebarProps {
   onRenameServer?: (serverId: number) => void;
   onDeleteServer?: (serverId: number) => void;
   onLeaveServer?: (serverId: number) => void;
-  presences?: Map<number, PresenceInfo>;
   voiceStates?: Map<number, VoiceRosterMember[]>;
-  onCallMember?: (userId: number, username: string) => void;
   onOpenSettings: () => void;
   onLogout: () => void;
 }
@@ -85,16 +82,13 @@ export function ChannelSidebar({
   onRenameServer,
   onDeleteServer,
   onLeaveServer,
-  presences,
   voiceStates,
-  onCallMember,
   onOpenSettings,
   onLogout,
 }: ChannelSidebarProps) {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [type, setType] = useState<ChannelType>("text");
-  const [membersOpen, setMembersOpen] = useState(false);
   const [botsOpen, setBotsOpen] = useState(false);
 
   async function handleCreate(event: FormEvent) {
@@ -112,13 +106,6 @@ export function ChannelSidebar({
         <span>{server?.name ?? "Sunucu seçin"}</span>
         {server ? (
           <span className="channel-sidebar__header-actions">
-            <button
-              className="channel-sidebar__members-button"
-              onClick={() => setMembersOpen(true)}
-              title="Üyeler"
-            >
-              👥
-            </button>
             <button
               className="channel-sidebar__members-button"
               onClick={() => setBotsOpen(true)}
@@ -271,18 +258,6 @@ export function ChannelSidebar({
           ÇIK
         </button>
       </div>
-
-      {server && membersOpen ? (
-        <MembersPanel
-          serverId={server.id}
-          serverName={server.name}
-          canInvite={canCreateChannel}
-          currentUserId={currentUser.id}
-          presences={presences}
-          onCallMember={onCallMember}
-          onClose={() => setMembersOpen(false)}
-        />
-      ) : null}
 
       {server && botsOpen ? (
         <BotsPanel

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { FormEvent } from "react";
 
 import type { Channel, Message } from "../types";
@@ -29,6 +29,9 @@ interface ChatAreaProps {
   onSendMessage: (content: string) => Promise<void>;
   onDeleteMessage: (eventId: string) => void;
   onRetryMessage: (clientId: string, content: string) => void;
+  hasMoreMessages: boolean;
+  loadingOlder: boolean;
+  onLoadOlder: () => Promise<void>;
 }
 
 function displayName(matrixUserId: string): string {
@@ -69,9 +72,14 @@ export function ChatArea({
   onSendMessage,
   onDeleteMessage,
   onRetryMessage,
+  hasMoreMessages,
+  loadingOlder,
+  onLoadOlder,
 }: ChatAreaProps) {
   const [draft, setDraft] = useState("");
   const [gameActionBusy, setGameActionBusy] = useState<string | null>(null);
+  const messagesRef = useRef<HTMLDivElement | null>(null);
+  const historyRequestRef = useRef(false);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -111,12 +119,45 @@ export function ChatArea({
     }
   }
 
+  async function loadOlderPreservingScroll() {
+    const container = messagesRef.current;
+    if (!container || !hasMoreMessages || loadingOlder || historyRequestRef.current) return;
+    historyRequestRef.current = true;
+    const previousHeight = container.scrollHeight;
+    const previousTop = container.scrollTop;
+    try {
+      await onLoadOlder();
+      requestAnimationFrame(() => {
+        container.scrollTop = previousTop + (container.scrollHeight - previousHeight);
+      });
+    } finally {
+      historyRequestRef.current = false;
+    }
+  }
+
   return (
     <section className="chat-area">
       <header className="chat-area__header">
         {channel ? `${channel.type === "voice" ? "🔊" : "#"} ${channel.name}` : "Bir kanal seçin"}
       </header>
-      <div className="chat-area__messages" aria-live="polite">
+      <div
+        className="chat-area__messages"
+        aria-live="polite"
+        ref={messagesRef}
+        onScroll={(event) => {
+          if (event.currentTarget.scrollTop <= 64) void loadOlderPreservingScroll();
+        }}
+      >
+        {channel && hasMoreMessages ? (
+          <button
+            type="button"
+            className="chat-area__load-older"
+            disabled={loadingOlder}
+            onClick={() => void loadOlderPreservingScroll()}
+          >
+            {loadingOlder ? "Eski mesajlar yükleniyor…" : "Daha eski mesajları yükle"}
+          </button>
+        ) : null}
         {!channel ? null : ordered.length === 0 ? (
           <p className="chat-area__placeholder">Henüz mesaj yok. İlk mesajı sen yaz.</p>
         ) : (

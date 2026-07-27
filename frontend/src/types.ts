@@ -65,6 +65,12 @@ export interface Message {
   delivery_status?: "sending" | "failed";
 }
 
+export interface MessagePage {
+  items: Message[];
+  next_cursor: string | null;
+  has_more: boolean;
+}
+
 export interface Bot {
   id: number;
   name: string;

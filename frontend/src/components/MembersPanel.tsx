@@ -37,6 +37,7 @@ export function MembersPanel({
   const [inviting, setInviting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [inviteOpen, setInviteOpen] = useState(false);
 
   function loadMembers() {
     setLoading(true);
@@ -80,86 +81,86 @@ export function MembersPanel({
   }
 
   return (
-    <div className="settings-overlay" onClick={onClose}>
-      <div className="settings-panel" onClick={(event) => event.stopPropagation()}>
-        <header className="settings-panel__header">
-          <h2>{serverName} — Üyeler</h2>
-          <button className="settings-panel__close" onClick={onClose} aria-label="Kapat">
-            ✕
-          </button>
-        </header>
-
-        <div className="settings-panel__section">
-          {loading ? (
-            <div>Yükleniyor...</div>
-          ) : (
-            <ul className="members-panel__list">
-              {members.map((member) => {
-                const presence = presences?.get(member.id);
-                const online = presence?.online ?? false;
-                const status = online ? (presence?.status ?? "online") : "offline";
-                const custom = online ? (presence?.custom ?? "") : "";
-                const isSelf = member.id === currentUserId;
-                return (
-                  <li key={member.id} className="members-panel__row">
-                    <span
-                      className={`presence-dot presence-dot--${status}`}
-                      title={STATUS_LABEL[status] ?? "Çevrimdışı"}
-                    />
-                    {member.avatar_url ? (
-                      <img className="member-avatar" src={member.avatar_url} alt="" />
-                    ) : (
-                      <span className="member-avatar member-avatar--empty">
-                        {(member.display_name ?? member.username).charAt(0).toUpperCase()}
-                      </span>
-                    )}
-                    <span className="members-panel__member-name">
-                      {member.display_name ?? member.username}
-                      {custom ? <span className="members-panel__custom"> — {custom}</span> : null}
-                    </span>
-                    {!isSelf && onCallMember ? (
-                      <button
-                        className="members-panel__call"
-                        title={online ? "Ses kanalına çağır" : "Çevrimdışı"}
-                        disabled={!online}
-                        onClick={() => onCallMember(member.id, member.username)}
-                      >
-                        📞
-                      </button>
-                    ) : null}
-                    {canInvite && !isSelf ? (
-                      <button
-                        className="members-panel__kick"
-                        title="Sunucudan çıkar"
-                        onClick={() => handleKick(member.id, member.display_name ?? member.username)}
-                      >
-                        🚫
-                      </button>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+    <aside className="members-dock" aria-label={`${serverName} üyeleri`}>
+      <header className="members-dock__header">
+        <div>
+          <span>TOPLULUK</span>
+          <strong>Üyeler · {members.length}</strong>
         </div>
+        <button type="button" onClick={onClose} aria-label="Üye panelini kapat">×</button>
+      </header>
 
-        {canInvite ? (
-          <form className="settings-panel__section" onSubmit={handleInvite}>
-            <label htmlFor="invite-username">Kullanıcı adıyla davet et</label>
-            <input
-              id="invite-username"
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-              placeholder="kullanici-adi"
-            />
-            {error ? <div className="members-panel__error">{error}</div> : null}
-            {notice ? <div className="members-panel__notice">{notice}</div> : null}
-            <button type="submit" disabled={inviting || !username.trim()}>
-              {inviting ? "Ekleniyor..." : "Davet et"}
-            </button>
-          </form>
-        ) : null}
-      </div>
-    </div>
+      {loading ? (
+        <div className="members-dock__loading">Üyeler yükleniyor…</div>
+      ) : (
+        <ul className="members-panel__list">
+          {members.map((member) => {
+            const presence = presences?.get(member.id);
+            const online = presence?.online ?? false;
+            const status = online ? (presence?.status ?? "online") : "offline";
+            const custom = online ? (presence?.custom ?? "") : "";
+            const isSelf = member.id === currentUserId;
+            return (
+              <li key={member.id} className="members-panel__row">
+                <span className={`presence-dot presence-dot--${status}`} title={STATUS_LABEL[status]} />
+                {member.avatar_url ? (
+                  <img className="member-avatar" src={member.avatar_url} alt="" />
+                ) : (
+                  <span className="member-avatar member-avatar--empty">
+                    {(member.display_name ?? member.username).charAt(0).toUpperCase()}
+                  </span>
+                )}
+                <span className="members-panel__member-name">
+                  <strong>{member.display_name ?? member.username}</strong>
+                  <small>{custom || STATUS_LABEL[status] || "Çevrimdışı"}</small>
+                </span>
+                {!isSelf && onCallMember ? (
+                  <button
+                    className="members-panel__call"
+                    title={online ? "Ses kanalına çağır" : "Çevrimdışı"}
+                    disabled={!online}
+                    onClick={() => onCallMember(member.id, member.username)}
+                  >
+                    ARA
+                  </button>
+                ) : null}
+                {canInvite && !isSelf ? (
+                  <button
+                    className="members-panel__kick"
+                    title="Sunucudan çıkar"
+                    onClick={() => handleKick(member.id, member.display_name ?? member.username)}
+                  >
+                    ×
+                  </button>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {canInvite ? (
+        <div className="members-dock__invite">
+          <button type="button" onClick={() => setInviteOpen((open) => !open)}>
+            {inviteOpen ? "Davet formunu kapat" : "+ Kullanıcı davet et"}
+          </button>
+          {inviteOpen ? (
+            <form onSubmit={handleInvite}>
+              <input
+                aria-label="Davet edilecek kullanıcı adı"
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                placeholder="kullanici-adi"
+              />
+              <button type="submit" disabled={inviting || !username.trim()}>
+                {inviting ? "…" : "Ekle"}
+              </button>
+            </form>
+          ) : null}
+          {error ? <div className="members-panel__error">{error}</div> : null}
+          {notice ? <div className="members-panel__notice">{notice}</div> : null}
+        </div>
+      ) : null}
+    </aside>
   );
 }

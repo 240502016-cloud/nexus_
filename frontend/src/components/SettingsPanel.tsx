@@ -464,7 +464,23 @@ export function SettingsPanel({
                 disabled={notifPermission !== "granted"}
                 onChange={(e) => update({ desktopNotifications: e.target.checked })}
               />
-              Gelen arama için masaüstü bildirimi
+              Mesajlar ve aramalar için sistem bildirimi
+            </label>
+            <label className="settings-panel__radio">
+              <input
+                type="checkbox"
+                checked={settings.messageNotifications}
+                onChange={(e) => update({ messageNotifications: e.target.checked })}
+              />
+              Yeni mesajda uygulama içi kenar bildirimi
+            </label>
+            <label className="settings-panel__radio">
+              <input
+                type="checkbox"
+                checked={settings.notificationSound}
+                onChange={(e) => update({ notificationSound: e.target.checked })}
+              />
+              Yeni mesaj sesi
             </label>
             <label className="settings-panel__radio">
               <input
@@ -475,8 +491,7 @@ export function SettingsPanel({
               Gelen aramada zil sesi
             </label>
             <p className="settings-panel__hint">
-              Masaüstü bildirimi yalnızca sekme arka plandayken gösterilir; sekme öndeyse arama
-              ekranı zaten görünür.
+              Rahatsız etmeyin durumundayken mesaj ve arama bildirimlerinin tamamı sessize alınır.
             </p>
           </div>
         ) : null}

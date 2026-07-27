@@ -8,6 +8,7 @@ import type {
   LoginResponse,
   Member,
   Message,
+  MessagePage,
   PluginManifest,
   Server,
   User,
@@ -144,8 +145,11 @@ export const coreApi = {
   deleteChannel: (serverId: number, channelId: number) =>
     request<void>(`/servers/${serverId}/channels/${channelId}`, { method: "DELETE" }),
 
-  listMessages: (channelId: number, limit = 50) =>
-    request<Message[]>(`/channels/${channelId}/messages?limit=${limit}`),
+  listMessages: (channelId: number, limit = 50, cursor?: string | null) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (cursor) params.set("cursor", cursor);
+    return request<MessagePage>(`/channels/${channelId}/messages?${params.toString()}`);
+  },
   sendMessage: (channelId: number, content: string, clientId: string) =>
     request<Message>(`/channels/${channelId}/messages`, {
       method: "POST",

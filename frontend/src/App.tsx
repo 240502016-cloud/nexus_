@@ -6,14 +6,16 @@ import { ChannelSidebar } from "./components/ChannelSidebar";
 import { ChatArea } from "./components/ChatArea";
 import { IncomingCallModal, OutgoingCallToast, CallNoticeToast } from "./components/IncomingCallModal";
 import { LoginForm } from "./components/LoginForm";
+import { MembersPanel } from "./components/MembersPanel";
 import { RegisterForm } from "./components/RegisterForm";
 import { ServerRail } from "./components/ServerRail";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { VideoStage } from "./components/VideoStage";
 import { useGateway } from "./hooks/useGateway";
 import { useVoiceChannel } from "./hooks/useVoiceChannel";
-import type { VoiceSettings } from "./settings";
-import { loadVoiceSettings } from "./settings";
+import { playMessageNotification } from "./notifications";
+import type { VideoFrameRate, VideoQuality, VoiceSettings } from "./settings";
+import { loadVoiceSettings, saveVoiceSettings } from "./settings";
 import type { Channel, ChannelType, Message, Server, User } from "./types";
 
 const MESSAGE_LIMIT = 50;
@@ -32,7 +34,7 @@ function mergeIncomingMessage(current: Message[], incoming: Message): Message[] 
       message.event_id !== incoming.event_id &&
       (!incoming.client_id || message.client_id !== incoming.client_id),
   );
-  return [{ ...incoming }, ...withoutDuplicate].slice(0, MESSAGE_LIMIT);
+  return [{ ...incoming }, ...withoutDuplicate];
 }
 
 function mergeMessageSnapshot(snapshot: Message[], current: Message[]): Message[] {
@@ -49,14 +51,17 @@ function mergeMessageSnapshot(snapshot: Message[], current: Message[]): Message[
     return !snapshot.some((serverMessage) => likelySameMessage(serverMessage, message));
   });
   const localIds = new Set(localOnly.map((message) => message.event_id));
-  return [
+  const refreshed = [
     ...localOnly,
     ...snapshot.filter(
       (message) =>
         !localIds.has(message.event_id) &&
         !localOnly.some((localMessage) => likelySameMessage(message, localMessage)),
     ),
-  ].slice(0, MESSAGE_LIMIT);
+  ];
+  const refreshedIds = new Set(refreshed.map((message) => message.event_id));
+  // Cursor ile yüklenmiş eski sayfalar, en yeni 50 mesajın periyodik yenilenmesinde bellekte kalır.
+  return [...refreshed, ...current.filter((message) => !refreshedIds.has(message.event_id))];
 }
 
 export default function App() {
@@ -71,10 +76,21 @@ export default function App() {
   const [activeChannelId, setActiveChannelId] = useState<number | null>(null);
   const [activeVoiceChannelId, setActiveVoiceChannelId] = useState<number | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [messageCursor, setMessageCursor] = useState<string | null>(null);
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
+  const [olderMessagesLoading, setOlderMessagesLoading] = useState(false);
   const [voiceSettings, setVoiceSettings] = useState<VoiceSettings>(() => loadVoiceSettings());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [callError, setCallError] = useState<string | null>(null);
   const [customStatusDraft, setCustomStatusDraft] = useState("");
+  const [voiceStageVisible, setVoiceStageVisible] = useState(true);
+  const [messageNotice, setMessageNotice] = useState<{
+    serverId: number;
+    channelId: number;
+    sender: string;
+    content: string;
+  } | null>(null);
+  const [membersVisible, setMembersVisible] = useState(false);
 
   // Sesli kanal ve gateway (presence + çağrı) hook'ları uygulama seviyesinde tutulur ki video
   // ana alanda, kontroller yan panelde gösterilebilsin ve çağrılar her yerde alınabilsin.
@@ -84,6 +100,7 @@ export default function App() {
   // Farklı bir sunucudaki kanala (çağrı kabulüyle) katılırken, kanallar yüklendikten sonra
   // hedef ses kanalına geçmek için beklemede tutulan istek.
   const pendingVoiceJoinRef = useRef<{ serverId: number; channelId: number } | null>(null);
+  const pendingTextChannelRef = useRef<{ serverId: number; channelId: number } | null>(null);
   const callNotificationRef = useRef<Notification | null>(null);
   const activeChannelIdRef = useRef(activeChannelId);
   activeChannelIdRef.current = activeChannelId;
@@ -93,7 +110,7 @@ export default function App() {
     const call = gateway.incomingCall;
     callNotificationRef.current?.close();
     callNotificationRef.current = null;
-    if (!call || !voiceSettings.desktopNotifications) return;
+    if (!call || !voiceSettings.desktopNotifications || gateway.selfStatus.status === "dnd") return;
     if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
     if (!document.hidden) return; // sekme öndeyse modal zaten görünür
     try {
@@ -113,7 +130,12 @@ export default function App() {
       callNotificationRef.current?.close();
       callNotificationRef.current = null;
     };
-  }, [gateway.incomingCall, voiceSettings.desktopNotifications]);
+  }, [gateway.incomingCall, gateway.selfStatus.status, voiceSettings.desktopNotifications]);
+
+  // Rahatsız etmeyin durumunda çağrı ekranı ve zil hiç açılmaz; arayana doğrudan meşgul yanıtı gider.
+  useEffect(() => {
+    if (gateway.selfStatus.status === "dnd" && gateway.incomingCall) gateway.rejectCall();
+  }, [gateway.incomingCall, gateway.rejectCall, gateway.selfStatus.status]);
 
   // Tema uygula: koyu = varsayılan (data-theme yok), açık = data-theme="light".
   // "system" seçiliyse işletim sistemi tercihini izler ve anlık değişimi dinler.
@@ -170,13 +192,24 @@ export default function App() {
     }
     coreApi.listChannels(activeServerId).then((list) => {
       setChannels(list);
-      setActiveChannelId((current) => (list.some((c) => c.id === current) ? current : (list[0]?.id ?? null)));
+      setActiveChannelId((current) =>
+        list.some((c) => c.id === current && c.type === "text")
+          ? current
+          : (list.find((c) => c.type === "text")?.id ?? null),
+      );
       // Çağrı kabulü sonrası beklemede bir katılım varsa ve bu sunucuya aitse, hedef kanala gir.
       const pending = pendingVoiceJoinRef.current;
       if (pending && pending.serverId === activeServerId) {
         pendingVoiceJoinRef.current = null;
         if (list.some((c) => c.id === pending.channelId)) {
           setActiveVoiceChannelId(pending.channelId);
+        }
+      }
+      const pendingText = pendingTextChannelRef.current;
+      if (pendingText && pendingText.serverId === activeServerId) {
+        pendingTextChannelRef.current = null;
+        if (list.some((c) => c.id === pendingText.channelId && c.type === "text")) {
+          setActiveChannelId(pendingText.channelId);
         }
       }
     });
@@ -187,12 +220,18 @@ export default function App() {
   useEffect(() => {
     if (!activeChannelId) {
       setMessages([]);
+      setMessageCursor(null);
+      setHasMoreMessages(false);
       return;
     }
     let cancelled = false;
     let timeoutId: number | null = null;
     let loading = false;
+    let initialized = false;
     const channelId = activeChannelId;
+    setMessages([]);
+    setMessageCursor(null);
+    setHasMoreMessages(false);
 
     function nextDelay() {
       if (document.hidden) return MESSAGE_SYNC_BACKGROUND_MS;
@@ -209,9 +248,14 @@ export default function App() {
       if (loading || cancelled) return;
       loading = true;
       try {
-        const list = await coreApi.listMessages(channelId, MESSAGE_LIMIT);
+        const page = await coreApi.listMessages(channelId, MESSAGE_LIMIT);
         if (!cancelled && activeChannelIdRef.current === channelId) {
-          setMessages((current) => mergeMessageSnapshot(list, current));
+          setMessages((current) => mergeMessageSnapshot(page.items, current));
+          if (!initialized) {
+            initialized = true;
+            setMessageCursor(page.next_cursor);
+            setHasMoreMessages(page.has_more);
+          }
         }
       } catch {
         // Gateway çalışmaya devam edebilir; bir sonraki düşük frekanslı senkronizasyonda tekrar denenir.
@@ -253,14 +297,104 @@ export default function App() {
       return;
     }
     let cancelled = false;
-    coreApi.listMessages(activeChannelId).then((list) => {
-      if (!cancelled) setMessages((current) => mergeMessageSnapshot(list, current));
+    coreApi.listMessages(activeChannelId).then((page) => {
+      if (!cancelled) setMessages((current) => mergeMessageSnapshot(page.items, current));
     }).catch(() => {});
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gateway.channelMessage?.sequence]);
+
+  // Aktif olmayan kanallardaki mesajlar için kenar bildirimi, kısa ses ve izin verilmişse
+  // tarayıcı dışı sistem bildirimi üret. DND bütün yolları tek noktadan kapatır.
+  useEffect(() => {
+    const event = gateway.channelMessage;
+    const message = event?.message;
+    if (!event || !message || !user || message.sender === user.matrix_user_id) return;
+    if (gateway.selfStatus.status === "dnd") return;
+    if (event.channelId === activeChannelId && !document.hidden) return;
+
+    const sender = message.sender.replace(/^@/, "").split(":")[0];
+    if (voiceSettings.messageNotifications) {
+      setMessageNotice({
+        serverId: event.serverId,
+        channelId: event.channelId,
+        sender,
+        content: message.content,
+      });
+    }
+    if (voiceSettings.notificationSound) playMessageNotification();
+    if (
+      voiceSettings.desktopNotifications &&
+      typeof Notification !== "undefined" &&
+      Notification.permission === "granted"
+    ) {
+      try {
+        const notification = new Notification(`${sender} yeni bir mesaj gönderdi`, {
+          body: message.content.slice(0, 180),
+          tag: `nexus-message-${event.channelId}`,
+        });
+        notification.onclick = () => {
+          window.focus();
+          notification.close();
+        };
+      } catch {
+        /* sistem bildirimi kullanılamıyorsa kenar bildirimi devam eder */
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gateway.channelMessage?.sequence]);
+
+  function openMessageNotice() {
+    if (!messageNotice) return;
+    if (messageNotice.serverId === activeServerId) {
+      setActiveChannelId(messageNotice.channelId);
+    } else {
+      pendingTextChannelRef.current = {
+        serverId: messageNotice.serverId,
+        channelId: messageNotice.channelId,
+      };
+      setActiveServerId(messageNotice.serverId);
+    }
+    setMessageNotice(null);
+  }
+
+  async function handleLoadOlderMessages() {
+    if (!activeChannelId || !messageCursor || olderMessagesLoading) return;
+    const channelId = activeChannelId;
+    setOlderMessagesLoading(true);
+    try {
+      const page = await coreApi.listMessages(channelId, MESSAGE_LIMIT, messageCursor);
+      if (activeChannelIdRef.current !== channelId) return;
+      setMessages((current) => {
+        const known = new Set(current.map((message) => message.event_id));
+        return [...current, ...page.items.filter((message) => !known.has(message.event_id))];
+      });
+      setMessageCursor(page.next_cursor);
+      setHasMoreMessages(page.has_more);
+    } catch (err) {
+      setCallError(err instanceof Error ? err.message : "Eski mesajlar yüklenemedi");
+    } finally {
+      setOlderMessagesLoading(false);
+    }
+  }
+
+  function updateVideoQuality(videoQuality: VideoQuality) {
+    setVoiceSettings((current) => {
+      const next = { ...current, videoQuality };
+      saveVoiceSettings(next);
+      return next;
+    });
+  }
+
+  function updateVideoFrameRate(videoFrameRate: VideoFrameRate) {
+    setVoiceSettings((current) => {
+      const next = { ...current, videoFrameRate };
+      saveVoiceSettings(next);
+      return next;
+    });
+  }
 
   async function handleLogin(username: string, password: string) {
     setAuthError(null);
@@ -357,6 +491,7 @@ export default function App() {
   }
 
   function handleToggleVoice(channelId: number) {
+    setVoiceStageVisible(true);
     setActiveVoiceChannelId((current) => (current === channelId ? null : channelId));
   }
 
@@ -409,6 +544,7 @@ export default function App() {
       return;
     }
     setActiveVoiceChannelId(targetChannel.id);
+    setVoiceStageVisible(true);
     gateway.inviteToCall(targetChannel.id, userId, username);
   }
 
@@ -492,7 +628,7 @@ export default function App() {
   const activeChannel = channels.find((c) => c.id === activeChannelId);
 
   return (
-    <div className="app-shell">
+    <div className={membersVisible ? "app-shell app-shell--members-open" : "app-shell"}>
       <ServerRail
         servers={servers}
         activeServerId={activeServerId}
@@ -516,13 +652,11 @@ export default function App() {
         onRenameServer={handleRenameServer}
         onDeleteServer={handleDeleteServer}
         onLeaveServer={handleLeaveServer}
-        presences={gateway.presences}
         voiceStates={gateway.voiceStates}
-        onCallMember={handleCallMember}
         onOpenSettings={() => setSettingsOpen(true)}
         onLogout={handleLogout}
       />
-      <div className="app-main">
+      <div className={voiceStageVisible ? "app-main" : "app-main app-main--chat-focus"}>
         <header className="app-main__toolbar">
           <div className="app-main__context">
             <span>{activeServer?.name ?? "Nexus"}</span>
@@ -538,6 +672,47 @@ export default function App() {
                 <span className="connection-pill__dot" />
                 Ses bağlı
               </span>
+            ) : null}
+            {activeServer ? (
+              <button
+                type="button"
+                className={membersVisible ? "toolbar-action toolbar-action--active" : "toolbar-action"}
+                onClick={() => setMembersVisible((visible) => !visible)}
+              >
+                {membersVisible ? "Üyeleri kapat" : "Üyeler"}
+              </button>
+            ) : null}
+            {voice.connected ? (
+              <>
+                <label className="quality-quick" title="Kamera ve ekran paylaşımı çözünürlüğü">
+                  <span>Kalite</span>
+                  <select
+                    value={voiceSettings.videoQuality}
+                    onChange={(event) => updateVideoQuality(event.target.value as VideoQuality)}
+                  >
+                    <option value="480p">480p</option>
+                    <option value="720p">720p</option>
+                    <option value="1080p">1080p</option>
+                  </select>
+                </label>
+                <label className="quality-quick" title="Kamera ve ekran paylaşımı kare hızı">
+                  <span>FPS</span>
+                  <select
+                    value={voiceSettings.videoFrameRate}
+                    onChange={(event) => updateVideoFrameRate(Number(event.target.value) as VideoFrameRate)}
+                  >
+                    <option value={30}>30</option>
+                    <option value={60}>60</option>
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="toolbar-action"
+                  onClick={() => setVoiceStageVisible((visible) => !visible)}
+                >
+                  {voiceStageVisible ? "Sahneyi gizle" : "Canlı sahneyi göster"}
+                </button>
+              </>
             ) : null}
             <select
               className="status-select"
@@ -565,17 +740,19 @@ export default function App() {
             />
           </div>
         </header>
-        <VideoStage
+        {voiceStageVisible ? <VideoStage
           currentUser={user}
           participants={voice.participants}
           localVideoStream={voice.localVideoStream}
           localVideoKind={voice.videoKind}
           remoteStreams={voice.remoteStreams}
           voice={voice}
+          qualityLabel={`${voiceSettings.videoQuality} · ${voiceSettings.videoFrameRate} FPS`}
+          onHide={() => setVoiceStageVisible(false)}
           onLeave={() => {
             if (activeVoiceChannelId) handleToggleVoice(activeVoiceChannelId);
           }}
-        />
+        /> : null}
         <ChatArea
           channel={activeChannel}
           messages={messages}
@@ -583,8 +760,22 @@ export default function App() {
           onSendMessage={handleSendMessage}
           onDeleteMessage={handleDeleteMessage}
           onRetryMessage={handleRetryMessage}
+          hasMoreMessages={hasMoreMessages}
+          loadingOlder={olderMessagesLoading}
+          onLoadOlder={handleLoadOlderMessages}
         />
       </div>
+      {activeServer && membersVisible ? (
+        <MembersPanel
+          serverId={activeServer.id}
+          serverName={activeServer.name}
+          canInvite={activeServer.owner_id === user.id}
+          currentUserId={user.id}
+          presences={gateway.presences}
+          onCallMember={handleCallMember}
+          onClose={() => setMembersVisible(false)}
+        />
+      ) : null}
       {settingsOpen ? (
         <SettingsPanel
           settings={voiceSettings}
@@ -595,7 +786,7 @@ export default function App() {
         />
       ) : null}
 
-      {gateway.incomingCall ? (
+      {gateway.incomingCall && gateway.selfStatus.status !== "dnd" ? (
         <IncomingCallModal
           call={gateway.incomingCall}
           sound={voiceSettings.callRingtone}
@@ -611,6 +802,22 @@ export default function App() {
       ) : null}
       {callError ? (
         <CallNoticeToast notice={{ kind: "error", text: callError }} onDismiss={() => setCallError(null)} />
+      ) : null}
+      {messageNotice ? (
+        <div className="message-notice" role="status">
+          <button type="button" className="message-notice__body" onClick={openMessageNotice}>
+            <strong>{messageNotice.sender}</strong>
+            <span>{messageNotice.content}</span>
+          </button>
+          <button
+            type="button"
+            className="message-notice__close"
+            onClick={() => setMessageNotice(null)}
+            aria-label="Bildirimi kapat"
+          >
+            ×
+          </button>
+        </div>
       ) : null}
     </div>
   );

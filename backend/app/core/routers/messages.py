@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.bot_engine.dispatcher import MessageEvent, handle_message_event, is_private_message_event
@@ -8,11 +8,22 @@ from app.core import schemas
 from app.core.auth import get_current_user
 from app.core.authz import ensure_server_member
 from app.core.matrix_client import MatrixError, matrix_client
-from app.core.models import BotServerLink, Channel, User
+from app.core.models import BotServerLink, Channel, ChannelType, User
 from app.core.routers.gateway import notify_channel_message
 from app.database import get_db
 
 router = APIRouter(prefix="/channels/{channel_id}/messages", tags=["messages"])
+
+
+def _get_text_channel(db: Session, channel_id: int) -> Channel:
+    channel = db.get(Channel, channel_id)
+    if not channel:
+        raise HTTPException(status_code=404, detail="Kanal bulunamadı")
+    if channel.type != ChannelType.TEXT:
+        raise HTTPException(status_code=409, detail="Ses kanallarının mesaj geçmişi yok")
+    if not channel.matrix_room_id:
+        raise HTTPException(status_code=404, detail="Kanalın Matrix odası bulunamadı")
+    return channel
 
 
 def _notify_bot_replies(
@@ -44,9 +55,7 @@ def send_message(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    channel = db.get(Channel, channel_id)
-    if not channel or not channel.matrix_room_id:
-        raise HTTPException(status_code=404, detail="Kanal veya Matrix odası bulunamadı")
+    channel = _get_text_channel(db, channel_id)
     ensure_server_member(db, channel.server, current_user)
 
     if not current_user.matrix_access_token:
@@ -121,9 +130,7 @@ def delete_message(
 ):
     """Bir mesajı siler (Matrix redact). Yetkilendirmeyi Matrix uygular: kullanıcı yalnızca
     kendi mesajını (veya yeterli power level'a sahipse başkasının mesajını) silebilir."""
-    channel = db.get(Channel, channel_id)
-    if not channel or not channel.matrix_room_id:
-        raise HTTPException(status_code=404, detail="Kanal veya Matrix odası bulunamadı")
+    channel = _get_text_channel(db, channel_id)
     ensure_server_member(db, channel.server, current_user)
 
     if not current_user.matrix_access_token:
@@ -147,24 +154,26 @@ def delete_message(
     )
 
 
-@router.get("", response_model=list[schemas.MessageRead])
+@router.get("", response_model=schemas.MessagePage)
 def list_messages(
     channel_id: int,
-    limit: int = 50,
+    limit: int = Query(default=50, ge=1, le=100),
+    cursor: str | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    channel = db.get(Channel, channel_id)
-    if not channel or not channel.matrix_room_id:
-        raise HTTPException(status_code=404, detail="Kanal veya Matrix odası bulunamadı")
+    channel = _get_text_channel(db, channel_id)
     ensure_server_member(db, channel.server, current_user)
 
     if not current_user.matrix_access_token:
         raise HTTPException(status_code=409, detail="Kullanıcının Matrix hesabı yok")
 
     try:
-        messages = matrix_client.get_messages(
-            current_user.matrix_access_token, channel.matrix_room_id, limit=limit
+        page = matrix_client.get_message_page(
+            current_user.matrix_access_token,
+            channel.matrix_room_id,
+            limit=limit,
+            cursor=cursor,
         )
         bot_matrix_ids = {
             link.bot.matrix_user_id
@@ -173,8 +182,8 @@ def list_messages(
             )
             if link.bot.matrix_user_id
         }
-        for message in messages:
+        for message in page["items"]:
             message["is_bot"] = message.get("sender") in bot_matrix_ids
-        return messages
+        return page
     except MatrixError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc

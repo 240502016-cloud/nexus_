@@ -139,18 +139,28 @@ class MatrixClient:
             raise MatrixError(f"Mesaj gönderilemedi: {response.status_code} {response.text}")
         return response.json()["event_id"]
 
-    def get_messages(self, access_token: str, room_id: str, limit: int = 50) -> list[dict]:
-        """Odadaki en son mesajları (yeniden eskiye) döner."""
+    def get_message_page(
+        self,
+        access_token: str,
+        room_id: str,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> dict:
+        """Oda geçmişini yeniden eskiye, Matrix cursor'ıyla sayfalar."""
+        params: dict[str, str | int] = {"dir": "b", "limit": limit}
+        if cursor:
+            params["from"] = cursor
         response = self._request(
             "GET",
             f"/_matrix/client/v3/rooms/{room_id}/messages",
             headers={"Authorization": f"Bearer {access_token}"},
-            params={"dir": "b", "limit": limit},
+            params=params,
         )
         if not response.ok:
             raise MatrixError(f"Mesajlar alınamadı: {response.status_code} {response.text}")
-        events = response.json().get("chunk", [])
-        return [
+        payload = response.json()
+        events = payload.get("chunk", [])
+        messages = [
             {
                 "event_id": event["event_id"],
                 "sender": event["sender"],
@@ -160,8 +170,18 @@ class MatrixClient:
             for event in events
             if event.get("type") == "m.room.message"
             # Silinmiş (redact edilmiş) mesajları listeye dahil etme.
-            and not event.get("unsigned", {}).get("redacted_because")
+            and "redacted_because" not in event.get("unsigned", {})
         ]
+        next_cursor = payload.get("end")
+        return {
+            "items": messages,
+            "next_cursor": next_cursor,
+            "has_more": bool(next_cursor and events),
+        }
+
+    def get_messages(self, access_token: str, room_id: str, limit: int = 50) -> list[dict]:
+        """Geriye uyumluluk için odadaki son mesajları döndürür."""
+        return self.get_message_page(access_token, room_id, limit=limit)["items"]
 
     def redact_message(self, access_token: str, room_id: str, event_id: str, reason: str | None = None) -> str:
         """Bir mesajı siler (redact). Kendi mesajını herkes silebilir; başkasının mesajını
