@@ -339,6 +339,9 @@ imajları yeniden oluşturduğu için Matrix spam ayarı ve `0006_social_graph` 
   kapalıyken bütün Nexus dağıtımını durdurmaz; belirgin bir uyarı verip ana servisleri günceller.
   Bu durumda yalnızca AI cevapları çevrimdışı kalır. İlk kurulum ve açık `Validate` işlemi Gateway
   bağlantısını/anahtarını zorunlu doğrulamaya devam eder.
+- Sunucu yönetim ve arkadaş güncelleme akışları Docker motoru kapalıysa Docker Desktop'ı otomatik
+  başlatıp hazır olmasını bekler; böylece kod çekildikten sonra servislerin başlamadan kalması ve
+  sitenin bütün HTTP/HTTPS portlarının kapalı görünmesi önlenir.
 
 ### Deploy
 

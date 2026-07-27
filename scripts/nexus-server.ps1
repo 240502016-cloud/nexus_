@@ -66,11 +66,55 @@ function Get-GitExecutable {
     throw 'Git was not found. Install Git for Windows first.'
 }
 
+function Test-DockerEngine {
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & docker info *> $null
+        return $LASTEXITCODE -eq 0
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+}
+
+function Ensure-DockerEngine {
+    if (Test-DockerEngine) {
+        Write-Host '[OK] Docker engine is ready'
+        return
+    }
+
+    Write-Step 'Docker engine is not running; starting Docker Desktop'
+    $candidates = @(
+        (Join-Path $env:LOCALAPPDATA 'Programs\DockerDesktop\Docker Desktop.exe'),
+        (Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe')
+    )
+    $dockerDesktop = $candidates |
+        Where-Object { $_ -and (Test-Path -LiteralPath $_) } |
+        Select-Object -First 1
+    if (-not $dockerDesktop) {
+        throw 'Docker Desktop.exe was not found. Install or start Docker Desktop manually.'
+    }
+
+    Start-Process -FilePath $dockerDesktop -WindowStyle Hidden
+    $deadline = (Get-Date).AddMinutes(4)
+    while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds 5
+        if (Test-DockerEngine) {
+            Write-Host '[OK] Docker engine is ready'
+            return
+        }
+        Write-Host '  ... waiting for Docker engine' -ForegroundColor DarkGray
+    }
+    throw 'Docker engine did not become ready within 4 minutes.'
+}
+
 function Assert-Prerequisites {
     if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-        throw 'Docker was not found. Install/start Docker Desktop first.'
+        throw 'Docker was not found. Install Docker Desktop first.'
     }
     Invoke-Checked -FilePath 'docker' -Arguments @('compose', 'version') | Out-Null
+    Ensure-DockerEngine
     [void](Get-GitExecutable)
 }
 

@@ -85,6 +85,10 @@ mesajlaşma, ses/görüntü ve dosya özellikleri çalışır; yalnızca AI ceva
 başlatılana kadar kullanılamaz. `Validate` işlemi ise bağlantı ve anahtar hatalarını kesin hata olarak
 raporlamaya devam eder.
 
+`Update`, `Deploy`, `Start` ve diğer sunucu işlemleri Docker komutu kurulu olduğu halde Docker motoru
+kapalıysa Docker Desktop'ı otomatik başlatır ve motorun hazır olması için en fazla dört dakika bekler.
+Bu sayede güncelleme kod çekildikten sonra kapalı Docker motoru nedeniyle yarıda kalmaz.
+
 ### Eski kurulumu silmeden temiz kurulum
 
 Eski stack önce durdurulmalıdır; iki stack aynı host portlarını aynı anda kullanamaz. Eski kurulumun
