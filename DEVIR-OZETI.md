@@ -335,6 +335,10 @@ imajları yeniden oluşturduğu için Matrix spam ayarı ve `0006_social_graph` 
   istemcide sırayla işlenir, yeniden gelen eş için eski bağlantı temizlenir ve kısa medya
   kopmalarında ICE otomatik yenilenir; kapanan bağlantıların beklenen `connection aborted` hatası
   artık kullanıcıya ham hata olarak gösterilmez.
+- `Arkadas-Sunucuyu-Guncelle.cmd` artık ayrı AI bilgisayarındaki Ollama/AI Gateway geçici olarak
+  kapalıyken bütün Nexus dağıtımını durdurmaz; belirgin bir uyarı verip ana servisleri günceller.
+  Bu durumda yalnızca AI cevapları çevrimdışı kalır. İlk kurulum ve açık `Validate` işlemi Gateway
+  bağlantısını/anahtarını zorunlu doğrulamaya devam eder.
 
 ### Deploy
 

@@ -284,12 +284,32 @@ function Get-SynapseLocale {
 }
 
 function Test-AiGateway {
+    param([switch]$Required)
+
     $values = Read-EnvironmentFile
     Write-Step 'Testing AI Gateway connectivity and authentication'
-    & (Join-Path $PSScriptRoot 'test-ai-gateway-tailscale.ps1') `
-        -GatewayBaseUrl $values['OLLAMA_BASE_URL'] `
-        -ApiKey $values['OLLAMA_API_KEY']
-    if ($LASTEXITCODE -ne 0) { throw 'AI Gateway test failed.' }
+    try {
+        $gatewayOutput = & (Join-Path $PSScriptRoot 'test-ai-gateway-tailscale.ps1') `
+            -GatewayBaseUrl $values['OLLAMA_BASE_URL'] `
+            -ApiKey $values['OLLAMA_API_KEY']
+        foreach ($line in $gatewayOutput) {
+            Write-Host $line
+        }
+        Write-Host '[OK] AI Gateway is online and authenticated'
+        return $true
+    }
+    catch {
+        $detail = $_.Exception.Message
+        if ($Required) {
+            throw "AI Gateway test failed: $detail"
+        }
+        Write-Warning (
+            "AI Gateway is currently unavailable. Server deployment will continue; " +
+            "only AI replies remain unavailable until Ollama and AI Gateway are started " +
+            "on the AI computer. Detail: $detail"
+        )
+        return $false
+    }
 }
 
 function Invoke-CurlRequest {
@@ -355,11 +375,13 @@ function Test-PublicEndpoints {
 }
 
 function Invoke-Deploy {
+    param([switch]$RequireAiGateway)
+
     Assert-Prerequisites
     Assert-EnvironmentFile
     Write-Step 'Validating Docker Compose configuration'
     Invoke-Compose -Arguments @('config', '--quiet') | Out-Null
-    Test-AiGateway
+    [void](Test-AiGateway -Required:$RequireAiGateway)
 
     if (-not $SkipBuild) {
         Write-Step 'Building service images'
@@ -450,7 +472,7 @@ function Invoke-Validation {
     Assert-EnvironmentFile
     Write-Step 'Validating Docker Compose configuration'
     Invoke-Compose -Arguments @('config', '--quiet') | Out-Null
-    Test-AiGateway
+    [void](Test-AiGateway -Required)
     Write-Host '[OK] environment, Compose and AI Gateway validation completed'
 }
 
@@ -506,7 +528,7 @@ switch ($Action) {
         Assert-Prerequisites
         Write-Step 'Creating a new server environment'
         New-EnvironmentFile
-        Invoke-Deploy
+        Invoke-Deploy -RequireAiGateway
     }
     'Deploy' { Invoke-Deploy }
     'Validate' { Invoke-Validation }

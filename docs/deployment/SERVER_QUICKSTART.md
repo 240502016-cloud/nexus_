@@ -79,6 +79,12 @@ yapıştırın. Giriş gizli olduğu için terminalde karakter görünmez. `Init
 
 Var olan `.env` dosyasını `Initialize` ezmez. Mevcut sunucuda aşağıdaki güncelleme akışını kullanın.
 
+Rutin `Update` ve `Deploy` sırasında AI bilgisayarı kapalıysa veya AI Gateway'e geçici olarak
+ulaşılamıyorsa işlem yalnızca uyarı verir ve ana Nexus servislerini güncellemeye devam eder. Bu durumda
+mesajlaşma, ses/görüntü ve dosya özellikleri çalışır; yalnızca AI cevapları Ollama ve AI Gateway yeniden
+başlatılana kadar kullanılamaz. `Validate` işlemi ise bağlantı ve anahtar hatalarını kesin hata olarak
+raporlamaya devam eder.
+
 ### Eski kurulumu silmeden temiz kurulum
 
 Eski stack önce durdurulmalıdır; iki stack aynı host portlarını aynı anda kullanamaz. Eski kurulumun
