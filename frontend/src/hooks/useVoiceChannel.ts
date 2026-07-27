@@ -64,6 +64,28 @@ export interface RemoteVideoStream {
 
 const SPEAKING_THRESHOLD = 12;
 
+function sendWebSocketJson(socket: WebSocket | null, payload: unknown): boolean {
+  if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+  try {
+    socket.send(JSON.stringify(payload));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isExpectedConnectionAbort(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const detail = `${error.name} ${error.message}`.toLowerCase();
+  return (
+    error.name === "AbortError" ||
+    detail.includes("connection aborted") ||
+    detail.includes("operation was aborted") ||
+    detail.includes("peerconnection is closed") ||
+    detail.includes("connection is closed")
+  );
+}
+
 function buildCameraConstraints(vs: VoiceSettings, deviceId: string | null): MediaTrackConstraints {
   const preset = VIDEO_QUALITY_PRESETS[vs.videoQuality];
   return {
@@ -148,7 +170,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     localStreamRef.current?.getAudioTracks().forEach((track) => {
       track.enabled = !nextMuted;
     });
-    wsRef.current?.send(JSON.stringify({ type: "mute", muted: nextMuted }));
+    sendWebSocketJson(wsRef.current, { type: "mute", muted: nextMuted });
   }, []);
 
   // Deafen: tüm uzak sesleri kıs ve (Discord gibi) kendini de sustur. Kapanınca önceki mute durumuna dön.
@@ -165,7 +187,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       } else {
         applyMuted(preDeafenMutedRef.current);
       }
-      wsRef.current?.send(JSON.stringify({ type: "deafen", deafened: nextDeafened }));
+      sendWebSocketJson(wsRef.current, { type: "deafen", deafened: nextDeafened });
     },
     [applyMuted],
   );
@@ -246,6 +268,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     let reconnectDelay = 1000;
     let microphoneError: string | null = null;
     let microphoneAttempted = false;
+    const peerRecoveryTimers = new Map<number, number>();
 
     function upsertRemoteStream(peerId: number, kind: "camera" | "screen", stream: MediaStream) {
       const key = `${peerId}:${kind}`;
@@ -265,7 +288,25 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       });
     }
 
+    function closePeerConnection(peerId: number) {
+      const recoveryTimer = peerRecoveryTimers.get(peerId);
+      if (recoveryTimer !== undefined) window.clearTimeout(recoveryTimer);
+      peerRecoveryTimers.delete(peerId);
+      peersRef.current.get(peerId)?.pc.close();
+      peersRef.current.delete(peerId);
+      const audioElement = audioElsRef.current.get(peerId);
+      if (audioElement) audioElement.srcObject = null;
+      audioElsRef.current.delete(peerId);
+      for (const key of [...remoteMediaRef.current.keys()]) {
+        if (key.startsWith(`${peerId}:`)) remoteMediaRef.current.delete(key);
+      }
+      pendingIceRef.current.delete(peerId);
+      dropRemoteStream(peerId);
+    }
+
     function resetPeersForReconnect() {
+      peerRecoveryTimers.forEach((timer) => window.clearTimeout(timer));
+      peerRecoveryTimers.clear();
       peersRef.current.forEach((peer) => peer.pc.close());
       peersRef.current.clear();
       pendingIceRef.current.clear();
@@ -351,8 +392,15 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
           if (pc.signalingState !== "stable") return;
           peer.makingOffer = true;
           await pc.setLocalDescription();
-          ws.send(JSON.stringify({ type: "offer", to: peerId, sdp: pc.localDescription?.sdp }));
+          sendWebSocketJson(ws, { type: "offer", to: peerId, sdp: pc.localDescription?.sdp });
         } catch (err) {
+          if (
+            cancelled ||
+            wsRef.current !== ws ||
+            peersRef.current.get(peerId)?.pc !== pc ||
+            pc.signalingState === "closed" ||
+            isExpectedConnectionAbort(err)
+          ) return;
           setError(`Bağlantı pazarlığı hatası: ${err instanceof Error ? err.message : String(err)}`);
         } finally {
           peer.makingOffer = false;
@@ -361,7 +409,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
 
       pc.onicecandidate = (event) => {
         if (event.candidate) {
-          ws.send(JSON.stringify({ type: "ice-candidate", to: peerId, candidate: event.candidate }));
+          sendWebSocketJson(ws, { type: "ice-candidate", to: peerId, candidate: event.candidate });
         }
       };
 
@@ -402,8 +450,34 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       };
 
       pc.onconnectionstatechange = () => {
-        if (pc.connectionState === "failed") {
-          setError("WebRTC bağlantısı kurulamadı; TURN/firewall ayarlarını kontrol edin");
+        const previousTimer = peerRecoveryTimers.get(peerId);
+        if (previousTimer !== undefined) {
+          window.clearTimeout(previousTimer);
+          peerRecoveryTimers.delete(peerId);
+        }
+        if (pc.connectionState === "connected") {
+          setError((current) =>
+            current === "Medya bağlantısı yeniden kuruluyor…" ? microphoneError : current,
+          );
+          return;
+        }
+        if (pc.connectionState === "disconnected" || pc.connectionState === "failed") {
+          const delay = pc.connectionState === "failed" ? 0 : 3_000;
+          const timer = window.setTimeout(() => {
+            peerRecoveryTimers.delete(peerId);
+            if (
+              cancelled ||
+              peersRef.current.get(peerId)?.pc !== pc ||
+              !["disconnected", "failed"].includes(pc.connectionState)
+            ) return;
+            setError("Medya bağlantısı yeniden kuruluyor…");
+            try {
+              pc.restartIce();
+            } catch {
+              // Socket yeniden bağlanırken kapanan eski peer'i canlandırmaya çalışma.
+            }
+          }, delay);
+          peerRecoveryTimers.set(peerId, timer);
         }
       };
 
@@ -476,8 +550,13 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       );
       wsRef.current = ws;
 
-      ws.onmessage = async (event) => {
-        try {
+      // WebSocket message event'leri async handler'ı beklemez. SDP offer/answer işlemlerini
+      // tek kuyrukta işleyerek aynı RTCPeerConnection üzerinde yarışmalarını engelle.
+      let signalingQueue = Promise.resolve();
+      ws.onmessage = (event) => {
+        signalingQueue = signalingQueue.then(async () => {
+          if (cancelled || wsRef.current !== ws) return;
+          try {
           const data = JSON.parse(event.data) as SignalMessage;
 
           switch (data.type) {
@@ -497,31 +576,30 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
             }
             break;
           }
-          case "peer-joined":
-            setParticipants((prev) => [
-              ...prev,
-              {
-                user_id: data.user_id as number,
+          case "peer-joined": {
+            const joinedUserId = data.user_id as number;
+            const participant = {
+                user_id: joinedUserId,
                 username: data.username as string,
                 avatar_url: (data.avatar_url as string | null) ?? null,
                 muted: data.muted as boolean,
                 deafened: (data.deafened as boolean) ?? false,
                 speaking: false,
-              },
+            };
+            setParticipants((prev) => [
+              ...prev.filter((item) => item.user_id !== joinedUserId),
+              participant,
             ]);
+            // Aynı kullanıcı F5/reconnect yaptıysa eski peer'i kapatıp yeni oturumla temiz
+            // bağlantı kur. Eski peer üzerinde yeni SDP uygulamak connection-aborted yarışı doğurur.
+            if (peersRef.current.has(joinedUserId)) closePeerConnection(joinedUserId);
             // Yeni gelen için de PC kur; iki taraf da offer üretebilir, glare perfect negotiation ile çözülür.
-            createPeerConnection(data.user_id as number, ws);
+            createPeerConnection(joinedUserId, ws);
             break;
+          }
           case "peer-left": {
             const peerId = data.user_id as number;
-            peersRef.current.get(peerId)?.pc.close();
-            peersRef.current.delete(peerId);
-            audioElsRef.current.get(peerId)?.remove();
-            audioElsRef.current.delete(peerId);
-            for (const key of [...remoteMediaRef.current.keys()]) {
-              if (key.startsWith(`${peerId}:`)) remoteMediaRef.current.delete(key);
-            }
-            dropRemoteStream(peerId);
+            closePeerConnection(peerId);
             setParticipants((prev) => prev.filter((p) => p.user_id !== peerId));
             break;
           }
@@ -542,7 +620,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
             await pc.setRemoteDescription(description);
             await flushPendingIce(fromId, pc);
             await pc.setLocalDescription();
-            ws.send(JSON.stringify({ type: "answer", to: fromId, sdp: pc.localDescription?.sdp }));
+            sendWebSocketJson(ws, { type: "answer", to: fromId, sdp: pc.localDescription?.sdp });
             break;
           }
           case "answer": {
@@ -588,9 +666,15 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
             );
             break;
           }
-        } catch (err) {
-          setError(`WebRTC signaling hatası: ${err instanceof Error ? err.message : String(err)}`);
-        }
+          } catch (err) {
+            if (
+              cancelled ||
+              wsRef.current !== ws ||
+              isExpectedConnectionAbort(err)
+            ) return;
+            setError(`WebRTC signaling hatası: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        });
       };
 
       ws.onerror = () => ws.close();
@@ -761,7 +845,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     function reportSpeaking(speaking: boolean) {
       if (speaking === lastSpeaking) return;
       lastSpeaking = speaking;
-      wsRef.current?.send(JSON.stringify({ type: "speaking", speaking }));
+      sendWebSocketJson(wsRef.current, { type: "speaking", speaking });
     }
 
     function tick() {

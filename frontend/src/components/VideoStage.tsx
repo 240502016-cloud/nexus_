@@ -23,6 +23,8 @@ function MediaTile({
   speaking = false,
   onPause,
   paused = false,
+  focused = false,
+  onFocus,
 }: {
   stream: MediaStream | null;
   name: string;
@@ -32,13 +34,32 @@ function MediaTile({
   speaking?: boolean;
   onPause?: () => void;
   paused?: boolean;
+  focused?: boolean;
+  onFocus?: () => void;
 }) {
   const ref = useRef<HTMLVideoElement | null>(null);
   useEffect(() => {
     if (ref.current && stream && ref.current.srcObject !== stream) ref.current.srcObject = stream;
   }, [stream]);
+  const className = [
+    "stage-person",
+    speaking ? "stage-person--speaking" : "",
+    focused ? "stage-person--focused" : "",
+  ].filter(Boolean).join(" ");
   return (
-    <article className={speaking ? "stage-person stage-person--speaking" : "stage-person"}>
+    <article
+      className={className}
+      onClick={onFocus}
+      onKeyDown={(event) => {
+        if (!onFocus || (event.key !== "Enter" && event.key !== " ")) return;
+        event.preventDefault();
+        onFocus();
+      }}
+      role={onFocus ? "button" : undefined}
+      tabIndex={onFocus ? 0 : undefined}
+      title={onFocus ? (focused ? "Odak görünümünden çık" : `${name} akışına odaklan`) : undefined}
+      aria-label={onFocus ? (focused ? `${name} odak görünümünden çık` : `${name} akışına odaklan`) : undefined}
+    >
       {hasVideo(stream) ? (
         <video ref={ref} autoPlay playsInline muted className={mirror ? "stage-person__video stage-person__video--mirror" : "stage-person__video"} />
       ) : avatar ? (
@@ -50,8 +71,18 @@ function MediaTile({
         <span>{name}</span>
         {label ? <small>{label}</small> : null}
       </div>
+      {onFocus ? (
+        <span className="stage-person__focus-hint">{focused ? "Izgaraya dön" : "Odakla"}</span>
+      ) : null}
       {onPause && (hasVideo(stream) || paused) ? (
-        <button type="button" className="stage-person__pause" onClick={onPause}>
+        <button
+          type="button"
+          className="stage-person__pause"
+          onClick={(event) => {
+            event.stopPropagation();
+            onPause();
+          }}
+        >
           {paused ? "İzlemeyi aç" : "İzlemeyi kapat"}
         </button>
       ) : null}
@@ -76,6 +107,7 @@ export function VideoStage({
 }) {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [focusedTileKey, setFocusedTileKey] = useState<string | null>(null);
   const remotes = useMemo(() => [...voice.remoteStreams.values()], [voice.remoteStreams]);
   const streamFor = (userId: number, kind: "camera" | "screen") =>
     remotes.find((item: RemoteVideoStream) => item.userId === userId && item.kind === kind)?.stream ?? null;
@@ -131,6 +163,18 @@ export function VideoStage({
       userId: item.userId,
     })),
   ];
+  const focusedTile = focusedTileKey
+    ? tiles.find((tile) => tile.key === focusedTileKey) ?? null
+    : null;
+  const otherTiles = focusedTile
+    ? tiles.filter((tile) => tile.key !== focusedTile.key)
+    : [];
+
+  useEffect(() => {
+    if (focusedTileKey && !tiles.some((tile) => tile.key === focusedTileKey)) {
+      setFocusedTileKey(null);
+    }
+  }, [focusedTileKey, tiles]);
 
   useEffect(() => {
     const handler = () => setIsFullscreen(document.fullscreenElement === stageRef.current);
@@ -144,21 +188,43 @@ export function VideoStage({
     else await stageRef.current.requestFullscreen();
   }
 
+  function renderTile(tile: (typeof tiles)[number], focused = false) {
+    const { key, ...mediaTile } = tile;
+    return (
+      <MediaTile
+        key={key}
+        {...mediaTile}
+        focused={focused}
+        onFocus={() => setFocusedTileKey((current) => current === key ? null : key)}
+        onPause={"userId" in mediaTile && mediaTile.userId
+          ? () => voice.toggleRemoteVideo(mediaTile.userId!)
+          : undefined}
+      />
+    );
+  }
+
   return (
     <section className="video-stage" ref={stageRef}>
       <header className="video-stage__header">
         <div><span className="video-stage__eyebrow">SESLİ SAHNE</span><strong>{tiles.length} katılımcı/yayın</strong></div>
         <span className="video-stage__quality"><span className="video-stage__live-dot" />{qualityLabel}</span>
       </header>
-      <div className={`voice-grid voice-grid--${Math.min(tiles.length, 9)}`}>
-        {tiles.map(({ key, ...tile }) => (
-          <MediaTile
-            key={key}
-            {...tile}
-            onPause={"userId" in tile && tile.userId ? () => voice.toggleRemoteVideo(tile.userId!) : undefined}
-          />
-        ))}
-      </div>
+      {focusedTile ? (
+        <div className="voice-focus-layout">
+          <div className="voice-focus-layout__main">
+            {renderTile(focusedTile, true)}
+          </div>
+          {otherTiles.length ? (
+            <div className="voice-focus-layout__strip" aria-label="Diğer sahne katılımcıları">
+              {otherTiles.map((tile) => renderTile(tile))}
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <div className={`voice-grid voice-grid--${Math.min(tiles.length, 9)}`}>
+          {tiles.map((tile) => renderTile(tile))}
+        </div>
+      )}
       <div className="video-stage__controls" aria-label="Görüşme kontrolleri">
         <button className={voice.muted ? "stage-control stage-control--danger" : "stage-control"} onClick={voice.toggleMute}><Icon name={voice.muted ? "micOff" : "mic"} /><span>{voice.muted ? "Sesi aç" : "Sustur"}</span></button>
         <button className={voice.deafened ? "stage-control stage-control--danger" : "stage-control"} onClick={voice.toggleDeafen}><Icon name={voice.deafened ? "headphonesOff" : "headphones"} /><span>{voice.deafened ? "Dinle" : "Sağırlaştır"}</span></button>

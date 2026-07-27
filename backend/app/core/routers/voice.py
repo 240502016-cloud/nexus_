@@ -68,7 +68,14 @@ class VoiceConnectionManager:
         room["server_id"] = server_id
         room["recipients"] = set(recipients)
         users = room["users"]
-        existing = [self._participant(uid, info) for uid, info in users.items()]
+        # Aynı hesap F5/reconnect ile yeni bir socket açtığında eski bağlantı kısa süre daha
+        # yaşayabilir. Kullanıcıyı kendi peer listesine sokma; aksi halde tarayıcı kendisiyle
+        # RTCPeerConnection kurmaya çalışıp "connection aborted" üretebilir.
+        existing = [
+            self._participant(uid, info)
+            for uid, info in users.items()
+            if uid != user_id
+        ]
         users[user_id] = {
             "ws": ws,
             "username": username,
@@ -79,12 +86,23 @@ class VoiceConnectionManager:
         }
         return existing
 
-    def leave(self, channel_id: int, user_id: int) -> None:
+    def leave(self, channel_id: int, user_id: int, ws: WebSocket | None = None) -> bool:
+        """Aktif bağlantıyı kaldır.
+
+        ``ws`` verildiğinde yalnızca halen odada kayıtlı socket aynıysa silinir. Böylece eski
+        bir socket'in gecikmiş ``finally`` bloğu, onun yerini alan yeni bağlantıyı düşüremez.
+        Bot gibi sanal katılımcılar ``ws`` vermeden önceki davranışı kullanmaya devam eder.
+        """
         room = self._rooms.get(channel_id)
-        if room:
-            room["users"].pop(user_id, None)
-            if not room["users"]:
-                self._rooms.pop(channel_id, None)
+        if not room:
+            return False
+        info = room["users"].get(user_id)
+        if info is None or (ws is not None and info.get("ws") is not ws):
+            return False
+        room["users"].pop(user_id, None)
+        if not room["users"]:
+            self._rooms.pop(channel_id, None)
+        return True
 
     def _set(self, channel_id: int, user_id: int, key: str, value) -> None:
         room = self._rooms.get(channel_id)
@@ -289,6 +307,8 @@ async def voice_socket(websocket: WebSocket, channel_id: int, token: str = Query
     finally:
         # Oda silinmeden ÖNCE alıcıları yakala; ayrıldıktan sonra (belki boş) roster'ı onlara bildir.
         recipients_before = voice_manager.recipients(channel_id)
-        voice_manager.leave(channel_id, user_id)
-        await voice_manager.broadcast(channel_id, {"type": "peer-left", "user_id": user_id})
-        await _notify_voice_state(channel_id, recipients_before)
+        removed = voice_manager.leave(channel_id, user_id, websocket)
+        # Eski bir socket yeni bağlantıyla değiştirilmişse gecikmiş kapanış olayını yayınlama.
+        if removed:
+            await voice_manager.broadcast(channel_id, {"type": "peer-left", "user_id": user_id})
+            await _notify_voice_state(channel_id, recipients_before)

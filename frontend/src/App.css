@@ -4413,6 +4413,126 @@ button {
   gap: 6px;
 }
 
+/* Tıklanan kamera/yayını büyüt; diğer akışları erişilebilir bir önizleme şeridinde tut. */
+.stage-person[role="button"] {
+  cursor: pointer;
+}
+
+.stage-person[role="button"]:focus-visible {
+  outline: 2px solid var(--accent, #8f6cff);
+  outline-offset: -2px;
+}
+
+.stage-person__focus-hint {
+  position: absolute;
+  z-index: 3;
+  top: 10px;
+  left: 10px;
+  padding: 5px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(5, 6, 14, 0.72);
+  font-size: 11px;
+  font-weight: 750;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-3px);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.stage-person:hover .stage-person__focus-hint,
+.stage-person:focus-visible .stage-person__focus-hint,
+.stage-person--focused .stage-person__focus-hint {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.voice-focus-layout {
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(150px, 22%, 230px);
+  gap: 10px;
+  padding: 10px 16px;
+}
+
+.voice-focus-layout__main,
+.voice-focus-layout__strip {
+  min-width: 0;
+  min-height: 0;
+}
+
+.voice-focus-layout__main .stage-person {
+  width: 100%;
+  height: 100%;
+}
+
+.voice-focus-layout__strip {
+  display: grid;
+  grid-auto-rows: minmax(104px, 1fr);
+  gap: 9px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.voice-focus-layout__strip .stage-person {
+  min-height: 104px;
+  border-radius: 14px;
+}
+
+.voice-focus-layout__strip .stage-person__meta {
+  right: 8px;
+  bottom: 7px;
+  left: 8px;
+  overflow: hidden;
+  padding: 5px 7px;
+  font-size: 11px;
+}
+
+.voice-focus-layout__strip .stage-person__meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-focus-layout__strip .stage-person__focus-hint {
+  top: 7px;
+  left: 7px;
+}
+
+.voice-focus-layout__strip .stage-person__pause {
+  right: 7px;
+  top: 7px;
+  min-height: 25px;
+  padding: 3px 7px;
+  font-size: 10px;
+}
+
+.video-stage:fullscreen .voice-focus-layout {
+  padding: 14px 24px;
+}
+
+@media (max-width: 760px) {
+  .voice-focus-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) 112px;
+  }
+
+  .voice-focus-layout__strip {
+    display: flex;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .voice-focus-layout__strip .stage-person {
+    width: 150px;
+    min-width: 150px;
+    height: 100%;
+  }
+}
+
 .chat-area__load-older {
   align-self: center;
   min-height: 32px;

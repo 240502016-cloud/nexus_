@@ -327,6 +327,14 @@ imajları yeniden oluşturduğu için Matrix spam ayarı ve `0006_social_graph` 
 - Mesaj düzenleme/silme simgeleri 27px kontrol ve 13px simge boyutuna küçültüldü.
 - Sunucu Ayarları → Botlar ekranı baştan düzenlendi: temalı bot oluşturma formu, aktif/pasif buton
   durumları, bot kartları ve açıklama/komutları okunabilen iki sütunlu platform plugin kartları eklendi.
+- Sesli sahnedeki kamera, ekran paylaşımı veya katılımcı kartına tıklanınca seçilen akış büyük odak
+  alanına geçer; diğer akışlar sağdaki kaydırılabilir önizleme şeridinde kalır. Aynı karta tekrar
+  tıklamak normal ızgaraya döndürür; dar ekranlarda önizlemeler alta taşınır.
+- F5 ve hızlı yeniden bağlanma sırasında eski ses WebSocket'inin yeni oturumu odadan silmesine ve
+  kullanıcının kendi WebRTC eş listesine girmesine yol açan yarış durumu kapatıldı. SDP mesajları
+  istemcide sırayla işlenir, yeniden gelen eş için eski bağlantı temizlenir ve kısa medya
+  kopmalarında ICE otomatik yenilenir; kapanan bağlantıların beklenen `connection aborted` hatası
+  artık kullanıcıya ham hata olarak gösterilmez.
 
 ### Deploy
 
