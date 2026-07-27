@@ -221,7 +221,7 @@ function Start-ServerAction {
             $message = switch ($Action) {
                 'Initialize' { 'This creates a new .env and performs the full first deployment. Continue?' }
                 'Deploy' { 'This builds images, reconciles databases, runs migrations and starts the stack. Continue?' }
-                'Update' { 'This safely stashes tracked changes, pulls origin/main and deploys. Continue?' }
+                'Update' { 'This safely stashes local changes, updates the current Git branch and deploys. Continue?' }
             }
             if (-not (Confirm-Action $message)) { return }
         }
@@ -751,7 +751,7 @@ First installation:
 4. Click "Initialize new server".
 
 Routine operation:
-- "Safe update" preserves tracked local changes in Git stash, pulls and deploys.
+- "Safe update" preserves local changes in Git stash, updates the current branch and deploys.
 - "Deploy current code" builds, repairs databases, migrates and starts.
 - "Start stack" starts existing containers without rebuilding.
 - "Diagnose" prints service states and recent logs.

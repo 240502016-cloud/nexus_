@@ -15,6 +15,7 @@ param(
     [int]$HttpPort = 8080,
     [ValidateRange(1, 65535)]
     [int]$HttpsPort = 8443,
+    [string]$GitBranch,
     [switch]$SkipBuild
 )
 
@@ -390,19 +391,51 @@ function Invoke-Deploy {
 
 function Invoke-SafeGitUpdate {
     $git = Get-GitExecutable
+    $branch = $GitBranch
+    if ([string]::IsNullOrWhiteSpace($branch)) {
+        $branch = (& $git branch --show-current | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($branch)) {
+            throw 'The current Git branch could not be detected. Pass -GitBranch explicitly.'
+        }
+    }
+    if ($branch -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]*$' -or $branch.Contains('..')) {
+        throw "Invalid Git branch name: $branch"
+    }
+
     $stamp = (Get-Date).ToUniversalTime().ToString("yyyyMMdd-HHmmss'Z'")
-    $dirty = (& $git status --porcelain --untracked-files=no | Out-String).Trim()
+    $dirty = (& $git status --porcelain --untracked-files=all | Out-String).Trim()
     if ($LASTEXITCODE -ne 0) { throw 'git status failed.' }
     if ($dirty) {
-        Write-Step 'Saving tracked server changes before update'
-        & $git stash push -m "nexus-server-auto-$stamp"
+        Write-Step 'Saving local server changes before update'
+        & $git stash push --include-untracked -m "nexus-server-auto-$stamp"
         if ($LASTEXITCODE -ne 0) { throw 'Local tracked changes could not be stashed.' }
-        Write-Host "Tracked changes were preserved in git stash: nexus-server-auto-$stamp"
+        Write-Host "Local changes were preserved in git stash: nexus-server-auto-$stamp"
     }
-    Write-Step 'Pulling origin/main with fast-forward only'
-    & $git pull --ff-only origin main
+
+    Write-Step "Fetching origin/$branch"
+    & $git fetch origin $branch
     if ($LASTEXITCODE -ne 0) {
-        throw 'git pull failed. Any automatic stash was preserved and was not popped.'
+        throw "git fetch failed for origin/$branch. Any automatic stash was preserved."
+    }
+
+    $currentBranch = (& $git branch --show-current | Out-String).Trim()
+    if ($currentBranch -ne $branch) {
+        $localBranchExists = (& $git branch --list $branch | Out-String).Trim()
+        if ($localBranchExists) {
+            & $git switch $branch
+        }
+        else {
+            & $git switch --create $branch --track "origin/$branch"
+        }
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not switch to branch '$branch'. Any automatic stash was preserved."
+        }
+    }
+
+    Write-Step "Updating $branch from origin with fast-forward only"
+    & $git merge --ff-only "origin/$branch"
+    if ($LASTEXITCODE -ne 0) {
+        throw 'git fast-forward failed. Any automatic stash was preserved and was not popped.'
     }
 }
 
@@ -444,6 +477,10 @@ New server (run after git clone):
 
 Routine update:
   powershell.exe -ExecutionPolicy Bypass -File .\scripts\nexus-server.ps1 -Action Update
+
+Update a specific branch:
+  powershell.exe -ExecutionPolicy Bypass -File .\scripts\nexus-server.ps1 -Action Update `
+    -GitBranch cekingen
 
 Other actions:
   -Action Configure  Generate .env only (new server)

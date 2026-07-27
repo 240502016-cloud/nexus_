@@ -219,3 +219,11 @@ docker compose up -d backend ai-worker plugin-sandbox frontend
 ```
 
 Doğrulama: 16 backend testi, frontend TypeScript lint ve production build başarılı.
+
+### Arkadaşın sunucu bilgisayarında tek tıkla güncelleme
+- Repo kökündeki `Arkadas-Sunucuyu-Guncelle.cmd` dosyasına çift tıklanır.
+- Script `origin/cekingen` dalını fetch eder, gerekirse bu dala geçer, yalnız fast-forward
+  güncelleme yapar; yerel değişiklikleri isimli Git stash içinde korur.
+- Ardından mevcut sunucu yöneticisi üzerinden tüm imajları build eder, PostgreSQL bootstrap
+  kontrolünü ve Alembic migration'larını çalıştırır, stack'i başlatıp public health testlerini yapar.
+- Volume silen `docker compose down -v` gibi bir işlem içermez.
