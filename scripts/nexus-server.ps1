@@ -48,7 +48,21 @@ function Invoke-Checked {
 
 function Invoke-Compose {
     param([Parameter(Mandatory = $true)][string[]]$Arguments, [switch]$Capture)
-    return Invoke-Checked -FilePath 'docker' -Arguments (@('compose') + $Arguments) -Capture:$Capture
+    $composeArguments = @('compose')
+    if (Test-PublicTunnelConfigured) {
+        $composeArguments += @('--profile', 'public-tunnel')
+    }
+    return Invoke-Checked -FilePath 'docker' -Arguments ($composeArguments + $Arguments) -Capture:$Capture
+}
+
+function Test-PublicTunnelConfigured {
+    if (-not (Test-Path -LiteralPath $envPath)) { return $false }
+    foreach ($line in Get-Content -LiteralPath $envPath) {
+        if ($line -match '^\s*CLOUDFLARE_TUNNEL_TOKEN\s*=\s*(.+?)\s*$') {
+            return -not [string]::IsNullOrWhiteSpace($Matches[1])
+        }
+    }
+    return $false
 }
 
 function Get-GitExecutable {
@@ -306,6 +320,12 @@ function Assert-EnvironmentFile {
             throw ".env secret is too short: $secretKey"
         }
     }
+    if ($values.ContainsKey('CLOUDFLARE_TUNNEL_TOKEN')) {
+        $tunnelToken = $values['CLOUDFLARE_TUNNEL_TOKEN'].Trim()
+        if ($tunnelToken -and ($tunnelToken.Length -lt 80 -or $tunnelToken -match 'replace-with-|<[^>]+>')) {
+            throw '.env CLOUDFLARE_TUNNEL_TOKEN is invalid or still contains a placeholder.'
+        }
+    }
 }
 
 function Get-SynapseLocale {
@@ -450,6 +470,9 @@ function Invoke-Deploy {
     Invoke-Compose -Arguments @('run', '--rm', 'migrate')
 
     Write-Step 'Starting the complete stack'
+    if (Test-PublicTunnelConfigured) {
+        Write-Host '[OK] Free Cloudflare public tunnel profile is enabled'
+    }
     Invoke-Compose -Arguments @('up', '-d')
     Invoke-Compose -Arguments @('ps', '-a')
     Test-PublicEndpoints
@@ -523,11 +546,13 @@ function Invoke-Validation {
 function Invoke-Diagnose {
     Show-Status
     Write-Step 'Recent service logs'
-    Invoke-Compose -Arguments @(
+    $services = @(
         'logs', '--tail', '120',
         'postgres', 'postgres-bootstrap', 'migrate', 'matrix',
         'backend', 'ai-worker', 'frontend', 'reverse-proxy'
     )
+    if (Test-PublicTunnelConfigured) { $services += 'public-tunnel' }
+    Invoke-Compose -Arguments $services
 }
 
 function Show-Help {

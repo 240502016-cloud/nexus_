@@ -1,5 +1,10 @@
 # Nexus server quickstart
 
+> Hamachi gerektirmeyen güncel ve ücretsiz dış erişim kurulumu için
+> [`PUBLIC_CLOUDFLARE_TUNNEL.md`](PUBLIC_CLOUDFLARE_TUNNEL.md) belgesini kullanın. Tünel
+> etkin olduğunda son kullanıcı sertifika paketi kurmaz; yalnızca `https://cekin.gen.tr`
+> adresini açar.
+
 Sunucu işletimi için ana giriş noktası:
 
 ```text

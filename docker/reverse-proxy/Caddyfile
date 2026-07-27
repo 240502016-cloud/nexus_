@@ -1,64 +1,68 @@
 {
-    email {$NEXUS_ACME_EMAIL}
+	email {$NEXUS_ACME_EMAIL}
 }
 
+(nexus_routes) {
+	encode zstd gzip
+
+	log {
+		output stdout
+		format json
+	}
+
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(self), microphone=(self), geolocation=()"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
+
+	@health path /healthz
+	respond @health "ok" 200
+
+	handle /.well-known/matrix/client {
+		header {
+			Content-Type "application/json"
+			Access-Control-Allow-Origin "*"
+		}
+		respond `{ "m.homeserver": { "base_url": "{$NEXUS_PUBLIC_URL}" } }` 200
+	}
+
+	handle /.well-known/matrix/server {
+		header Content-Type "application/json"
+		respond `{ "m.server": "{$NEXUS_MATRIX_SERVER_AUTHORITY}" }` 200
+	}
+
+	# Caddy automatically proxies WebSocket Upgrade requests to the backend.
+	handle_path /api/* {
+		reverse_proxy backend:8000 {
+			stream_close_delay 5m
+		}
+	}
+
+	# Publish only the Matrix client/federation surface, not Synapse admin endpoints.
+	@matrix path /_matrix/* /_synapse/client/*
+	handle @matrix {
+		reverse_proxy matrix:8008
+	}
+
+	handle {
+		reverse_proxy frontend:8080
+	}
+}
+
+# Keep direct HTTPS available for installations that already expose ports 80/443.
 {$NEXUS_DOMAIN} {
-    encode zstd gzip
+	tls {
+		protocols tls1.2 tls1.3
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+	}
 
-    # Sunucu Hamachi'de olduğu için HTTP-01/TLS-ALPN doğrulaması yapılamaz; Cloudflare DNS-01
-    # ile güvenilir Let's Encrypt sertifikası alınır (istemciler artık sertifika kurmaz).
-    tls {
-        protocols tls1.2 tls1.3
-        dns cloudflare {env.CLOUDFLARE_API_TOKEN}
-    }
+	import nexus_routes
+}
 
-    log {
-        output stdout
-        format json
-    }
-
-    header {
-        -Server
-        X-Content-Type-Options "nosniff"
-        Referrer-Policy "strict-origin-when-cross-origin"
-        Permissions-Policy "camera=(self), microphone=(self), geolocation=()"
-        Strict-Transport-Security "max-age=31536000; includeSubDomains"
-    }
-
-    @health path /healthz
-    respond @health "ok" 200
-
-    # Matrix istemcilerinin public homeserver adresini aynı domain üzerinden keşfetmesi.
-    handle /.well-known/matrix/client {
-        header {
-            Content-Type "application/json"
-            Access-Control-Allow-Origin "*"
-        }
-        respond `{ "m.homeserver": { "base_url": "{$NEXUS_PUBLIC_URL}" } }` 200
-    }
-
-    # Federasyon delegasyonu Matrix trafiğini public HTTPS portuna yönlendirir.
-    handle /.well-known/matrix/server {
-        header Content-Type "application/json"
-        respond `{ "m.server": "{$NEXUS_MATRIX_SERVER_AUTHORITY}" }` 200
-    }
-
-    # Core API + WSS signaling. Caddy WebSocket Upgrade isteğini otomatik tünele çevirir;
-    # handle_path /api önekini backend'e gitmeden siler.
-    handle_path /api/* {
-        reverse_proxy backend:8000 {
-            # Config reload sırasında tüm ses istemcilerinin aynı anda yeniden bağlanmasını azaltır.
-            stream_close_delay 5m
-        }
-    }
-
-    # Yalnızca Matrix istemci/federasyon yüzeyi yayınlanır; /_synapse/admin dışarı açılmaz.
-    @matrix path /_matrix/* /_synapse/client/*
-    handle @matrix {
-        reverse_proxy matrix:8008
-    }
-
-    handle {
-        reverse_proxy frontend:8080
-    }
+# Cloudflare Tunnel reaches this HTTP origin only through the private Docker network.
+http://:8081 {
+	import nexus_routes
 }

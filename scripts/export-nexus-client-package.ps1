@@ -21,22 +21,37 @@ if (-not (Test-Path -LiteralPath (Join-Path $repoRoot '.env'))) {
     throw '.env was not found.'
 }
 $publicUrl = Read-EnvValue 'NEXUS_PUBLIC_URL'
+$tunnelToken = Read-EnvValue 'CLOUDFLARE_TUNNEL_TOKEN'
 if (-not $publicUrl) {
     $domain = Read-EnvValue 'NEXUS_DOMAIN'
     $port = Read-EnvValue 'NEXUS_HTTPS_PORT'
     $publicUrl = if ($port -and $port -ne '443') { "https://${domain}:$port" } else { "https://$domain" }
 }
 
-& docker compose cp 'reverse-proxy:/data/caddy/pki/authorities/local/root.crt' `
-    (Join-Path $resolvedOutput 'nexus-caddy-root.crt')
-if ($LASTEXITCODE -ne 0) {
-    throw 'Caddy root certificate could not be copied. Ensure reverse-proxy is running and using local HTTPS.'
+if ($tunnelToken) {
+    $instructions = @"
+Nexus client access package
+===========================
+
+Hamachi or a private certificate is not required.
+
+Open Nexus in a current browser:
+   $publicUrl
+
+Do not share server .env files, database passwords or AI API keys with client users.
+"@
 }
+else {
+    & docker compose cp 'reverse-proxy:/data/caddy/pki/authorities/local/root.crt' `
+        (Join-Path $resolvedOutput 'nexus-caddy-root.crt')
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Caddy root certificate could not be copied. Ensure reverse-proxy is running and using local HTTPS.'
+    }
 
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'install-nexus-client-certificate.ps1') `
-    -Destination $resolvedOutput -Force
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'install-nexus-client-certificate.ps1') `
+        -Destination $resolvedOutput -Force
 
-$instructions = @"
+    $instructions = @"
 Nexus client access package
 ===========================
 
@@ -51,6 +66,7 @@ Nexus client access package
 
 Do not share server .env files, database passwords or AI API keys with client users.
 "@
+}
 [IO.File]::WriteAllText(
     (Join-Path $resolvedOutput 'README.txt'),
     ($instructions.Trim() + [Environment]::NewLine),

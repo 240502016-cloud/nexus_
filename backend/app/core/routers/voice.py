@@ -204,6 +204,7 @@ def voice_ice_servers(current_user: User = Depends(get_current_user)) -> dict:
     ]
     return {
         "ice_servers": [
+            {"urls": "stun:stun.cloudflare.com:3478"},
             {"urls": f"stun:{turn_host}:{settings.turn_port}"},
             {"urls": turn_urls, "username": username, "credential": credential},
         ],

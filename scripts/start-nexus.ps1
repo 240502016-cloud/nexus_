@@ -32,9 +32,15 @@ if (-not (Test-Docker)) {
 }
 Write-Host "Docker hazir." -ForegroundColor Green
 
-# 2) Stack'i baslat
-Write-Host "Konteynerler baslatiliyor (docker compose up -d)..." -ForegroundColor Cyan
-docker compose up -d
+# 2) Stack'i baslat. Token varsa ucretsiz public tunnel profili de otomatik acilir.
+$tunnelEnabled = [bool](Get-Content (Join-Path $repo '.env') |
+    Where-Object { $_ -match '^\s*CLOUDFLARE_TUNNEL_TOKEN\s*=\s*\S+' } |
+    Select-Object -First 1)
+$composeArguments = @('compose')
+if ($tunnelEnabled) { $composeArguments += @('--profile', 'public-tunnel') }
+$composeArguments += @('up', '-d')
+Write-Host "Konteynerler baslatiliyor..." -ForegroundColor Cyan
+& docker @composeArguments
 if (-not $?) { Write-Host "HATA: docker compose up basarisiz oldu." -ForegroundColor Red; exit 1 }
 
 # 3) Adresi .env'den oku

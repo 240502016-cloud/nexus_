@@ -1,6 +1,19 @@
 # Nexus — Devir Özeti (yeni sohbete yapıştırılabilir)
 
 Tarih: 26 Temmuz 2026
+
+## 27 Temmuz 2026 — Hamachi gerektirmeyen ücretsiz dış erişim
+
+- `cekin.gen.tr` için ücretsiz Cloudflare Tunnel servisi Compose'a isteğe bağlı
+  `public-tunnel` profili olarak eklendi. Web, API, Matrix ve WebSocket trafiği modem portu
+  açılmadan sunucuya ulaşır; son kullanıcı Hamachi veya özel sertifika kurmaz.
+- Tünelin origin adresi yalnız Docker iç ağında erişilebilen `http://reverse-proxy:8081` olur.
+- `Public-Tunnel-Ayarla.cmd`, hassas tünel tokenini görünmeyen girişle `.env` dosyasına kaydeder.
+  Sunucu güncelleme/yönetim script'i tokeni algıladığında profili otomatik olarak başlatır.
+- WebRTC ICE listesine ücretsiz `stun:stun.cloudflare.com:3478` eklendi. Mevcut kendi coturn
+  servisi relay yedeği olarak korunur.
+- Ayrıntılı kurulum: `docs/deployment/PUBLIC_CLOUDFLARE_TUNNEL.md`.
+
 Sunucu makinesi: `C:\Users\merte\Github\nexus-server`
 **Bu dosya, önceki `yol haritası.md`'nin yerini alır (o dosya artık eskidir: IP + kendi sertifikası dönemini anlatıyor).**
 
