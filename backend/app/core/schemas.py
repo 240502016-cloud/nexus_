@@ -135,7 +135,10 @@ class RoleRead(RoleBase):
 
 
 class MessageCreate(BaseModel):
-    content: str
+    content: str = Field(min_length=1, max_length=20000)
+    # İstemcinin iyimser mesajını Matrix event'iyle güvenle eşleştirir ve aynı isteğin
+    # ağ hatasında yinelenmesi halinde Matrix transaction de-duplication anahtarı olur.
+    client_id: str | None = Field(default=None, min_length=8, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 class MessageRead(BaseModel):
@@ -143,6 +146,7 @@ class MessageRead(BaseModel):
     sender: str
     content: str
     origin_server_ts: int | None = None
+    client_id: str | None = None
 
 
 # ---- Plugin ----

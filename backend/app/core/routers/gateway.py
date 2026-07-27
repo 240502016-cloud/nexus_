@@ -100,13 +100,29 @@ async def _push_voice_state(channel_id: int, participants: list[dict], recipient
 set_voice_state_listener(_push_voice_state)
 
 
-async def _broadcast_channel_message(channel_id: int, server_id: int, recipient_ids: set[int]) -> None:
+async def _broadcast_channel_message(
+    channel_id: int,
+    server_id: int,
+    recipient_ids: set[int],
+    message_payload: dict | None = None,
+    deleted_event_id: str | None = None,
+) -> None:
     message = {"type": "channel-message", "channel_id": channel_id, "server_id": server_id}
+    if message_payload is not None:
+        message["message"] = message_payload
+    if deleted_event_id is not None:
+        message["deleted_event_id"] = deleted_event_id
     for uid in recipient_ids:
         await gateway_manager.send_to_user(uid, message)
 
 
-def notify_channel_message(channel_id: int, server_id: int, recipient_ids: set[int]) -> None:
+def notify_channel_message(
+    channel_id: int,
+    server_id: int,
+    recipient_ids: set[int],
+    message_payload: dict | None = None,
+    deleted_event_id: str | None = None,
+) -> None:
     """Senkron endpoint'ten (mesaj gönderme) çağrılır: kanaldaki yeni mesaj sinyalini gerçek
     zamanlı olarak üyelere iletmek üzere ana event loop'a planlar. Böylece istemciler 4 sn
     polling beklemeden mesajı anında görür (polling yine yedek olarak kalır)."""
@@ -115,7 +131,14 @@ def notify_channel_message(channel_id: int, server_id: int, recipient_ids: set[i
     except RuntimeError:
         return
     asyncio.run_coroutine_threadsafe(
-        _broadcast_channel_message(channel_id, server_id, set(recipient_ids)), loop
+        _broadcast_channel_message(
+            channel_id,
+            server_id,
+            set(recipient_ids),
+            message_payload,
+            deleted_event_id,
+        ),
+        loop,
     )
 
 

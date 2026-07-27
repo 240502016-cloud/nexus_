@@ -29,28 +29,59 @@ def send_message(
         raise HTTPException(status_code=409, detail="Kullanıcının Matrix hesabı yok")
 
     try:
-        event_id = matrix_client.send_message(current_user.matrix_access_token, channel.matrix_room_id, payload.content)
+        event_id = matrix_client.send_message(
+            current_user.matrix_access_token,
+            channel.matrix_room_id,
+            payload.content,
+            txn_id=payload.client_id,
+        )
     except MatrixError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+    recipients = {sm.user_id for sm in channel.server.members}
+    recipients.add(channel.server.owner_id)
+    message = schemas.MessageRead(
+        event_id=event_id,
+        sender=current_user.matrix_user_id,
+        content=payload.content,
+        origin_server_ts=None,
+        client_id=payload.client_id,
+    )
+
+    # Kullanıcı mesajını bot işlemlerini bekletmeden tüm istemcilere aktar. İstemci doğrudan
+    # bu payload'ı listeye ekler; yeniden 50 mesaj indirmesi gerekmez.
+    notify_channel_message(
+        channel_id,
+        channel.server_id,
+        recipients,
+        message.model_dump(),
+    )
+
     # Bot Engine: mesaj bir komutsa (ör. "/sunucu-durumu"), sunucuya eklenmiş botlar
     # ilgili plugin'i çalıştırıp cevabı kendi Matrix hesabıyla aynı odaya yazar.
-    handle_message_event(
+    replies = handle_message_event(
         db,
         MessageEvent(
             channel=channel, sender_id=current_user.id, sender_username=current_user.username, content=payload.content
         ),
     )
 
-    # Gerçek zamanlı: kanaldaki üyelere yeni mesaj sinyali gönder (bot cevapları da dahil,
-    # çünkü bu noktada handle_message_event tamamlandı).
-    recipients = {sm.user_id for sm in channel.server.members}
-    recipients.add(channel.server.owner_id)
-    notify_channel_message(channel_id, channel.server_id, recipients)
+    # Senkron bot cevaplarının event_id'si biliniyorsa onları da doğrudan gateway'den gönder.
+    for reply in replies:
+        if reply.event_id and reply.matrix_user_id:
+            notify_channel_message(
+                channel_id,
+                channel.server_id,
+                recipients,
+                schemas.MessageRead(
+                    event_id=reply.event_id,
+                    sender=reply.matrix_user_id,
+                    content=reply.content,
+                    origin_server_ts=None,
+                ).model_dump(),
+            )
 
-    return schemas.MessageRead(
-        event_id=event_id, sender=current_user.matrix_user_id, content=payload.content, origin_server_ts=None
-    )
+    return message
 
 
 @router.delete("/{event_id}", status_code=204)
@@ -77,6 +108,15 @@ def delete_message(
         if "403" in str(exc):
             raise HTTPException(status_code=403, detail="Bu mesajı silme yetkiniz yok") from exc
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    recipients = {sm.user_id for sm in channel.server.members}
+    recipients.add(channel.server.owner_id)
+    notify_channel_message(
+        channel_id,
+        channel.server_id,
+        recipients,
+        deleted_event_id=event_id,
+    )
 
 
 @router.get("", response_model=list[schemas.MessageRead])

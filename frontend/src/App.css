@@ -2073,6 +2073,39 @@ button {
   line-height: 1.45;
 }
 
+.chat-message--sending {
+  opacity: 0.68;
+}
+
+.chat-message--failed {
+  border: 1px solid rgba(255, 95, 109, 0.24);
+  background: rgba(255, 95, 109, 0.07);
+}
+
+.chat-message__delivery {
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.chat-message--failed .chat-message__delivery {
+  color: var(--danger);
+}
+
+.chat-message__retry {
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.chat-message__retry:hover {
+  color: #fff;
+  background: var(--danger);
+}
+
 .chat-area__composer {
   gap: 10px;
   padding: 12px 16px 15px;

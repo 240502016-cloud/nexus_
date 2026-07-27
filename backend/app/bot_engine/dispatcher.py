@@ -42,6 +42,8 @@ class BotReply:
     bot_name: str
     content: str
     send_matrix: bool = True
+    event_id: str | None = None
+    matrix_user_id: str | None = None
 
 
 def parse_command(content: str, prefix: str) -> tuple[str, str] | None:
@@ -104,13 +106,19 @@ def _run_command(
         except Exception as exc:  # plugin kodu güvenilmez; botun cevap veremediğini bildir
             output = f"({bot.name} hata: {exc})"
 
+    event_id: str | None = None
     if bot.matrix_access_token and event.channel.matrix_room_id and not isinstance(output, QueuedAiResponse):
         try:
-            matrix_client.send_message(bot.matrix_access_token, event.channel.matrix_room_id, output)
+            event_id = matrix_client.send_message(bot.matrix_access_token, event.channel.matrix_room_id, output)
         except MatrixError:
             pass  # Matrix'e yazılamadı; yine de replies listesinde görünür
 
-    return BotReply(bot_name=bot.name, content=output)
+    return BotReply(
+        bot_name=bot.name,
+        content=output,
+        event_id=event_id,
+        matrix_user_id=bot.matrix_user_id,
+    )
 
 
 def handle_message_event(db: Session, event: MessageEvent) -> list[BotReply]:

@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     matrix_server_name: str = "nexus.local"
     matrix_homeserver_url: str = "http://localhost:8008"
     matrix_registration_shared_secret: str = "changeme"
+    matrix_connect_timeout_seconds: float = 3.0
+    matrix_read_timeout_seconds: float = 15.0
 
     # TASK-003: Bu adres doğrudan Ollama değil, Tailscale üzerindeki AI Gateway'dir.
     # Gateway Bearer anahtarını doğrular ve yerel Ollama'ya proxy olur.

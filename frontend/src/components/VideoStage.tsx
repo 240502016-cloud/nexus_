@@ -37,6 +37,20 @@ function VideoTile({
     }
   }, [stream]);
 
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        video.pause(); // ses ayrı <audio> öğesinden sürer; görünmeyen video GPU tüketmez.
+      } else {
+        void video.play().catch(() => {});
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, []);
+
   return (
     <button
       type="button"

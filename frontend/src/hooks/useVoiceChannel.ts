@@ -196,6 +196,10 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     let cancelled = false;
     let iceServers: RTCIceServer[] = [];
     let selfId = 0;
+    let reconnectTimer: number | null = null;
+    let reconnectDelay = 1000;
+    let microphoneError: string | null = null;
+    let microphoneAttempted = false;
 
     function upsertRemoteStream(peerId: number, stream: MediaStream) {
       setRemoteStreams((prev) => {
@@ -212,6 +216,34 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         next.delete(peerId);
         return next;
       });
+    }
+
+    function resetPeersForReconnect() {
+      peersRef.current.forEach((peer) => peer.pc.close());
+      peersRef.current.clear();
+      pendingIceRef.current.clear();
+      audioElsRef.current.forEach((element) => {
+        element.srcObject = null;
+      });
+      audioElsRef.current.clear();
+      remoteMediaRef.current.clear();
+      setParticipants([]);
+      setRemoteStreams(new Map());
+    }
+
+    function clearReconnectTimer() {
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+    }
+
+    function scheduleReconnect() {
+      if (cancelled || !navigator.onLine) return;
+      clearReconnectTimer();
+      const delay = Math.round(reconnectDelay * (0.85 + Math.random() * 0.3));
+      reconnectDelay = Math.min(reconnectDelay * 2, 15_000);
+      reconnectTimer = window.setTimeout(() => void connect(), delay);
     }
 
     function createPeerConnection(peerId: number, ws: WebSocket): PeerState {
@@ -341,6 +373,15 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     }
 
     async function connect() {
+      if (cancelled || !navigator.onLine) return;
+      const currentSocket = wsRef.current;
+      if (
+        currentSocket &&
+        (currentSocket.readyState === WebSocket.OPEN || currentSocket.readyState === WebSocket.CONNECTING)
+      ) {
+        return;
+      }
+      clearReconnectTimer();
       setError(null);
       try {
         const ice = await coreApi.voiceIceServers();
@@ -348,29 +389,35 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         iceServers = ice.ice_servers;
       } catch (err) {
         setError(`TURN sunucusuna bağlanılamadı: ${err instanceof Error ? err.message : String(err)}`);
+        scheduleReconnect();
         return;
       }
 
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: buildAudioConstraints(voiceSettingsRef.current),
-        });
-        if (cancelled) {
-          stream.getTracks().forEach((track) => track.stop());
-          return;
-        }
-        localStreamRef.current = stream;
-        if (voiceSettingsRef.current.mode === "ptt") {
-          stream.getAudioTracks().forEach((track) => {
-            track.enabled = false;
+      if (!localStreamRef.current && !microphoneAttempted) {
+        microphoneAttempted = true;
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: buildAudioConstraints(voiceSettingsRef.current),
           });
-          setMuted(true);
-          mutedRef.current = true;
+          if (cancelled) {
+            stream.getTracks().forEach((track) => track.stop());
+            return;
+          }
+          localStreamRef.current = stream;
+          microphoneError = null;
+          if (voiceSettingsRef.current.mode === "ptt") {
+            stream.getAudioTracks().forEach((track) => {
+              track.enabled = false;
+            });
+            setMuted(true);
+            mutedRef.current = true;
+          }
+        } catch (err) {
+          microphoneError =
+            `Mikrofona erişilemedi: ${err instanceof Error ? err.message : String(err)} ` +
+            "(sadece dinleyici olarak katılıyorsunuz)";
+          setError(microphoneError);
         }
-      } catch (err) {
-        setError(
-          `Mikrofona erişilemedi: ${err instanceof Error ? err.message : String(err)} (sadece dinleyici olarak katılıyorsunuz)`,
-        );
       }
 
       const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -392,6 +439,8 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
             }));
             setParticipants(peers);
             setConnected(true);
+            reconnectDelay = 1000;
+            setError(microphoneError);
             // Mevcut herkesle bağlantı kur. Track ekleme onnegotiationneeded'i tetikleyip offer üretir.
             for (const peer of peers) {
               createPeerConnection(peer.user_id, ws);
@@ -486,8 +535,19 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         }
       };
 
-      ws.onerror = () => setError("Sesli kanal bağlantı hatası");
-      ws.onclose = () => setConnected(false);
+      ws.onerror = () => ws.close();
+      ws.onclose = (event) => {
+        if (wsRef.current === ws) wsRef.current = null;
+        setConnected(false);
+        if (cancelled) return;
+        resetPeersForReconnect();
+        if (event.code === 4401 || event.code === 4403 || event.code === 4404) {
+          setError("Ses kanalına yeniden bağlanılamadı; oturum veya kanal yetkisini kontrol edin.");
+          return;
+        }
+        setError("Ses bağlantısı kesildi, yeniden bağlanılıyor…");
+        scheduleReconnect();
+      };
     }
 
     // Video başlatma/durdurma yardımcıları connect kapsamında tanımlanır (peersRef üzerinden çalışır).
@@ -609,10 +669,18 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     videoControlRef.current = { startVideo, stopVideo, applyQuality };
     micControlRef.current = { switchMic };
 
+    function handleOnline() {
+      reconnectDelay = 1000;
+      void connect();
+    }
+
+    window.addEventListener("online", handleOnline);
     connect();
 
     return () => {
       cancelled = true;
+      clearReconnectTimer();
+      window.removeEventListener("online", handleOnline);
       videoControlRef.current = null;
       micControlRef.current = null;
       cleanup();
@@ -627,27 +695,53 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     const audioContext = new AudioContext();
     const source = audioContext.createMediaStreamSource(localStreamRef.current);
     const analyser = audioContext.createAnalyser();
-    analyser.fftSize = 512;
+    analyser.fftSize = 256;
     source.connect(analyser);
     const buffer = new Uint8Array(analyser.frequencyBinCount);
 
     let lastSpeaking = false;
-    let rafId: number;
+    let timerId: number | null = null;
+
+    function reportSpeaking(speaking: boolean) {
+      if (speaking === lastSpeaking) return;
+      lastSpeaking = speaking;
+      wsRef.current?.send(JSON.stringify({ type: "speaking", speaking }));
+    }
 
     function tick() {
+      if (document.hidden) return;
       analyser.getByteFrequencyData(buffer);
       const average = buffer.reduce((sum, value) => sum + value, 0) / buffer.length;
       const speaking = average > SPEAKING_THRESHOLD && !mutedRef.current;
-      if (speaking !== lastSpeaking) {
-        lastSpeaking = speaking;
-        wsRef.current?.send(JSON.stringify({ type: "speaking", speaking }));
-      }
-      rafId = requestAnimationFrame(tick);
+      reportSpeaking(speaking);
+      // Konuşma göstergesi için 60 Hz gereksiz; ~13 Hz CPU tüketimini belirgin azaltır.
+      timerId = window.setTimeout(tick, 75);
     }
-    tick();
+
+    function handleVisibilityChange() {
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+        timerId = null;
+      }
+      if (document.hidden) {
+        reportSpeaking(false);
+        void audioContext.suspend();
+      } else {
+        void audioContext.resume().then(tick).catch(() => {});
+      }
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    if (document.hidden) {
+      void audioContext.suspend();
+    } else {
+      tick();
+    }
 
     return () => {
-      cancelAnimationFrame(rafId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (timerId !== null) window.clearTimeout(timerId);
+      reportSpeaking(false);
       source.disconnect();
       void audioContext.close();
     };

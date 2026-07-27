@@ -147,3 +147,37 @@ Mevcut kullanıcılar: `mutbelagtest` (id 1), `apeacefulman` (id 2), id 3.
   sıfırlanabilir.
 - Eski kurulum (`nexus-current`) ve eski `nexus_*` volume'ları hâlâ duruyor; yeni sistem stabil
   kaldıkça kontrollü silinebilir.
+
+---
+
+## 6. 27 Temmuz 2026 — Arayüz ve performans güncellemesi
+
+### Arayüz / yayın
+- Ana arayüz ve giriş/kayıt ekranları koyu cam efektli + açık profesyonel tema ile yenilendi.
+- Video sahnesi odak yayın + küçük önizlemeler düzenine geçti; görüntü `contain` ile kaydırmasız,
+  eksiksiz gösteriliyor.
+- Gerçek tam ekran ve tam ekranda mikrofon, ses, kamera, ekran paylaşımı ve ayrılma kontrolleri eklendi.
+- Kamera/ekran paylaşımı için kullanıcı seçimi: **480p / 720p / 1080p** ve **30 / 60 FPS**.
+
+### Mesajlaşma / gecikme
+- Mesajlar Enter'a basıldığı anda iyimser olarak görünür; başarısız olursa tekrar deneme sunulur.
+- `client_id`, Matrix transaction ID olarak kullanılır; zaman aşımı/tekrar denemede çift mesaj önlenir.
+- Gateway `channel-message` artık mesaj payload'ını ve silme olaylarını doğrudan taşır. Normal mesajlarda
+  her olay için son 50 mesajı yeniden indirme kaldırıldı.
+- Senkron bot cevapları da payload olarak anında iletilir. Ayrı AI worker cevapları için düşük frekanslı
+  snapshot güvenlik ağı devam eder.
+
+### Kaynak tüketimi / dayanıklılık
+- Mesaj snapshot aralığı gateway bağlıyken 30 sn, bağlantı yokken 10 sn, arka planda 5 dk.
+- Konuşma algılama ~60 Hz'den ~13 Hz'e düşürüldü; sekme arka plandayken analyser tamamen durur.
+- Arka plandaki video elemanları duraklatılır (ses ayrı audio elemanından devam eder).
+- Gateway ve ses kanalı WebSocket'lerine jitter'lı exponential backoff ve ağ geri gelince hızlı
+  yeniden bağlanma eklendi. Ses kanalında mevcut mikrofon/kamera track'leri korunur.
+- Matrix HTTP çağrıları thread-local keep-alive session kullanır; connect/read timeout eklendi.
+
+### Bu sürümün deploy'u
+Bu güncelleme hem backend hem frontend içerir:
+```
+docker compose build backend frontend
+docker compose up -d backend ai-worker plugin-sandbox frontend
+```

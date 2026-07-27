@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getToken } from "../api/client";
+import type { Message } from "../types";
 
 export interface IncomingCall {
   fromUser: number;
@@ -42,6 +43,14 @@ export interface VoiceRosterMember {
   speaking: boolean;
 }
 
+export interface ChannelMessageEvent {
+  channelId: number;
+  serverId: number;
+  message: Message | null;
+  deletedEventId: string | null;
+  sequence: number;
+}
+
 interface GatewayMessage {
   type: string;
   [key: string]: unknown;
@@ -55,11 +64,10 @@ const RECONNECT_MAX_MS = 15000;
  * Kanal soketinden bağımsızdır; kullanıcı hiçbir kanalda değilken bile çağrı alabilir.
  */
 export function useGateway(enabled: boolean) {
+  const [connected, setConnected] = useState(false);
   const [presences, setPresences] = useState<Map<number, PresenceInfo>>(new Map());
   const [selfStatus, setSelfStatus] = useState<SelfStatus>({ status: "online", custom: "" });
-  // Gerçek zamanlı mesaj sinyali: bir kanalda yeni mesaj olduğunda nonce artar.
-  const [messageSignal, setMessageSignal] = useState(0);
-  const [messageChannelId, setMessageChannelId] = useState<number | null>(null);
+  const [channelMessage, setChannelMessage] = useState<ChannelMessageEvent | null>(null);
   // channelId -> o ses kanalındaki katılımcılar (kanala girmeden görülür).
   const [voiceStates, setVoiceStates] = useState<Map<number, VoiceRosterMember[]>>(new Map());
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
@@ -69,6 +77,7 @@ export function useGateway(enabled: boolean) {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<number | null>(null);
   const backoffRef = useRef(RECONNECT_MIN_MS);
+  const messageSequenceRef = useRef(0);
   const outgoingRef = useRef<OutgoingCall | null>(null);
   outgoingRef.current = outgoingCall;
 
@@ -83,20 +92,40 @@ export function useGateway(enabled: boolean) {
     if (!enabled) return;
     let closedByUs = false;
 
+    function clearReconnectTimer() {
+      if (reconnectRef.current !== null) {
+        window.clearTimeout(reconnectRef.current);
+        reconnectRef.current = null;
+      }
+    }
+
     function scheduleReconnect() {
       if (closedByUs) return;
-      const delay = backoffRef.current;
+      clearReconnectTimer();
+      if (!navigator.onLine) return; // "online" olayı geldiğinde reconnectNow devreye girer.
+      // Çok sayıda istemci aynı anda geri geldiğinde sunucuya yığılmayı önlemek için küçük jitter.
+      const delay = Math.round(backoffRef.current * (0.85 + Math.random() * 0.3));
       backoffRef.current = Math.min(backoffRef.current * 2, RECONNECT_MAX_MS);
       reconnectRef.current = window.setTimeout(connect, delay);
     }
 
     function connect() {
+      if (closedByUs) return;
+      const current = wsRef.current;
+      if (current && (current.readyState === WebSocket.OPEN || current.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
+      if (!navigator.onLine) {
+        return;
+      }
+      clearReconnectTimer();
       const protocol = window.location.protocol === "https:" ? "wss" : "ws";
       const ws = new WebSocket(`${protocol}://${window.location.host}/api/gateway?token=${getToken() ?? ""}`);
       wsRef.current = ws;
 
       ws.onopen = () => {
         backoffRef.current = RECONNECT_MIN_MS;
+        setConnected(true);
       };
 
       ws.onmessage = (event) => {
@@ -140,8 +169,14 @@ export function useGateway(enabled: boolean) {
           });
           break;
         case "channel-message":
-          setMessageChannelId(data.channel_id as number);
-          setMessageSignal((n) => n + 1);
+          messageSequenceRef.current += 1;
+          setChannelMessage({
+            channelId: data.channel_id as number,
+            serverId: data.server_id as number,
+            message: (data.message as Message | undefined) ?? null,
+            deletedEventId: (data.deleted_event_id as string | undefined) ?? null,
+            sequence: messageSequenceRef.current,
+          });
           break;
         case "voice-channel-state": {
           const channelId = data.channel_id as number;
@@ -192,8 +227,10 @@ export function useGateway(enabled: boolean) {
         }
       };
 
-      ws.onclose = () => {
-        wsRef.current = null;
+      ws.onclose = (event) => {
+        if (wsRef.current === ws) wsRef.current = null;
+        setConnected(false);
+        if (event.code === 4401) return; // token geçersiz; aynı token ile sonsuz reconnect yapma.
         scheduleReconnect();
       };
       ws.onerror = () => {
@@ -201,13 +238,36 @@ export function useGateway(enabled: boolean) {
       };
     }
 
+    function reconnectNow() {
+      if (closedByUs) return;
+      clearReconnectTimer();
+      backoffRef.current = RECONNECT_MIN_MS;
+      connect();
+    }
+
+    function handleVisibilityChange() {
+      if (!document.hidden && wsRef.current?.readyState !== WebSocket.OPEN) reconnectNow();
+    }
+
+    function handleOffline() {
+      setConnected(false);
+      wsRef.current?.close();
+    }
+
+    window.addEventListener("online", reconnectNow);
+    window.addEventListener("offline", handleOffline);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     connect();
 
     return () => {
       closedByUs = true;
-      if (reconnectRef.current) window.clearTimeout(reconnectRef.current);
+      clearReconnectTimer();
+      window.removeEventListener("online", reconnectNow);
+      window.removeEventListener("offline", handleOffline);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       wsRef.current?.close();
       wsRef.current = null;
+      setConnected(false);
       setPresences(new Map());
       setVoiceStates(new Map());
       setIncomingCall(null);
@@ -255,11 +315,11 @@ export function useGateway(enabled: boolean) {
   const clearNotice = useCallback(() => setNotice(null), []);
 
   return {
+    connected,
     presences,
     selfStatus,
     setStatus,
-    messageSignal,
-    messageChannelId,
+    channelMessage,
     voiceStates,
     incomingCall,
     outgoingCall,

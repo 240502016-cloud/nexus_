@@ -136,8 +136,11 @@ export const coreApi = {
 
   listMessages: (channelId: number, limit = 50) =>
     request<Message[]>(`/channels/${channelId}/messages?limit=${limit}`),
-  sendMessage: (channelId: number, content: string) =>
-    request<Message>(`/channels/${channelId}/messages`, { method: "POST", body: JSON.stringify({ content }) }),
+  sendMessage: (channelId: number, content: string, clientId: string) =>
+    request<Message>(`/channels/${channelId}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ content, client_id: clientId }),
+    }),
   deleteMessage: (channelId: number, eventId: string) =>
     request<void>(`/channels/${channelId}/messages/${encodeURIComponent(eventId)}`, { method: "DELETE" }),
 };

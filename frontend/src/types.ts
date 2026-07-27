@@ -58,6 +58,9 @@ export interface Message {
   sender: string;
   content: string;
   origin_server_ts: number | null;
+  client_id?: string | null;
+  // Yalnızca istemci tarafındaki iyimser mesajlarda kullanılır; API snapshot'larında bulunmaz.
+  delivery_status?: "sending" | "failed";
 }
 
 export interface Bot {

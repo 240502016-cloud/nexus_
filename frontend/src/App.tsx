@@ -16,8 +16,48 @@ import type { VoiceSettings } from "./settings";
 import { loadVoiceSettings } from "./settings";
 import type { Channel, ChannelType, Message, Server, User } from "./types";
 
-// Gateway "channel-message" sinyali anlık yenileme sağlar; polling yalnızca yedek (ör. bot cevabı).
-const MESSAGE_POLL_MS = 10000;
+const MESSAGE_LIMIT = 50;
+const MESSAGE_SYNC_CONNECTED_MS = 30_000;
+const MESSAGE_SYNC_DISCONNECTED_MS = 10_000;
+const MESSAGE_SYNC_BACKGROUND_MS = 300_000;
+
+function createMessageClientId(): string {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  return `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+function mergeIncomingMessage(current: Message[], incoming: Message): Message[] {
+  const withoutDuplicate = current.filter(
+    (message) =>
+      message.event_id !== incoming.event_id &&
+      (!incoming.client_id || message.client_id !== incoming.client_id),
+  );
+  return [{ ...incoming }, ...withoutDuplicate].slice(0, MESSAGE_LIMIT);
+}
+
+function mergeMessageSnapshot(snapshot: Message[], current: Message[]): Message[] {
+  const likelySameMessage = (serverMessage: Message, localMessage: Message) =>
+    serverMessage.sender === localMessage.sender &&
+    serverMessage.content === localMessage.content &&
+    serverMessage.origin_server_ts !== null &&
+    localMessage.origin_server_ts !== null &&
+    Math.abs(serverMessage.origin_server_ts - localMessage.origin_server_ts) < 120_000;
+
+  const localOnly = current.filter((message) => {
+    if (!message.delivery_status) return false;
+    if (message.delivery_status === "sending") return true;
+    return !snapshot.some((serverMessage) => likelySameMessage(serverMessage, message));
+  });
+  const localIds = new Set(localOnly.map((message) => message.event_id));
+  return [
+    ...localOnly,
+    ...snapshot.filter(
+      (message) =>
+        !localIds.has(message.event_id) &&
+        !localOnly.some((localMessage) => likelySameMessage(message, localMessage)),
+    ),
+  ].slice(0, MESSAGE_LIMIT);
+}
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -45,6 +85,8 @@ export default function App() {
   // hedef ses kanalına geçmek için beklemede tutulan istek.
   const pendingVoiceJoinRef = useRef<{ serverId: number; channelId: number } | null>(null);
   const callNotificationRef = useRef<Notification | null>(null);
+  const activeChannelIdRef = useRef(activeChannelId);
+  activeChannelIdRef.current = activeChannelId;
 
   // Gelen çağrıda masaüstü bildirimi (sekme arka plandayken bile duyulur). Ayar + izin gerektirir.
   useEffect(() => {
@@ -140,41 +182,85 @@ export default function App() {
     });
   }, [activeServerId]);
 
-  // Aktif kanal değişince mesajlarını çek, birkaç saniyede bir yenile.
+  // Gateway normal mesajları doğrudan taşır. Bu döngü yalnızca bağlantı kesintileri ve ayrı
+  // worker'dan gelen AI cevapları için düşük frekanslı güvenlik ağıdır.
   useEffect(() => {
     if (!activeChannelId) {
       setMessages([]);
       return;
     }
     let cancelled = false;
+    let timeoutId: number | null = null;
+    let loading = false;
     const channelId = activeChannelId;
 
-    function load() {
-      coreApi.listMessages(channelId).then((list) => {
-        if (!cancelled) setMessages(list);
-      });
+    function nextDelay() {
+      if (document.hidden) return MESSAGE_SYNC_BACKGROUND_MS;
+      return gateway.connected ? MESSAGE_SYNC_CONNECTED_MS : MESSAGE_SYNC_DISCONNECTED_MS;
     }
 
-    load();
-    const interval = setInterval(load, MESSAGE_POLL_MS);
+    function scheduleNext() {
+      if (cancelled) return;
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(() => void load(), nextDelay());
+    }
+
+    async function load() {
+      if (loading || cancelled) return;
+      loading = true;
+      try {
+        const list = await coreApi.listMessages(channelId, MESSAGE_LIMIT);
+        if (!cancelled && activeChannelIdRef.current === channelId) {
+          setMessages((current) => mergeMessageSnapshot(list, current));
+        }
+      } catch {
+        // Gateway çalışmaya devam edebilir; bir sonraki düşük frekanslı senkronizasyonda tekrar denenir.
+      } finally {
+        loading = false;
+        scheduleNext();
+      }
+    }
+
+    function handleVisibilityChange() {
+      if (!document.hidden) {
+        if (timeoutId !== null) window.clearTimeout(timeoutId);
+        void load();
+      } else {
+        scheduleNext();
+      }
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    void load();
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
     };
-  }, [activeChannelId]);
+  }, [activeChannelId, gateway.connected]);
 
-  // Gerçek zamanlı: gateway aktif kanalda yeni mesaj sinyali verince anında yenile.
+  // Gerçek zamanlı: mesaj payload'ını veya silme olayını doğrudan yerel listeye uygula.
+  // Eski backend payload göndermiyorsa geriye uyumluluk için tek seferlik snapshot çekilir.
   useEffect(() => {
-    if (!activeChannelId || gateway.messageChannelId !== activeChannelId) return;
+    const event = gateway.channelMessage;
+    if (!activeChannelId || !event || event.channelId !== activeChannelId) return;
+    if (event.deletedEventId) {
+      setMessages((current) => current.filter((message) => message.event_id !== event.deletedEventId));
+      return;
+    }
+    if (event.message) {
+      setMessages((current) => mergeIncomingMessage(current, event.message!));
+      return;
+    }
     let cancelled = false;
     coreApi.listMessages(activeChannelId).then((list) => {
-      if (!cancelled) setMessages(list);
-    });
+      if (!cancelled) setMessages((current) => mergeMessageSnapshot(list, current));
+    }).catch(() => {});
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gateway.messageSignal]);
+  }, [gateway.channelMessage?.sequence]);
 
   async function handleLogin(username: string, password: string) {
     setAuthError(null);
@@ -333,8 +419,37 @@ export default function App() {
 
   async function handleSendMessage(content: string) {
     if (!activeChannelId) return;
-    await coreApi.sendMessage(activeChannelId, content);
-    setMessages(await coreApi.listMessages(activeChannelId));
+    const channelId = activeChannelId;
+    const clientId = createMessageClientId();
+    const optimistic: Message = {
+      event_id: `pending-${clientId}`,
+      sender: user?.matrix_user_id ?? `@${user?.username ?? "sen"}:nexus`,
+      content,
+      origin_server_ts: Date.now(),
+      client_id: clientId,
+      delivery_status: "sending",
+    };
+    setMessages((current) => mergeIncomingMessage(current, optimistic));
+    try {
+      const sent = await coreApi.sendMessage(channelId, content, clientId);
+      if (activeChannelIdRef.current === channelId) {
+        setMessages((current) => mergeIncomingMessage(current, sent));
+      }
+    } catch (err) {
+      if (activeChannelIdRef.current === channelId) {
+        setMessages((current) =>
+          current.map((message) =>
+            message.client_id === clientId ? { ...message, delivery_status: "failed" } : message,
+          ),
+        );
+      }
+      setCallError(err instanceof Error ? err.message : "Mesaj gönderilemedi");
+    }
+  }
+
+  function handleRetryMessage(clientId: string, content: string) {
+    setMessages((current) => current.filter((message) => message.client_id !== clientId));
+    void handleSendMessage(content);
   }
 
   async function handleDeleteMessage(eventId: string) {
@@ -342,12 +457,14 @@ export default function App() {
     const channelId = activeChannelId;
     // İyimser güncelleme: mesajı hemen kaldır, sonra sunucu sonucuyla senkronize et.
     setMessages((prev) => prev.filter((m) => m.event_id !== eventId));
+    const removed = messages.find((message) => message.event_id === eventId);
     try {
       await coreApi.deleteMessage(channelId, eventId);
     } catch (err) {
+      if (removed && activeChannelIdRef.current === channelId) {
+        setMessages((current) => mergeIncomingMessage(current, removed));
+      }
       setCallError(err instanceof Error ? err.message : "Mesaj silinemedi");
-    } finally {
-      setMessages(await coreApi.listMessages(channelId));
     }
   }
 
@@ -461,6 +578,7 @@ export default function App() {
           currentMatrixUserId={user.matrix_user_id}
           onSendMessage={handleSendMessage}
           onDeleteMessage={handleDeleteMessage}
+          onRetryMessage={handleRetryMessage}
         />
       </div>
       {settingsOpen ? (
