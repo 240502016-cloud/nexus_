@@ -462,13 +462,19 @@ function Test-PublicEndpoints {
     }
     Write-Host '[OK] reverse proxy health'
 
-    $backendHealth = Invoke-CurlRequest -Url "$publicUrl/api/health" -TimeoutSeconds 10
-    if ($backendHealth.ExitCode -ne 0) { throw 'Backend public health check failed.' }
+    for ($attempt = 1; $attempt -le 12; $attempt++) {
+        $backendHealth = Invoke-CurlRequest -Url "$publicUrl/api/health" -TimeoutSeconds 10
+        if ($backendHealth.ExitCode -eq 0) { break }
+        if ($attempt -eq 12) { throw 'Backend public health check failed.' }
+        Start-Sleep -Seconds 3
+    }
     Write-Host '[OK] backend health'
 
-    $matrix = Invoke-CurlRequest -Url "$publicUrl/_matrix/client/versions" -TimeoutSeconds 10
-    if ($matrix.ExitCode -ne 0 -or $matrix.Content -notmatch '"versions"') {
-        throw 'Matrix public health check failed.'
+    for ($attempt = 1; $attempt -le 12; $attempt++) {
+        $matrix = Invoke-CurlRequest -Url "$publicUrl/_matrix/client/versions" -TimeoutSeconds 10
+        if ($matrix.ExitCode -eq 0 -and $matrix.Content -match '"versions"') { break }
+        if ($attempt -eq 12) { throw 'Matrix public health check failed.' }
+        Start-Sleep -Seconds 3
     }
     Write-Host '[OK] Matrix client endpoint'
 }
