@@ -72,6 +72,31 @@ curl.exe https://cekin.gen.tr/healthz
 
 İlk komutta `public-tunnel` çalışıyor, son komutta `ok` görünmelidir.
 
+### Bir yenilemede açılıp diğerinde 502 görülüyorsa
+
+Önce [Cloudflare sistem durumunda](https://www.cloudflarestatus.com/) İstanbul/Sofia/Bükreş
+bölgesinde açık olay bulunmadığını doğrulayın. Bölgesel olay kapandıktan sonra yanıtlar hâlâ
+`200, 502, 200, 502` biçiminde değişiyorsa aynı tünele bağlı connector/replica'lar eşit durumda
+değildir. Cloudflare Zero Trust → Networks → Tunnels → ilgili tünel → Connectors bölümünde:
+
+1. Yalnız bu sunucudaki güncel Docker `public-tunnel` connector'ını bırakın.
+2. Eski bilgisayar, eski Docker projesi veya Windows servisi olarak çalışan connector'ları durdurup
+   silin. Tek connector'ın dört Cloudflare bağlantısı göstermesi normaldir; farklı **Connector ID**
+   satırları farklı replica'lardır.
+3. Public Hostname servisinin `http://reverse-proxy:8081` olduğunu doğrulayın.
+4. Sunucuda aşağıdaki kontrolleri çalıştırın:
+
+```powershell
+docker compose --profile public-tunnel ps
+docker compose --profile public-tunnel logs --tail 100 public-tunnel reverse-proxy
+docker compose exec -T reverse-proxy wget -qO- http://127.0.0.1:8081/healthz
+1..10 | ForEach-Object { curl.exe -sS -o NUL -w "%{http_code}`n" https://cekin.gen.tr/healthz }
+```
+
+Son komutun her satırı `200` olmalıdır. Cloudflare olayı kapalı, yerel health check başarılı ve
+tek connector kullanılmasına rağmen sonuç değişiyorsa Tunnel loglarıyla birlikte Cloudflare'a
+arıza kaydı açın.
+
 Alan adının artık Hamachi'ye gitmediğini ayrıca doğrulayın:
 
 ```powershell

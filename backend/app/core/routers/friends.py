@@ -106,12 +106,21 @@ def create_request(
         .first()
     )
     if existing:
-        detail = (
-            "Bu kullanıcı zaten arkadaşınız"
-            if existing.status == "accepted"
-            else "Bu kullanıcıyla bekleyen bir arkadaşlık isteği var"
+        if existing.status == "accepted":
+            raise HTTPException(status_code=409, detail="Bu kullanıcı zaten arkadaşınız")
+        if existing.status == "pending" and existing.requested_by_id == current_user.id:
+            # İlk POST veritabanına ulaşıp yanıt ağda kaybolmuş olabilir. Aynı isteği
+            # idempotent biçimde döndürmek istemcinin güvenli tekrar denemesini sağlar.
+            return schemas.FriendRequestRead(
+                id=existing.id,
+                user=_public(target),
+                direction="outgoing",
+                created_at=existing.created_at,
+            )
+        raise HTTPException(
+            status_code=409,
+            detail="Bu kullanıcıdan bekleyen bir arkadaşlık isteğiniz var; gelen isteklerden kabul edin",
         )
-        raise HTTPException(status_code=409, detail=detail)
 
     friendship = Friendship(
         user_low_id=low_id,
@@ -123,6 +132,7 @@ def create_request(
     db.commit()
     db.refresh(friendship)
     notify_social_event(target.id, "friend-request")
+    notify_social_event(current_user.id, "friend-request-sent")
     return schemas.FriendRequestRead(
         id=friendship.id,
         user=_public(target),
@@ -138,6 +148,14 @@ def accept_request(
     db: Session = Depends(get_db),
 ):
     friendship = _get_participating_request(db, friendship_id, current_user.id)
+    if friendship.status == "accepted":
+        # Kabul yanıtı istemciye ulaşmadan bağlantı kesildiyse aynı POST güvenle
+        # tekrarlanabilir; işlem zaten tamamlanmış halini döndürür.
+        return schemas.FriendRead(
+            friendship_id=friendship.id,
+            user=_public(friendship.other_user(current_user.id)),
+            since=friendship.updated_at,
+        )
     if friendship.status != "pending":
         raise HTTPException(status_code=409, detail="Bu istek artık beklemiyor")
     if friendship.requested_by_id == current_user.id:
@@ -147,6 +165,7 @@ def accept_request(
     db.commit()
     db.refresh(friendship)
     notify_social_event(friendship.requested_by_id, "friend-accepted")
+    notify_social_event(current_user.id, "friend-accepted")
     return schemas.FriendRead(
         friendship_id=friendship.id,
         user=_public(friendship.other_user(current_user.id)),
@@ -160,7 +179,12 @@ def remove_friendship(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    friendship = _get_participating_request(db, friendship_id, current_user.id)
+    friendship = db.get(Friendship, friendship_id)
+    if not friendship:
+        # DELETE tekrarları ağ hatalarından sonra güvenli olmalıdır.
+        return None
+    if current_user.id not in (friendship.user_low_id, friendship.user_high_id):
+        raise HTTPException(status_code=404, detail="Arkadaşlık isteği bulunamadı")
     other_id = (
         friendship.user_high_id
         if friendship.user_low_id == current_user.id
@@ -169,3 +193,4 @@ def remove_friendship(
     db.delete(friendship)
     db.commit()
     notify_social_event(other_id, "friend-removed")
+    notify_social_event(current_user.id, "friend-removed")

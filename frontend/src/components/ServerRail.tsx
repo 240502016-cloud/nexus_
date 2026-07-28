@@ -9,6 +9,7 @@ interface ServerRailProps {
   activeServerId: number | null;
   onSelect: (serverId: number) => void;
   onCreateServer: (name: string) => Promise<void>;
+  onOpenJoin: () => void;
   inviteCount: number;
   onOpenInvites: () => void;
 }
@@ -18,6 +19,7 @@ export function ServerRail({
   activeServerId,
   onSelect,
   onCreateServer,
+  onOpenJoin,
   inviteCount,
   onOpenInvites,
 }: ServerRailProps) {
@@ -72,6 +74,15 @@ export function ServerRail({
           +
         </button>
       )}
+      <button
+        type="button"
+        className="server-icon server-icon--join"
+        onClick={onOpenJoin}
+        title="Davet koduyla sunucuya katıl"
+        aria-label="Davet koduyla sunucuya katıl"
+      >
+        ↪
+      </button>
     </nav>
   );
 }

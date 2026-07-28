@@ -24,6 +24,7 @@ interface ChannelSidebarProps {
   onDeleteChannel?: (channelId: number) => void;
   onOpenServerSettings: () => void;
   voiceStates?: Map<number, VoiceRosterMember[]>;
+  pendingFriendRequestCount: number;
   onOpenProfile: () => void;
   onOpenSettings: () => void;
 }
@@ -76,6 +77,7 @@ export function ChannelSidebar({
   onDeleteChannel,
   onOpenServerSettings,
   voiceStates,
+  pendingFriendRequestCount,
   onOpenProfile,
   onOpenSettings,
 }: ChannelSidebarProps) {
@@ -204,9 +206,19 @@ export function ChannelSidebar({
             {memberInitial(currentUser.display_name || currentUser.username)}
           </span>
         )}
-        <button type="button" className="user-dock__identity" onClick={onOpenProfile} title="Profili aç">
+        <button
+          type="button"
+          className="user-dock__identity"
+          onClick={onOpenProfile}
+          title={pendingFriendRequestCount ? `${pendingFriendRequestCount} arkadaşlık isteği` : "Profili aç"}
+        >
           <strong>{currentUser.display_name || currentUser.username}</strong>
           <span>@{currentUser.username}</span>
+          {pendingFriendRequestCount ? (
+            <b className="user-dock__friend-badge" aria-label={`${pendingFriendRequestCount} bekleyen arkadaşlık isteği`}>
+              {pendingFriendRequestCount > 9 ? "9+" : pendingFriendRequestCount}
+            </b>
+          ) : null}
         </button>
         <button type="button" className="user-dock__action" onClick={onOpenSettings} title="Ayarlar">
           <Icon name="settings" />

@@ -1,0 +1,82 @@
+{
+  "name": "nexus-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "author": "Nexus Communication Platform",
+  "description": "Nexus Communication Platform Windows desktop client",
+  "type": "module",
+  "main": "src/main.mjs",
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:frontend\" \"npm:dev:electron\"",
+    "dev:frontend": "npm --prefix ../frontend run dev",
+    "dev:electron": "wait-on http://127.0.0.1:5173 && cross-env NEXUS_DESKTOP_DEV_URL=http://127.0.0.1:5173 electron .",
+    "build:frontend": "npm --prefix ../frontend run build:desktop",
+    "build:icon": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/generate-icon.ps1",
+    "pack": "npm run build:icon && npm run build:frontend && electron-builder --dir",
+    "dist": "npm run build:icon && npm run build:frontend && electron-builder --win nsis",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9",
+    "uiohook-napi": "^1.5.5"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
+    "wait-on": "^9.0.1"
+  },
+  "build": {
+    "appId": "tr.gen.cekin.nexus",
+    "productName": "Nexus",
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/uiohook-napi/**"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/**",
+      "assets/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../frontend/dist",
+        "to": "frontend"
+      }
+    ],
+    "win": {
+      "icon": "assets/icon.ico",
+      "verifyUpdateCodeSignature": true,
+      "signtoolOptions": {
+        "publisherName": "Nexus Communication Platform"
+      },
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "NexusSetup-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Nexus",
+      "uninstallDisplayName": "Nexus Communication Platform"
+    },
+    "publish": {
+      "provider": "generic",
+      "url": "https://cekin.gen.tr/desktop-updates"
+    },
+    "electronUpdaterCompatibility": ">=2.16"
+  }
+}

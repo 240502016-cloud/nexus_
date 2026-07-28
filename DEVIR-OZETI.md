@@ -2,6 +2,68 @@
 
 Tarih: 28 Temmuz 2026
 
+## 28 Temmuz 2026 — arkadaşlık gerektirmeyen paylaşılabilir sunucu daveti
+
+- Sunucu sahibi, Sunucu Yönetimi → Genel alanından 16 karakterli kalıcı bir davet kodu ve
+  `https://cekin.gen.tr/?invite=...` bağlantısı oluşturabilir.
+- Bağlantıyı açan veya sol sunucu şeridindeki `↪` düğmesine kodu yazan oturum açmış kullanıcı,
+  arkadaşlık isteği olmadan doğrudan `ServerMember` olur ve varsayılan rolü alır.
+- Katılım idempotenttir; Cloudflare/ağ katmanında yanıt kaybolursa tekrar deneme çift üyelik üretmez.
+- Üyelik Matrix senkronundan önce PostgreSQL'e yazılır. Matrix geçici olarak kapalı olsa bile kullanıcı
+  sunucuyu ve ses kanallarını görür; metin odası üyeliği best-effort hazırlanır ve mesaj akışı da
+  eksik Matrix üyeliğini gerektiğinde onarır.
+- Kod yalnız sunucu sahibi tarafından görülebilir, yenilenebilir veya iptal edilebilir. Kod denemeleri
+  kullanıcı başına dakikada 12 ile sınırlıdır.
+- Migration head: `0008_server_join_codes`.
+- Doğrulama: arkadaşlık olmadan sunucu+ses kanalı erişimi ve kod yenileme/iptal senaryosu dahil backend
+  testleri **31/31**; frontend type-check ve production build başarılı.
+
+## 28 Temmuz 2026 — arkadaşlık isteklerinde canlı ve ağ-dayanıklı eşitleme
+
+- Arkadaşlık isteklerinin süre sonu olmadığı doğrulandı; bekleyen kayıt kullanıcı kabul edene,
+  reddedene veya gönderen iptal edene kadar PostgreSQL'de kalır.
+- Arkadaşlık ve sunucu daveti gönderme, kabul ve silme işlemleri ağda yanıt kaybolduğunda güvenle
+  tekrar edilebilir hale getirildi. Aynı istek çoğalmaz; tamamlanmış kabul/silme tekrarları hata üretmez.
+- Gateway WebSocket'e 20 saniyelik ping/pong heartbeat ve 45 saniyelik yarı-açık bağlantı algılama
+  eklendi. Yeniden bağlantıda istemci sosyal durumu kalıcı API kayıtlarından zorunlu eşitler.
+- Canlı olay kaçarsa arkadaşlık paneli ve ana bekleyen-istek sayacı 15 saniyelik yedek uzlaştırmayla
+  kendini düzeltir. Kullanıcı bölümünde görünür sayaç ve arka planda masaüstü bildirimi bulunur.
+- Geçici `502/503/504`, bağlantı kopması ve zaman aşımı için GET istekleri ile idempotent arkadaşlık
+  mutasyonlarına sınırlı exponential-backoff tekrar denemesi eklendi.
+- Doğrulama: frontend type-check ve production build başarılı; backend testleri **30/30** başarılı.
+
+## 28 Temmuz 2026 — gerçek Windows masaüstü istemcisi
+
+- Mevcut React/Vite istemcisi yeniden yazılmadan Electron 43 tabanlı ayrı bir Windows istemcisine
+  dönüştürüldü. Web istemcisi ve mevcut API/WebSocket/WebRTC sözleşmeleri korunur.
+- Tauri yerine Electron seçildi: bu depoda Rust toolchain yoktur ve medya-ağırlıklı istemcide test
+  edilmiş Chromium WebRTC/ekran-yakalama davranışını korumak paket boyutundan daha önceliklidir.
+- Paketli arayüz uzaktan sayfa açmaz; yerel ve güvenli `nexus://app` origin'inden çalışır.
+  `nodeIntegration` kapalı, renderer sandbox/context isolation açık, preload IPC yüzeyi beyaz
+  listedir. API proxy yalnız yapılandırılmış HTTPS Nexus sunucusuna gider.
+- Authentication tokenı desktop'ta localStorage'a yazılmaz; Windows DPAPI tabanlı Electron
+  `safeStorage` ile şifrelenir. Web sürümünün mevcut localStorage davranışı değişmez.
+- Global hold-to-talk ile Mouse4/Mouse5, Ctrl/Alt/CapsLock ve birleşik tuşlar; mikrofon/deafen/focus
+  kısayolları; çakışma kontrolü; tray menüsü; X'e basınca tray/çıkış tercihi; Windows startup;
+  native bildirim; custom kompakt titlebar; minimum pencere boyutu eklendi.
+- Always-on-top, taşınabilir mini ses penceresi kanal/katılımcı/konuşan/mute durumunu gösterir ve
+  mikrofon/deafen kontrolü sunar.
+- Ses ayarlarına gerçek giriş gain'i (%0–200) ve çıkış seviyesi (%0–100), Kısayollar, Windows ve
+  Gelişmiş sekmeleri eklendi. Cihaz ekleme/çıkarma ve sistem varsayılanına dönüş mevcut
+  `devicechange`/MediaDevices altyapısını kullanır.
+- Ekran paylaşımı Electron `desktopCapturer` ile ekran/pencere seçimi üzerinden mevcut
+  `getDisplayMedia` + WebRTC akışına bağlanır; video protokolü yeniden yazılmadı.
+- NSIS installer, Start Menu/masaüstü kısayolu, uninstall, uygulama ikonu, blockmap ve `latest.yml`
+  update metadata'sı üretir. Auto-update ilk kurulumda kapalıdır ve kullanıcı tarafından açılır.
+- Üretilen geliştirme installer'ı: `desktop/release-delivery2/NexusSetup-1.0.0-x64.exe`.
+  **Production dağıtımından önce Authenticode kod imzası zorunludur**; mevcut yerel artifact
+  imzasızdır ve sıkı Windows Application Control politikaları yeni hash'i engelleyebilir.
+- Doğrulama: frontend TypeScript lint, web build ve desktop build başarılı; backend testleri
+  **28/28** başarılı; production dependency audit **0 açık**; paketli uygulamanın yerel protokol,
+  preload/IPC ve native PTT başlangıcı smoke-test ile doğrulandı. Son imzasız delivery hash'inin
+  çalıştırılması bu makinede Windows Application Control tarafından engellendi; önceki aynı
+  paket smoke-test'i başarılıydı. Bu nedenle production sertifikası olmadan dağıtılmamalıdır.
+
 ## 28 Temmuz 2026 — güvenli dış erişim, ses bağlantısı ve sunucu davetleri
 
 - **Canlı dış erişimde kalan zorunlu ayar:** Genel DNS sorgusunda `cekin.gen.tr` hâlâ
@@ -30,7 +92,8 @@ Tarih: 28 Temmuz 2026
 - Ekran yakalamada genişlik/yükseklik zorlaması kaldırıldı. Kaynak oranı doğal hâliyle korunur;
   480p/720p/1080p tercihi gerekiyorsa WebRTC encoder'ında `scaleResolutionDownBy` ile orantılı
   ölçeklenir. Böylece kalite ayarı ekranın üstünü, altını veya yanlarını kesmez.
-- Veritabanı migration head'i: `0007_server_invites`.
+- Bu sürümün o tarihteki migration head'i `0007_server_invites` idi; güncel head
+  `0008_server_join_codes` değeridir.
 - Doğrulama: frontend type-check/build başarılı; yayın sahnesi masaüstü ve 390×844 dar ekran
   görünümünde dört köşe test deseniyle doğrulandı; backend test paketi **28/28** başarılı.
 

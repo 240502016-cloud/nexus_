@@ -73,6 +73,11 @@ export interface ServerInviteList {
   outgoing: ServerInvite[];
 }
 
+export interface ServerJoinCode {
+  code: string;
+  created_at: string;
+}
+
 export interface Channel {
   id: number;
   server_id: number;

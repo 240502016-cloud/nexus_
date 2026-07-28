@@ -95,6 +95,14 @@ def accept_server_invite(
     invite = _participating_invite(db, invite_id, current_user.id)
     if invite.invitee_id != current_user.id:
         raise HTTPException(status_code=403, detail="Kendi gönderdiğiniz daveti kabul edemezsiniz")
+    if invite.status == "accepted":
+        # Üyelik tamamlandıktan sonra yanıt kaybolmuşsa kabul isteği güvenle tekrarlanır.
+        existing = db.get(
+            ServerMember,
+            {"user_id": current_user.id, "server_id": invite.server_id},
+        )
+        if existing:
+            return invite.server
     if invite.status != "pending":
         raise HTTPException(status_code=409, detail="Bu davet artık beklemiyor")
     if not _friendship_is_accepted(db, invite.inviter_id, current_user.id):
@@ -156,6 +164,9 @@ def decline_or_cancel_server_invite(
 ):
     invite = _participating_invite(db, invite_id, current_user.id)
     if invite.status != "pending":
+        expected_status = "rejected" if invite.invitee_id == current_user.id else "cancelled"
+        if invite.status == expected_status:
+            return None
         raise HTTPException(status_code=409, detail="Bu davet artık beklemiyor")
     invite.status = "rejected" if invite.invitee_id == current_user.id else "cancelled"
     other_user_id = (
@@ -164,3 +175,4 @@ def decline_or_cancel_server_invite(
     db.add(invite)
     db.commit()
     notify_social_event(other_user_id, "server-invite-updated")
+    notify_social_event(current_user.id, "server-invite-updated")

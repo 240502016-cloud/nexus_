@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getToken } from "../api/client";
+import { webSocketUrl } from "../desktopBridge";
 import type { Message } from "../types";
 
 export interface IncomingCall {
@@ -58,6 +59,11 @@ export interface DirectMessageEvent {
   sequence: number;
 }
 
+export interface SocialEvent {
+  event: string;
+  sequence: number;
+}
+
 interface GatewayMessage {
   type: string;
   [key: string]: unknown;
@@ -65,6 +71,8 @@ interface GatewayMessage {
 
 const RECONNECT_MIN_MS = 1500;
 const RECONNECT_MAX_MS = 15000;
+const HEARTBEAT_INTERVAL_MS = 20_000;
+const HEARTBEAT_TIMEOUT_MS = 45_000;
 
 /**
  * Oturum boyunca açık kalan gateway WebSocket'i: presence + çağrı sinyali.
@@ -77,6 +85,7 @@ export function useGateway(enabled: boolean) {
   const [channelMessage, setChannelMessage] = useState<ChannelMessageEvent | null>(null);
   const [directMessage, setDirectMessage] = useState<DirectMessageEvent | null>(null);
   const [socialEventSequence, setSocialEventSequence] = useState(0);
+  const [socialEvent, setSocialEvent] = useState<SocialEvent | null>(null);
   // channelId -> o ses kanalındaki katılımcılar (kanala girmeden görülür).
   const [voiceStates, setVoiceStates] = useState<Map<number, VoiceRosterMember[]>>(new Map());
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
@@ -88,6 +97,7 @@ export function useGateway(enabled: boolean) {
   const backoffRef = useRef(RECONNECT_MIN_MS);
   const messageSequenceRef = useRef(0);
   const directMessageSequenceRef = useRef(0);
+  const socialEventSequenceRef = useRef(0);
   const outgoingRef = useRef<OutgoingCall | null>(null);
   outgoingRef.current = outgoingCall;
 
@@ -101,11 +111,20 @@ export function useGateway(enabled: boolean) {
   useEffect(() => {
     if (!enabled) return;
     let closedByUs = false;
+    let heartbeatTimer: number | null = null;
+    let lastServerMessageAt = Date.now();
 
     function clearReconnectTimer() {
       if (reconnectRef.current !== null) {
         window.clearTimeout(reconnectRef.current);
         reconnectRef.current = null;
+      }
+    }
+
+    function clearHeartbeatTimer() {
+      if (heartbeatTimer !== null) {
+        window.clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
       }
     }
 
@@ -129,16 +148,26 @@ export function useGateway(enabled: boolean) {
         return;
       }
       clearReconnectTimer();
-      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-      const ws = new WebSocket(`${protocol}://${window.location.host}/api/gateway?token=${getToken() ?? ""}`);
+      const ws = new WebSocket(`${webSocketUrl("/gateway")}?token=${encodeURIComponent(getToken() ?? "")}`);
       wsRef.current = ws;
 
       ws.onopen = () => {
         backoffRef.current = RECONNECT_MIN_MS;
+        lastServerMessageAt = Date.now();
         setConnected(true);
+        clearHeartbeatTimer();
+        heartbeatTimer = window.setInterval(() => {
+          if (ws.readyState !== WebSocket.OPEN) return;
+          if (Date.now() - lastServerMessageAt > HEARTBEAT_TIMEOUT_MS) {
+            ws.close();
+            return;
+          }
+          ws.send(JSON.stringify({ type: "ping" }));
+        }, HEARTBEAT_INTERVAL_MS);
       };
 
       ws.onmessage = (event) => {
+        lastServerMessageAt = Date.now();
         let data: GatewayMessage;
         try {
           data = JSON.parse(event.data) as GatewayMessage;
@@ -198,7 +227,18 @@ export function useGateway(enabled: boolean) {
           });
           break;
         case "social-event":
-          setSocialEventSequence((sequence) => sequence + 1);
+          socialEventSequenceRef.current += 1;
+          setSocialEventSequence(socialEventSequenceRef.current);
+          setSocialEvent({
+            event: (data.event as string) ?? "unknown",
+            sequence: socialEventSequenceRef.current,
+          });
+          break;
+        case "social-sync":
+          socialEventSequenceRef.current += 1;
+          setSocialEventSequence(socialEventSequenceRef.current);
+          break;
+        case "pong":
           break;
         case "voice-channel-state": {
           const channelId = data.channel_id as number;
@@ -250,6 +290,7 @@ export function useGateway(enabled: boolean) {
       };
 
       ws.onclose = (event) => {
+        clearHeartbeatTimer();
         if (wsRef.current === ws) wsRef.current = null;
         setConnected(false);
         if (event.code === 4401) return; // token geçersiz; aynı token ile sonsuz reconnect yapma.
@@ -284,6 +325,7 @@ export function useGateway(enabled: boolean) {
     return () => {
       closedByUs = true;
       clearReconnectTimer();
+      clearHeartbeatTimer();
       window.removeEventListener("online", reconnectNow);
       window.removeEventListener("offline", handleOffline);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
@@ -343,6 +385,7 @@ export function useGateway(enabled: boolean) {
     setStatus,
     channelMessage,
     directMessage,
+    socialEvent,
     socialEventSequence,
     voiceStates,
     incomingCall,

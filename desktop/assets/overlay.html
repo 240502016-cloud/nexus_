@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nexus Mini</title>
+    <link rel="stylesheet" href="./overlay.css" />
+  </head>
+  <body>
+    <main class="overlay">
+      <header class="overlay__header">
+        <div>
+          <span class="overlay__eyebrow">NEXUS MINI</span>
+          <strong id="channel-name">Ses bağlantısı yok</strong>
+        </div>
+        <button id="close-button" type="button" aria-label="Kapat">×</button>
+      </header>
+      <section id="participants" class="overlay__participants">
+        <p class="overlay__empty">Bir ses kanalına katıldığınızda katılımcılar burada görünür.</p>
+      </section>
+      <footer class="overlay__controls">
+        <button id="mute-button" type="button" disabled>🎤 Mikrofon</button>
+        <button id="deafen-button" type="button" disabled>🔊 Ses</button>
+      </footer>
+    </main>
+    <script type="module" src="./overlay.mjs"></script>
+  </body>
+</html>

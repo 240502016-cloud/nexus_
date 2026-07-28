@@ -4,9 +4,10 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview",
+    "dev": "vite --config vite.config.ts",
+    "build": "tsc -b && vite build --config vite.config.ts",
+    "build:desktop": "tsc -b && vite build --config vite.config.ts --mode desktop",
+    "preview": "vite preview --config vite.config.ts",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

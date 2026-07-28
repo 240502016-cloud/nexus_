@@ -1,6 +1,7 @@
 import asyncio
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.core import models  # noqa: F401  (Base.metadata'ya kaydetmek için import edilir)
 from app.core.event_loop import set_main_loop
@@ -13,6 +14,7 @@ from app.core.routers import (
     direct,
     friends,
     gateway,
+    join_codes,
     members,
     messages,
     plugins,
@@ -27,6 +29,16 @@ from app.services.ollama import models as ollama_models  # noqa: F401  (Base.met
 from app.services.ollama.requests import router as ai_router
 
 app = FastAPI(title="Nexus Core API")
+
+# Paketlenmiş istemci yerel ve güvenli bir özel origin kullanır. Yalnız bu origin'e API erişimi
+# verilir; wildcard kullanılmaz ve web istemcisi production'da aynı-origin çalışmaya devam eder.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["nexus://app"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 app.include_router(auth.router)
 app.include_router(attachments.router)
@@ -44,6 +56,7 @@ app.include_router(bots.server_bots_router)
 app.include_router(ai_router)
 app.include_router(voice.router)
 app.include_router(gateway.router)
+app.include_router(join_codes.router)
 
 
 def _reload_enabled_plugins() -> None:

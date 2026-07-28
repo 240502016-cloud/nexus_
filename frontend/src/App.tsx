@@ -5,6 +5,7 @@ import { coreApi, getToken, setToken } from "./api/client";
 import { ChannelSidebar } from "./components/ChannelSidebar";
 import { ChatArea } from "./components/ChatArea";
 import { IncomingCallModal, OutgoingCallToast, CallNoticeToast } from "./components/IncomingCallModal";
+import { JoinServerPanel } from "./components/JoinServerPanel";
 import { LoginForm } from "./components/LoginForm";
 import { MembersPanel } from "./components/MembersPanel";
 import { ProfilePanel } from "./components/ProfilePanel";
@@ -14,6 +15,7 @@ import { ServerInvitesPanel } from "./components/ServerInvitesPanel";
 import { ServerSettingsPanel } from "./components/ServerSettingsPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { VideoStage } from "./components/VideoStage";
+import { desktopBridge } from "./desktopBridge";
 import { useGateway } from "./hooks/useGateway";
 import { useVoiceChannel } from "./hooks/useVoiceChannel";
 import { playMessageNotification } from "./notifications";
@@ -30,6 +32,14 @@ const MESSAGE_SYNC_BACKGROUND_MS = 300_000;
 function createMessageClientId(): string {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
   return `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+function inviteCodeFromLocation(): string {
+  try {
+    return new URLSearchParams(window.location.search).get("invite")?.trim().toUpperCase() ?? "";
+  } catch {
+    return "";
+  }
 }
 
 function mergeIncomingMessage(current: Message[], incoming: Message): Message[] {
@@ -99,22 +109,104 @@ export default function App() {
   const [voiceStageVisible, setVoiceStageVisible] = useState(true);
   const [membersVisible, setMembersVisible] = useState(false);
   const [serverInvitesOpen, setServerInvitesOpen] = useState(false);
+  const [joinServerOpen, setJoinServerOpen] = useState(() => Boolean(inviteCodeFromLocation()));
+  const [joinServerInitialCode, setJoinServerInitialCode] = useState(inviteCodeFromLocation);
   const [serverInvitesLoading, setServerInvitesLoading] = useState(false);
   const [serverInvites, setServerInvites] = useState<ServerInviteList>({
     incoming: [],
     outgoing: [],
   });
+  const [pendingFriendRequestCount, setPendingFriendRequestCount] = useState(0);
 
   // Sesli kanal ve gateway (presence + çağrı) hook'ları uygulama seviyesinde tutulur ki video
   // ana alanda, kontroller yan panelde gösterilebilsin ve çağrılar her yerde alınabilsin.
   const voice = useVoiceChannel(activeVoiceChannelId, voiceSettings);
   const gateway = useGateway(!!user);
 
+  useEffect(() => {
+    if (!desktopBridge.available) return;
+    void desktopBridge.updatePreferences({
+      closeBehavior: voiceSettings.desktopCloseBehavior,
+      openAtLogin: voiceSettings.desktopOpenAtLogin,
+      startMinimized: voiceSettings.desktopStartMinimized,
+      autoCheckUpdates: voiceSettings.desktopAutoCheckUpdates,
+      overlayEnabled: voiceSettings.desktopOverlayEnabled,
+      keybinds: {
+        pushToTalk: voiceSettings.desktopPushToTalkKey,
+        toggleMute: voiceSettings.desktopToggleMuteKey,
+        toggleDeafen: voiceSettings.desktopToggleDeafenKey,
+        focusApp: voiceSettings.desktopFocusAppKey,
+      },
+    });
+  }, [
+    voiceSettings.desktopAutoCheckUpdates,
+    voiceSettings.desktopCloseBehavior,
+    voiceSettings.desktopFocusAppKey,
+    voiceSettings.desktopOpenAtLogin,
+    voiceSettings.desktopOverlayEnabled,
+    voiceSettings.desktopPushToTalkKey,
+    voiceSettings.desktopStartMinimized,
+    voiceSettings.desktopToggleDeafenKey,
+    voiceSettings.desktopToggleMuteKey,
+  ]);
+
+  useEffect(
+    () =>
+      desktopBridge.onAction((action) => {
+        if (action.type === "toggle-mute" && voice.connected) voice.toggleMute();
+        if (action.type === "toggle-deafen" && voice.connected) voice.toggleDeafen();
+        if (action.type === "open-settings") setSettingsOpen(true);
+      }),
+    [voice.connected, voice.toggleDeafen, voice.toggleMute],
+  );
+
+  useEffect(() => {
+    const channelName = channels.find((channel) => channel.id === activeVoiceChannelId)?.name ?? null;
+    desktopBridge.updateVoiceState({
+      connected: voice.connected,
+      channelName,
+      muted: voice.muted,
+      deafened: voice.deafened,
+      participants: [
+        ...(user
+          ? [{ userId: user.id, username: user.display_name || user.username, speaking: false, muted: voice.muted }]
+          : []),
+        ...voice.participants.map((participant) => ({
+          userId: participant.user_id,
+          username: participant.username,
+          speaking: participant.speaking,
+          muted: participant.muted,
+        })),
+      ],
+    });
+  }, [
+    activeVoiceChannelId,
+    channels,
+    user,
+    voice.connected,
+    voice.deafened,
+    voice.muted,
+    voice.participants,
+  ]);
+
+  useEffect(() => {
+    if (!desktopBridge.available) return;
+    if (voiceSettings.desktopOverlayEnabled && voice.connected) void desktopBridge.openOverlay();
+    if (!voiceSettings.desktopOverlayEnabled) void desktopBridge.closeOverlay();
+  }, [voice.connected, voiceSettings.desktopOverlayEnabled]);
+
+  useEffect(() => {
+    const serverName = servers.find((server) => server.id === activeServerId)?.name;
+    const channelName = channels.find((channel) => channel.id === activeChannelId)?.name;
+    document.title = channelName ? `${channelName} · ${serverName ?? "Nexus"}` : serverName || "Nexus";
+  }, [activeChannelId, activeServerId, channels, servers]);
+
   // Farklı bir sunucudaki kanala (çağrı kabulüyle) katılırken, kanallar yüklendikten sonra
   // hedef ses kanalına geçmek için beklemede tutulan istek.
   const pendingVoiceJoinRef = useRef<{ serverId: number; channelId: number } | null>(null);
   const pendingTextChannelRef = useRef<{ serverId: number; channelId: number } | null>(null);
   const callNotificationRef = useRef<Notification | null>(null);
+  const friendNotificationRef = useRef<Notification | null>(null);
   const activeChannelIdRef = useRef(activeChannelId);
   activeChannelIdRef.current = activeChannelId;
 
@@ -130,12 +222,62 @@ export default function App() {
     }
   }, [user]);
 
+  const loadFriendRequestCount = useCallback(async () => {
+    if (!user) {
+      setPendingFriendRequestCount(0);
+      return;
+    }
+    try {
+      const requests = await coreApi.listFriendRequests();
+      setPendingFriendRequestCount(requests.incoming.length);
+    } catch {
+      // Anlık ağ hatasında mevcut sayaç korunur; gateway veya zamanlayıcı tekrar uzlaştırır.
+    }
+  }, [user]);
+
   useEffect(() => {
     if (!user) return;
     void loadServerInvites();
     const timer = window.setInterval(() => void loadServerInvites(), 30_000);
     return () => window.clearInterval(timer);
   }, [gateway.socialEventSequence, loadServerInvites, user]);
+
+  useEffect(() => {
+    if (!user) {
+      setPendingFriendRequestCount(0);
+      return;
+    }
+    void loadFriendRequestCount();
+    const timer = window.setInterval(() => void loadFriendRequestCount(), 15_000);
+    return () => window.clearInterval(timer);
+  }, [gateway.socialEventSequence, loadFriendRequestCount, user]);
+
+  useEffect(() => {
+    const event = gateway.socialEvent;
+    if (!event || event.event !== "friend-request") return;
+    if (!voiceSettings.desktopNotifications || gateway.selfStatus.status === "dnd") return;
+    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    if (!document.hidden) return;
+    friendNotificationRef.current?.close();
+    try {
+      const notification = new Notification("Yeni arkadaşlık isteği", {
+        body: "İsteği görmek ve yanıtlamak için Nexus'u açın.",
+        tag: "nexus-friend-request",
+      });
+      notification.onclick = () => {
+        window.focus();
+        setProfileOpen(true);
+        notification.close();
+      };
+      friendNotificationRef.current = notification;
+    } catch {
+      // Bildirim desteği yoksa görünür sayaç ve sosyal panel çalışmaya devam eder.
+    }
+  }, [
+    gateway.selfStatus.status,
+    gateway.socialEvent?.sequence,
+    voiceSettings.desktopNotifications,
+  ]);
 
   // Gelen çağrıda masaüstü bildirimi (sekme arka plandayken bile duyulur). Ayar + izin gerektirir.
   useEffect(() => {
@@ -429,6 +571,11 @@ export default function App() {
       const { access_token } = await coreApi.login(username, password);
       setToken(access_token);
       setUser(await coreApi.me());
+      const inviteCode = inviteCodeFromLocation();
+      if (inviteCode) {
+        setJoinServerInitialCode(inviteCode);
+        setJoinServerOpen(true);
+      }
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : "Giriş başarısız");
     }
@@ -441,6 +588,11 @@ export default function App() {
       const { access_token } = await coreApi.login(username, password);
       setToken(access_token);
       setUser(await coreApi.me());
+      const inviteCode = inviteCodeFromLocation();
+      if (inviteCode) {
+        setJoinServerInitialCode(inviteCode);
+        setJoinServerOpen(true);
+      }
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : "Kayıt başarısız");
     }
@@ -451,6 +603,7 @@ export default function App() {
     setSettingsOpen(false);
     setServerSettingsOpen(false);
     setServerInvitesOpen(false);
+    setJoinServerOpen(false);
     setToken(null);
     setUser(null);
     setServers([]);
@@ -663,6 +816,22 @@ export default function App() {
     }
   }
 
+  async function handleJoinServer(code: string) {
+    const joinedServer = await coreApi.joinServerByCode(code);
+    setServers((current) => [
+      ...current.filter((server) => server.id !== joinedServer.id),
+      joinedServer,
+    ]);
+    setActiveServerId(joinedServer.id);
+    setJoinServerOpen(false);
+    setJoinServerInitialCode("");
+    if (!desktopBridge.available && window.location.search) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("invite");
+      window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+  }
+
   async function handleEditMessage(eventId: string, content: string) {
     if (!activeChannelId) return;
     const channelId = activeChannelId;
@@ -731,6 +900,10 @@ export default function App() {
         activeServerId={activeServerId}
         onSelect={setActiveServerId}
         onCreateServer={handleCreateServer}
+        onOpenJoin={() => {
+          setJoinServerInitialCode("");
+          setJoinServerOpen(true);
+        }}
         inviteCount={serverInvites.incoming.length}
         onOpenInvites={() => {
           setServerInvitesOpen(true);
@@ -765,6 +938,7 @@ export default function App() {
         onDeleteChannel={handleDeleteChannel}
         onOpenServerSettings={() => setServerSettingsOpen(true)}
         voiceStates={gateway.voiceStates}
+        pendingFriendRequestCount={pendingFriendRequestCount}
         onOpenProfile={() => setProfileOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
       />
@@ -846,6 +1020,13 @@ export default function App() {
           onClose={() => setProfileOpen(false)}
           onOpenSettings={() => setSettingsOpen(true)}
           onLogout={handleLogout}
+        />
+      ) : null}
+      {joinServerOpen ? (
+        <JoinServerPanel
+          initialCode={joinServerInitialCode}
+          onJoin={handleJoinServer}
+          onClose={() => setJoinServerOpen(false)}
         />
       ) : null}
       {serverInvitesOpen ? (

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
 
 import { ApiError, coreApi } from "../api/client";
@@ -91,21 +91,39 @@ export function ProfilePanel({
     element.style.overflowY = element.scrollHeight > max ? "auto" : "hidden";
   }
 
-  function loadSocial() {
-    Promise.all([
+  const loadSocial = useCallback(async () => {
+    try {
+      const [friendList, requestList, conversationList] = await Promise.all([
       coreApi.listFriends(),
       coreApi.listFriendRequests(),
       coreApi.listDirectConversations(),
-    ])
-      .then(([friendList, requestList, conversationList]) => {
-        setFriends(friendList);
-        setRequests(requestList);
-        setConversations(conversationList);
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : "Sosyal bilgiler yüklenemedi"));
-  }
+      ]);
+      setFriends(friendList);
+      setRequests(requestList);
+      setConversations(conversationList);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Sosyal bilgiler yüklenemedi");
+    }
+  }, []);
 
-  useEffect(loadSocial, [socialEventSequence]);
+  useEffect(() => {
+    void loadSocial();
+  }, [loadSocial, socialEventSequence]);
+
+  useEffect(() => {
+    const refresh = () => {
+      if (!document.hidden) void loadSocial();
+    };
+    const timer = window.setInterval(refresh, 15_000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [loadSocial]);
 
   useEffect(() => {
     const query = search.trim();

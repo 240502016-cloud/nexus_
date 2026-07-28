@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { SINK_ID_SUPPORTED, useMediaDevices } from "../hooks/useMediaDevices";
 import type { SelfStatus } from "../hooks/useGateway";
+import { desktopBridge } from "../desktopBridge";
+import type { DesktopUpdateStatus } from "../desktopBridge";
 import type { KeyCombo, VoiceSettings } from "../settings";
 import {
   DEFAULT_VOICE_SETTINGS,
@@ -15,7 +17,15 @@ import type { User } from "../types";
 import { AccountSettings } from "./AccountSettings";
 import { Icon } from "./Icon";
 
-type SettingsTab = "account" | "status" | "voice" | "notifications" | "appearance";
+type SettingsTab =
+  | "account"
+  | "status"
+  | "voice"
+  | "notifications"
+  | "appearance"
+  | "keybinds"
+  | "windows"
+  | "advanced";
 
 interface SettingsPanelProps {
   settings: VoiceSettings;
@@ -52,16 +62,31 @@ export function SettingsPanel({
   const [status, setStatus] = useState(selfStatus.status);
   const [customStatus, setCustomStatus] = useState(selfStatus.custom);
   const [notifPermission, setNotifPermission] = useState<NotificationPermission | "unsupported">(
-    typeof Notification === "undefined" ? "unsupported" : Notification.permission,
+    desktopBridge.available
+      ? "granted"
+      : typeof Notification === "undefined"
+        ? "unsupported"
+        : Notification.permission,
   );
+  const [desktopFeedback, setDesktopFeedback] = useState<string | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<DesktopUpdateStatus>({
+    state: "idle",
+    message: "Henüz güncelleme denetlenmedi.",
+  });
 
   async function requestNotifPermission() {
+    if (desktopBridge.available) {
+      setNotifPermission("granted");
+      return;
+    }
     if (typeof Notification === "undefined") return;
     const result = await Notification.requestPermission();
     setNotifPermission(result);
   }
 
   const { devices, permissionGranted, error: deviceError, requestPermission } = useMediaDevices();
+
+  useEffect(() => desktopBridge.onUpdateStatus(setUpdateStatus), []);
 
   // --- Mikrofon test (canlı seviye) ve kamera önizleme kaynakları ---
   const [micLevel, setMicLevel] = useState(0);
@@ -209,9 +234,34 @@ export function SettingsPanel({
     };
   }, [recording]);
 
-  function handleSave() {
+  async function handleSave() {
     stopMicTest();
     stopCamPreview();
+    if (desktopBridge.available) {
+      const keybinds = {
+        pushToTalk: settings.desktopPushToTalkKey,
+        toggleMute: settings.desktopToggleMuteKey,
+        toggleDeafen: settings.desktopToggleDeafenKey,
+        focusApp: settings.desktopFocusAppKey,
+      };
+      const duplicateCount = new Set(Object.values(keybinds).map((value) => value.toLowerCase())).size;
+      if (duplicateCount !== Object.keys(keybinds).length) {
+        setDesktopFeedback("Aynı kısayol iki eyleme atanamaz.");
+        return;
+      }
+      const result = await desktopBridge.configureKeybinds(keybinds);
+      await desktopBridge.updatePreferences({
+        closeBehavior: settings.desktopCloseBehavior,
+        openAtLogin: settings.desktopOpenAtLogin,
+        startMinimized: settings.desktopStartMinimized,
+        autoCheckUpdates: settings.desktopAutoCheckUpdates,
+        overlayEnabled: settings.desktopOverlayEnabled,
+      });
+      if (result.errors.length) {
+        setDesktopFeedback(result.errors.join(" "));
+        return;
+      }
+    }
     saveVoiceSettings(settings);
     onChange(settings);
     onStatusChange(status, customStatus.trim());
@@ -263,6 +313,28 @@ export function SettingsPanel({
           >
             Görünüm
           </button>
+          {desktopBridge.available ? (
+            <>
+              <button
+                className={tab === "keybinds" ? "settings-panel__tab active" : "settings-panel__tab"}
+                onClick={() => setTab("keybinds")}
+              >
+                Kısayollar
+              </button>
+              <button
+                className={tab === "windows" ? "settings-panel__tab active" : "settings-panel__tab"}
+                onClick={() => setTab("windows")}
+              >
+                Windows
+              </button>
+              <button
+                className={tab === "advanced" ? "settings-panel__tab active" : "settings-panel__tab"}
+                onClick={() => setTab("advanced")}
+              >
+                Gelişmiş
+              </button>
+            </>
+          ) : null}
         </nav>
 
         {tab === "account" ? (
@@ -341,6 +413,16 @@ export function SettingsPanel({
               ))}
             </select>
           </label>
+          <label className="settings-panel__field">
+            <span>Mikrofon seviyesi · %{settings.inputVolume}</span>
+            <input
+              type="range"
+              min={0}
+              max={200}
+              value={settings.inputVolume}
+              onChange={(event) => update({ inputVolume: Number(event.target.value) })}
+            />
+          </label>
           <div className="settings-panel__test-row">
             <button onClick={micTesting ? stopMicTest : startMicTest}>
               {micTesting ? "Testi durdur" : "Mikrofonu test et"}
@@ -364,6 +446,16 @@ export function SettingsPanel({
                 </option>
               ))}
             </select>
+          </label>
+          <label className="settings-panel__field">
+            <span>Çıkış seviyesi · %{settings.outputVolume}</span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={settings.outputVolume}
+              onChange={(event) => update({ outputVolume: Number(event.target.value) })}
+            />
           </label>
           {SINK_ID_SUPPORTED ? (
             <div className="settings-panel__test-row">
@@ -471,9 +563,11 @@ export function SettingsPanel({
             <h3 className="settings-panel__section-title">Bildirimler</h3>
             <div className="settings-panel__notice-row">
               <span>
-                Tarayıcı bildirim izni:{" "}
+                {desktopBridge.available ? "Windows bildirimleri: " : "Tarayıcı bildirim izni: "}
                 <strong>
-                  {notifPermission === "granted"
+                  {desktopBridge.available
+                    ? "Hazır"
+                    : notifPermission === "granted"
                     ? "Verildi"
                     : notifPermission === "denied"
                       ? "Reddedildi"
@@ -498,7 +592,8 @@ export function SettingsPanel({
                 disabled={notifPermission !== "granted"}
                 onChange={(e) => update({ desktopNotifications: e.target.checked })}
               />
-              Sekme arka plandayken mesajlar ve aramalar için sistem bildirimi
+              {desktopBridge.available ? "Nexus arka plandayken" : "Sekme arka plandayken"} mesajlar
+              ve aramalar için sistem bildirimi
             </label>
             <label className="settings-panel__radio">
               <input
@@ -553,9 +648,124 @@ export function SettingsPanel({
           </div>
         ) : null}
 
+        {tab === "keybinds" ? (
+          <div className="settings-panel__section">
+            <h3 className="settings-panel__section-title">Global kısayollar</h3>
+            <p className="settings-panel__hint">
+              Biçim örnekleri: <b>CapsLock</b>, <b>Mouse4</b>, <b>Ctrl+Shift+KeyM</b>.
+              Global bas-konuş tuşa basıldığı ve bırakıldığı anı izler; oyun öndeyken de çalışır.
+            </p>
+            {[
+              ["Bas-konuş", "desktopPushToTalkKey"],
+              ["Mikrofonu aç / kapat", "desktopToggleMuteKey"],
+              ["Sağırlaştır", "desktopToggleDeafenKey"],
+              ["Nexus'u öne getir", "desktopFocusAppKey"],
+            ].map(([label, key]) => (
+              <label className="settings-panel__field" key={key}>
+                <span>{label}</span>
+                <input
+                  value={settings[key as keyof VoiceSettings] as string}
+                  onChange={(event) =>
+                    update({ [key]: event.target.value } as Partial<VoiceSettings>)
+                  }
+                  spellCheck={false}
+                />
+              </label>
+            ))}
+            {desktopFeedback ? <p className="settings-panel__error-text">{desktopFeedback}</p> : null}
+          </div>
+        ) : null}
+
+        {tab === "windows" ? (
+          <div className="settings-panel__section">
+            <h3 className="settings-panel__section-title">Windows davranışı</h3>
+            <label className="settings-panel__field">
+              <span>Kapat düğmesi</span>
+              <select
+                value={settings.desktopCloseBehavior}
+                onChange={(event) =>
+                  update({
+                    desktopCloseBehavior: event.target.value as VoiceSettings["desktopCloseBehavior"],
+                  })
+                }
+              >
+                <option value="tray">Sistem tepsisine küçült</option>
+                <option value="quit">Uygulamadan tamamen çık</option>
+              </select>
+            </label>
+            <label className="settings-panel__radio">
+              <input
+                type="checkbox"
+                checked={settings.desktopOpenAtLogin}
+                onChange={(event) => update({ desktopOpenAtLogin: event.target.checked })}
+              />
+              Windows başladığında Nexus'u aç
+            </label>
+            <label className="settings-panel__radio">
+              <input
+                type="checkbox"
+                checked={settings.desktopStartMinimized}
+                disabled={!settings.desktopOpenAtLogin}
+                onChange={(event) => update({ desktopStartMinimized: event.target.checked })}
+              />
+              Başlangıçta sistem tepsisinde aç
+            </label>
+            <label className="settings-panel__radio">
+              <input
+                type="checkbox"
+                checked={settings.desktopOverlayEnabled}
+                onChange={(event) => update({ desktopOverlayEnabled: event.target.checked })}
+              />
+              Mini ses penceresini etkinleştir
+            </label>
+            <div className="settings-panel__test-row">
+              <button type="button" onClick={() => void desktopBridge.openOverlay()}>
+                Mini pencereyi aç
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {tab === "advanced" ? (
+          <div className="settings-panel__section">
+            <h3 className="settings-panel__section-title">Masaüstü istemcisi</h3>
+            <dl className="desktop-runtime-info">
+              <div><dt>Runtime</dt><dd>Electron · {desktopBridge.platform}</dd></div>
+              <div><dt>Sunucu</dt><dd>{desktopBridge.serverUrl}</dd></div>
+              <div><dt>Güncelleme</dt><dd>{updateStatus.message}</dd></div>
+            </dl>
+            <label className="settings-panel__radio">
+              <input
+                type="checkbox"
+                checked={settings.desktopAutoCheckUpdates}
+                onChange={(event) => update({ desktopAutoCheckUpdates: event.target.checked })}
+              />
+              Açılışta güvenli güncelleme denetimi yap
+            </label>
+            <div className="settings-panel__test-row">
+              <button
+                type="button"
+                disabled={updateStatus.state === "checking" || updateStatus.state === "downloading"}
+                onClick={() => void desktopBridge.checkForUpdates().then(setUpdateStatus)}
+              >
+                Güncellemeleri denetle
+              </button>
+              {updateStatus.state === "downloaded" ? (
+                <button type="button" onClick={() => void desktopBridge.installUpdate()}>
+                  Yeniden başlat ve kur
+                </button>
+              ) : null}
+            </div>
+            <p className="settings-panel__hint">
+              Production paketleri kod imzalı olmalı; istemci yalnız yayın metadata'sındaki
+              doğrulanmış SHA-512 özetiyle eşleşen NSIS paketini kurar.
+            </p>
+          </div>
+        ) : null}
+
         <div className="settings-panel__actions">
           <button onClick={handleReset}>Varsayılana dön</button>
-          <button className="settings-panel__save" onClick={handleSave}>
+          <button className="settings-panel__save" onClick={() => void handleSave()}>
             Kaydet
           </button>
         </div>

@@ -109,6 +109,9 @@ def add_member(
         .first()
     )
     if invite and invite.status == "pending":
+        # İlk yanıt ağda kaybolduysa aynı daveti başarıyla döndür; ikinci kayıt üretme.
+        if invite.inviter_id == current_user.id:
+            return _invite_read(invite, current_user.id)
         raise HTTPException(status_code=409, detail="Bu kullanıcıya zaten bekleyen bir davet var")
     if invite:
         invite.inviter_id = current_user.id
@@ -127,6 +130,7 @@ def add_member(
     db.commit()
     db.refresh(invite)
     notify_social_event(user.id, "server-invite")
+    notify_social_event(current_user.id, "server-invite-sent")
     return _invite_read(invite, current_user.id)
 
 

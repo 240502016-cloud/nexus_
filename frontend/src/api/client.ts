@@ -19,13 +19,21 @@ import type {
   Server,
   ServerInvite,
   ServerInviteList,
+  ServerJoinCode,
   User,
 } from "../types";
+import { apiUrl, desktopBridge } from "../desktopBridge";
 
-const BASE_URL = "/api";
 const TOKEN_STORAGE_KEY = "nexus_token";
 
-let token: string | null = localStorage.getItem(TOKEN_STORAGE_KEY);
+let token: string | null = desktopBridge.available ? null : localStorage.getItem(TOKEN_STORAGE_KEY);
+
+export async function initializeTokenStorage(): Promise<void> {
+  if (!desktopBridge.available) return;
+  token = await desktopBridge.getSecureToken();
+  // Eski geliştirme sürümünden kalmış düz metin tokenı masaüstünde tutma.
+  localStorage.removeItem(TOKEN_STORAGE_KEY);
+}
 
 export function getToken(): string | null {
   return token;
@@ -33,6 +41,11 @@ export function getToken(): string | null {
 
 export function setToken(newToken: string | null): void {
   token = newToken;
+  if (desktopBridge.available) {
+    void desktopBridge.setSecureToken(newToken);
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    return;
+  }
   if (newToken) {
     localStorage.setItem(TOKEN_STORAGE_KEY, newToken);
   } else {
@@ -49,7 +62,20 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+interface RequestOptions extends RequestInit {
+  retry?: boolean;
+  timeoutMs?: number;
+}
+
+const RETRYABLE_STATUSES = new Set([502, 503, 504]);
+
+function retryDelay(attempt: number): Promise<void> {
+  const delay = 350 * 2 ** attempt + Math.round(Math.random() * 150);
+  return new Promise((resolve) => window.setTimeout(resolve, delay));
+}
+
+async function request<T>(path: string, init?: RequestOptions): Promise<T> {
+  const { retry, timeoutMs = 15_000, ...fetchInit } = init ?? {};
   const headers: Record<string, string> = { ...(init?.headers as Record<string, string> | undefined) };
   if (token) {
     headers.Authorization = `Bearer ${token}`;
@@ -59,23 +85,53 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers["Content-Type"] = "application/json";
   }
 
-  const response = await fetch(`${BASE_URL}${path}`, { ...init, headers });
+  const method = (fetchInit.method ?? "GET").toUpperCase();
+  const canRetry = retry === true || method === "GET" || method === "HEAD";
+  const maxAttempts = canRetry ? 3 : 1;
 
-  if (!response.ok) {
-    let detail = response.statusText;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+    let response: Response;
     try {
-      const body = await response.json();
-      detail = body.detail ?? detail;
-    } catch {
-      // yanıt gövdesi JSON değilse statusText'e düş
+      response = await fetch(apiUrl(path), { ...fetchInit, headers, signal: controller.signal });
+    } catch (error) {
+      window.clearTimeout(timer);
+      if (attempt + 1 < maxAttempts) {
+        await retryDelay(attempt);
+        continue;
+      }
+      const timeout = error instanceof DOMException && error.name === "AbortError";
+      throw new ApiError(
+        0,
+        timeout
+          ? "Sunucu yanıt vermedi. Bağlantı yeniden kurulunca tekrar deneyin."
+          : "Sunucuya ulaşılamadı. İnternet veya sunucu bağlantınızı kontrol edin.",
+      );
     }
-    throw new ApiError(response.status, detail);
-  }
+    window.clearTimeout(timer);
 
-  if (response.status === 204) {
-    return undefined as T;
+    if (!response.ok) {
+      if (RETRYABLE_STATUSES.has(response.status) && attempt + 1 < maxAttempts) {
+        await retryDelay(attempt);
+        continue;
+      }
+      let detail = response.statusText;
+      try {
+        const body = await response.json();
+        detail = body.detail ?? detail;
+      } catch {
+        // yanıt gövdesi JSON değilse statusText'e düş
+      }
+      throw new ApiError(response.status, detail);
+    }
+
+    if (response.status === 204) {
+      return undefined as T;
+    }
+    return response.json() as Promise<T>;
   }
-  return response.json() as Promise<T>;
+  throw new ApiError(0, "İstek tamamlanamadı.");
 }
 
 export const coreApi = {
@@ -113,11 +169,12 @@ export const coreApi = {
     request<FriendRequest>("/friends/requests", {
       method: "POST",
       body: JSON.stringify({ username }),
+      retry: true,
     }),
   acceptFriendRequest: (friendshipId: number) =>
-    request<Friend>(`/friends/requests/${friendshipId}/accept`, { method: "POST" }),
+    request<Friend>(`/friends/requests/${friendshipId}/accept`, { method: "POST", retry: true }),
   removeFriendship: (friendshipId: number) =>
-    request<void>(`/friends/${friendshipId}`, { method: "DELETE" }),
+    request<void>(`/friends/${friendshipId}`, { method: "DELETE", retry: true }),
 
   listDirectConversations: () => request<DirectConversation[]>("/direct/conversations"),
   listDirectMessages: (conversationId: number, limit = 50, cursor?: string | null) => {
@@ -150,12 +207,32 @@ export const coreApi = {
     request<ServerInvite>(`/servers/${serverId}/members`, {
       method: "POST",
       body: JSON.stringify({ user_id: userId }),
+      retry: true,
     }),
   listServerInvites: () => request<ServerInviteList>("/server-invites"),
   acceptServerInvite: (inviteId: number) =>
-    request<Server>(`/server-invites/${inviteId}/accept`, { method: "POST" }),
+    request<Server>(`/server-invites/${inviteId}/accept`, { method: "POST", retry: true }),
   declineServerInvite: (inviteId: number) =>
-    request<void>(`/server-invites/${inviteId}`, { method: "DELETE" }),
+    request<void>(`/server-invites/${inviteId}`, { method: "DELETE", retry: true }),
+  getServerJoinCode: (serverId: number) =>
+    request<ServerJoinCode>(`/server-join/servers/${serverId}/code`),
+  createServerJoinCode: (serverId: number) =>
+    request<ServerJoinCode>(`/server-join/servers/${serverId}/code`, {
+      method: "POST",
+      retry: true,
+    }),
+  rotateServerJoinCode: (serverId: number) =>
+    request<ServerJoinCode>(`/server-join/servers/${serverId}/code`, {
+      method: "PUT",
+    }),
+  revokeServerJoinCode: (serverId: number) =>
+    request<void>(`/server-join/servers/${serverId}/code`, { method: "DELETE", retry: true }),
+  joinServerByCode: (code: string) =>
+    request<Server>("/server-join", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+      retry: true,
+    }),
   removeMember: (serverId: number, userId: number) =>
     request<void>(`/servers/${serverId}/members/${userId}`, { method: "DELETE" }),
 

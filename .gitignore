@@ -10,6 +10,11 @@ node_modules/
 dist/
 build/
 .vite/
+.electron-runtime-cache/
+desktop/release/
+desktop/release-*/
+desktop/assets/icon.ico
+desktop/assets/icon.png
 *.tsbuildinfo
 vite.config.js
 vite.config.d.ts

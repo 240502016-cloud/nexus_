@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { coreApi, getToken } from "../api/client";
+import { webSocketUrl } from "../desktopBridge";
 import { VIDEO_QUALITY_PRESETS } from "../settings";
 import type { VoiceSettings } from "../settings";
 import { usePushToTalk } from "./usePushToTalk";
@@ -179,6 +180,8 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
 
   const wsRef = useRef<WebSocket | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null); // mikrofon (audio)
+  const microphoneSourceRef = useRef<MediaStream | null>(null);
+  const microphoneGraphRef = useRef<{ context: AudioContext; gain: GainNode } | null>(null);
   const cameraTrackRef = useRef<MediaStreamTrack | null>(null);
   const screenTrackRef = useRef<MediaStreamTrack | null>(null);
   const peersRef = useRef<Map<number, PeerState>>(new Map());
@@ -204,6 +207,23 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
   // connect() effect'i sadece channelId'ye bağlı çalışır; bağlantı anındaki modu okumak için ref kullanılır.
   const voiceSettingsRef = useRef(voiceSettings);
   voiceSettingsRef.current = voiceSettings;
+
+  const processMicrophoneStream = useCallback(async (sourceStream: MediaStream) => {
+    const context = new AudioContext();
+    const source = context.createMediaStreamSource(sourceStream);
+    const gain = context.createGain();
+    const destination = context.createMediaStreamDestination();
+    gain.gain.value = Math.max(0, Math.min(2, voiceSettingsRef.current.inputVolume / 100));
+    source.connect(gain);
+    gain.connect(destination);
+    await context.resume().catch(() => {});
+
+    microphoneSourceRef.current?.getTracks().forEach((track) => track.stop());
+    void microphoneGraphRef.current?.context.close();
+    microphoneSourceRef.current = sourceStream;
+    microphoneGraphRef.current = { context, gain };
+    return destination.stream;
+  }, []);
 
   const applyMuted = useCallback((nextMuted: boolean) => {
     setMuted(nextMuted);
@@ -279,6 +299,10 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     remoteMediaRef.current.clear();
     localStreamRef.current?.getTracks().forEach((track) => track.stop());
     localStreamRef.current = null;
+    microphoneSourceRef.current?.getTracks().forEach((track) => track.stop());
+    microphoneSourceRef.current = null;
+    void microphoneGraphRef.current?.context.close();
+    microphoneGraphRef.current = null;
     cameraTrackRef.current?.stop();
     screenTrackRef.current?.stop();
     cameraTrackRef.current = null;
@@ -476,6 +500,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
           }
           audioEl.srcObject = stream;
           audioEl.muted = deafenedRef.current;
+          audioEl.volume = Math.max(0, Math.min(1, voiceSettingsRef.current.outputVolume / 100));
           void applySinkId(audioEl, voiceSettingsRef.current.outputDeviceId);
           return;
         }
@@ -583,9 +608,10 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
           if (!navigator.mediaDevices?.getUserMedia) {
             throw new DOMException("Secure media API unavailable", "SecurityError");
           }
-          const stream = await navigator.mediaDevices.getUserMedia({
+          const sourceStream = await navigator.mediaDevices.getUserMedia({
             audio: buildAudioConstraints(voiceSettingsRef.current),
           });
+          const stream = await processMicrophoneStream(sourceStream);
           if (cancelled) {
             stream.getTracks().forEach((track) => track.stop());
             return;
@@ -605,11 +631,10 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         }
       }
 
-      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
       let ws: WebSocket;
       try {
         ws = new WebSocket(
-          `${protocol}://${window.location.host}/api/channels/${channelId}/voice?token=${getToken() ?? ""}`,
+          `${webSocketUrl(`/channels/${channelId}/voice`)}?token=${encodeURIComponent(getToken() ?? "")}`,
         );
       } catch (err) {
         setError(`Ses bağlantısı başlatılamadı: ${err instanceof Error ? err.message : String(err)}`);
@@ -875,7 +900,8 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         const newStream = await navigator.mediaDevices.getUserMedia({
           audio: buildAudioConstraints(voiceSettingsRef.current),
         });
-        const newTrack = newStream.getAudioTracks()[0];
+        const processedStream = await processMicrophoneStream(newStream);
+        const newTrack = processedStream.getAudioTracks()[0];
         if (!newTrack) return;
         newTrack.enabled = !mutedRef.current;
         for (const [, peer] of peersRef.current) {
@@ -883,7 +909,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
           if (sender) await sender.replaceTrack(newTrack);
         }
         localStreamRef.current?.getAudioTracks().forEach((t) => t.stop());
-        localStreamRef.current = newStream;
+        localStreamRef.current = processedStream;
         setMicEpoch((e) => e + 1); // konuşma-tespiti analyser'ını yeni track'le yeniden kur
       } catch (err) {
         setError(`Mikrofon değiştirilemedi: ${err instanceof Error ? err.message : String(err)}`);
@@ -974,8 +1000,16 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
 
   // Çıkış cihazı (hoparlör) değişince mevcut uzak ses elemanlarına uygula.
   useEffect(() => {
-    audioElsRef.current.forEach((el) => void applySinkId(el, voiceSettings.outputDeviceId));
-  }, [voiceSettings.outputDeviceId]);
+    audioElsRef.current.forEach((el) => {
+      el.volume = Math.max(0, Math.min(1, voiceSettings.outputVolume / 100));
+      void applySinkId(el, voiceSettings.outputDeviceId);
+    });
+  }, [voiceSettings.outputDeviceId, voiceSettings.outputVolume]);
+
+  useEffect(() => {
+    const gain = microphoneGraphRef.current?.gain;
+    if (gain) gain.gain.value = Math.max(0, Math.min(2, voiceSettings.inputVolume / 100));
+  }, [voiceSettings.inputVolume]);
 
   // Mikrofon veya ses işleme ayarı değişince, görüşme sürüyorsa canlı geçiş yap.
   useEffect(() => {

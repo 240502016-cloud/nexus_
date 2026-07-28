@@ -159,6 +159,23 @@ class ServerInvite(Base):
     invitee: Mapped["User"] = relationship(foreign_keys=[invitee_id])
 
 
+class ServerJoinCode(Base):
+    """Arkadaşlık gerektirmeden bir sunucuya katılmayı sağlayan iptal edilebilir paylaşım kodu."""
+
+    __tablename__ = "server_join_codes"
+    __table_args__ = (Index("ix_server_join_codes_code", "code", unique=True),)
+
+    server_id: Mapped[int] = mapped_column(
+        ForeignKey("servers.id", ondelete="CASCADE"), primary_key=True
+    )
+    code: Mapped[str] = mapped_column(String(32))
+    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    server: Mapped["Server"] = relationship()
+    created_by: Mapped["User"] = relationship()
+
+
 class Channel(Base):
     __tablename__ = "channels"
 

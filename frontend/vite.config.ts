@@ -1,7 +1,9 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
+  // Web production keeps root-relative assets; the packaged nexus:// origin needs relative assets.
+  base: mode === "desktop" ? "./" : "/",
   plugins: [react()],
   server: {
     // Allow other devices on the LAN to open the dev client.
@@ -16,4 +18,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

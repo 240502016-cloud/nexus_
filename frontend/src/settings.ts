@@ -2,6 +2,7 @@ export type VoiceMode = "toggle" | "ptt";
 export type ThemeMode = "dark" | "light" | "system";
 export type VideoQuality = "480p" | "720p" | "1080p";
 export type VideoFrameRate = 30 | 60;
+export type DesktopCloseBehavior = "tray" | "quit";
 
 export interface VideoQualityPreset {
   width: number;
@@ -45,6 +46,8 @@ export interface VoiceSettings {
   inputDeviceId: string | null;
   outputDeviceId: string | null;
   cameraDeviceId: string | null;
+  inputVolume: number;
+  outputVolume: number;
   // Kamera ve ekran paylaşımı için ücretsiz, tarayıcı tabanlı WebRTC kalite tercihleri.
   videoQuality: VideoQuality;
   videoFrameRate: VideoFrameRate;
@@ -59,6 +62,16 @@ export interface VoiceSettings {
   callRingtone: boolean; // gelen çağrıda zil sesi
   // Görünüm.
   theme: ThemeMode;
+  // Masaüstü runtime tarafından uygulanır; web istemcisinde güvenli biçimde etkisizdir.
+  desktopCloseBehavior: DesktopCloseBehavior;
+  desktopOpenAtLogin: boolean;
+  desktopStartMinimized: boolean;
+  desktopAutoCheckUpdates: boolean;
+  desktopOverlayEnabled: boolean;
+  desktopPushToTalkKey: string;
+  desktopToggleMuteKey: string;
+  desktopToggleDeafenKey: string;
+  desktopFocusAppKey: string;
 }
 
 const STORAGE_KEY = "nexus.voiceSettings";
@@ -71,6 +84,8 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   inputDeviceId: null,
   outputDeviceId: null,
   cameraDeviceId: null,
+  inputVolume: 100,
+  outputVolume: 100,
   videoQuality: "1080p",
   videoFrameRate: 60,
   noiseSuppression: true,
@@ -81,6 +96,15 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   notificationSound: true,
   callRingtone: true,
   theme: "dark",
+  desktopCloseBehavior: "tray",
+  desktopOpenAtLogin: false,
+  desktopStartMinimized: false,
+  desktopAutoCheckUpdates: false,
+  desktopOverlayEnabled: false,
+  desktopPushToTalkKey: "CapsLock",
+  desktopToggleMuteKey: "Ctrl+Shift+KeyM",
+  desktopToggleDeafenKey: "Ctrl+Shift+KeyD",
+  desktopFocusAppKey: "Ctrl+Shift+KeyN",
 };
 
 function boolWithDefault(value: unknown, fallback: boolean): boolean {
@@ -89,6 +113,16 @@ function boolWithDefault(value: unknown, fallback: boolean): boolean {
 
 function stringOrNull(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function numberInRange(value: unknown, fallback: number, minimum = 0, maximum = 200): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(minimum, Math.min(maximum, Math.round(value)))
+    : fallback;
+}
+
+function keybindWithDefault(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.length > 0 && value.length <= 80 ? value : fallback;
 }
 
 export function loadVoiceSettings(): VoiceSettings {
@@ -107,6 +141,8 @@ export function loadVoiceSettings(): VoiceSettings {
       inputDeviceId: stringOrNull(parsed.inputDeviceId),
       outputDeviceId: stringOrNull(parsed.outputDeviceId),
       cameraDeviceId: stringOrNull(parsed.cameraDeviceId),
+      inputVolume: numberInRange(parsed.inputVolume, 100),
+      outputVolume: numberInRange(parsed.outputVolume, 100),
       videoQuality:
         parsed.videoQuality === "480p" || parsed.videoQuality === "720p" ? parsed.videoQuality : "1080p",
       videoFrameRate: parsed.videoFrameRate === 30 ? 30 : 60,
@@ -118,6 +154,15 @@ export function loadVoiceSettings(): VoiceSettings {
       notificationSound: boolWithDefault(parsed.notificationSound, true),
       callRingtone: boolWithDefault(parsed.callRingtone, true),
       theme: parsed.theme === "light" || parsed.theme === "system" ? parsed.theme : "dark",
+      desktopCloseBehavior: parsed.desktopCloseBehavior === "quit" ? "quit" : "tray",
+      desktopOpenAtLogin: boolWithDefault(parsed.desktopOpenAtLogin, false),
+      desktopStartMinimized: boolWithDefault(parsed.desktopStartMinimized, false),
+      desktopAutoCheckUpdates: boolWithDefault(parsed.desktopAutoCheckUpdates, false),
+      desktopOverlayEnabled: boolWithDefault(parsed.desktopOverlayEnabled, false),
+      desktopPushToTalkKey: keybindWithDefault(parsed.desktopPushToTalkKey, "CapsLock"),
+      desktopToggleMuteKey: keybindWithDefault(parsed.desktopToggleMuteKey, "Ctrl+Shift+KeyM"),
+      desktopToggleDeafenKey: keybindWithDefault(parsed.desktopToggleDeafenKey, "Ctrl+Shift+KeyD"),
+      desktopFocusAppKey: keybindWithDefault(parsed.desktopFocusAppKey, "Ctrl+Shift+KeyN"),
     };
   } catch {
     return DEFAULT_VOICE_SETTINGS;

@@ -32,7 +32,7 @@ nexus-communication-platform/
 | Katman     | Teknoloji              |
 |------------|-------------------------|
 | Frontend   | React + TypeScript      |
-| Masaüstü   | Tauri / Electron (sonraki aşama) |
+| Masaüstü   | Electron 43 + NSIS |
 | Backend    | Python FastAPI          |
 | Database   | PostgreSQL              |
 | İletişim   | Matrix Synapse          |
@@ -43,6 +43,12 @@ nexus-communication-platform/
 Core platform, Matrix metin mesajlaşması, plugin/bot sistemi, AI Gateway, WebRTC sesli kanal
 ve production Docker topolojisi uygulanmış durumda. Güncel eksikler ve doğrulama notları için
 [ROADMAP.md](./ROADMAP.md) dosyasına bakın.
+
+Windows masaüstü istemcisi mevcut React istemcisini paylaşır; global bas-konuş/kısayollar, system
+tray, Windows bildirimleri, güvenli token saklama, başlangıç davranışı, mini always-on-top pencere,
+NSIS installer ve opt-in auto-update katmanı ekler. Geliştirme/paketleme adımları:
+[desktop/README.md](./desktop/README.md). Framework kararı ve güvenlik sınırları:
+[docs/desktop/DESKTOP_MIGRATION_PLAN.md](./docs/desktop/DESKTOP_MIGRATION_PLAN.md).
 
 ## Production Docker
 

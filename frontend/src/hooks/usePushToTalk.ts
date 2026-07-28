@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 
 import type { KeyCombo } from "../settings";
 import { comboIsEmpty } from "../settings";
+import { desktopBridge } from "../desktopBridge";
 
 // Kullanıcı bir metin alanına yazıyorsa PTT tetiklenmemeli (ve tuş bastırılıp yazma engellenmemeli).
 function isEditableTarget(event: KeyboardEvent): boolean {
@@ -74,12 +75,18 @@ export function usePushToTalk(enabled: boolean, combo: KeyCombo, onChange: (acti
     window.addEventListener("keyup", handleKeyUp);
     window.addEventListener("blur", reset);
     document.addEventListener("visibilitychange", reset);
+    const unsubscribeDesktop = desktopBridge.onAction((action) => {
+      if (action.type !== "ptt") return;
+      active = action.active;
+      onChangeRef.current(action.active);
+    });
 
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("blur", reset);
       document.removeEventListener("visibilitychange", reset);
+      unsubscribeDesktop();
       if (active) onChangeRef.current(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

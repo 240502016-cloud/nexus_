@@ -3,14 +3,38 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.core import schemas
 from app.core.matrix_client import MatrixError
-from app.core.models import Channel, ChannelType, Friendship, Server, ServerInvite, ServerMember, User
+from app.core.models import (
+    Channel,
+    ChannelType,
+    Friendship,
+    Role,
+    Server,
+    ServerInvite,
+    ServerMember,
+    User,
+)
+from app.core.permissions import Permission
+from app.core.routers.channels import list_channels
 from app.core.routers.direct import list_direct_messages, send_direct_message
-from app.core.routers.friends import accept_request, create_request, list_friends
+from app.core.routers.friends import (
+    accept_request,
+    create_request,
+    list_friends,
+    list_requests,
+    remove_friendship,
+)
+from app.core.routers.join_codes import (
+    create_join_code,
+    join_server,
+    revoke_join_code,
+    rotate_join_code,
+)
 from app.core.routers.members import add_member
 from app.core.routers.messages import send_message
 from app.core.routers.server_invites import accept_server_invite, decline_or_cancel_server_invite
@@ -81,6 +105,13 @@ class SocialFlowTests(unittest.TestCase):
             current_user=self.alice,
             db=self.db,
         )
+        repeated_invite = add_member(
+            server.id,
+            schemas.MemberInvite(user_id=self.bob.id),
+            current_user=self.alice,
+            db=self.db,
+        )
+        self.assertEqual(repeated_invite.id, invite.id)
         self.assertIsNone(
             self.db.get(ServerMember, {"user_id": self.bob.id, "server_id": server.id})
         )
@@ -91,7 +122,13 @@ class SocialFlowTests(unittest.TestCase):
             current_user=self.bob,
             db=self.db,
         )
+        accepted_server_again = accept_server_invite(
+            invite.id,
+            current_user=self.bob,
+            db=self.db,
+        )
         self.assertEqual(accepted_server.id, server.id)
+        self.assertEqual(accepted_server_again.id, server.id)
         self.assertIsNotNone(
             self.db.get(ServerMember, {"user_id": self.bob.id, "server_id": server.id})
         )
@@ -113,11 +150,126 @@ class SocialFlowTests(unittest.TestCase):
         )
 
         decline_or_cancel_server_invite(invite.id, current_user=self.bob, db=self.db)
+        decline_or_cancel_server_invite(invite.id, current_user=self.bob, db=self.db)
 
         self.assertEqual(self.db.get(ServerInvite, invite.id).status, "rejected")
         self.assertIsNone(
             self.db.get(ServerMember, {"user_id": self.bob.id, "server_id": server.id})
         )
+
+    def test_friend_request_survives_reloads_and_duplicate_send_is_idempotent(self):
+        first = create_request(
+            schemas.FriendRequestCreate(username="bob"),
+            current_user=self.alice,
+            db=self.db,
+        )
+        repeated = create_request(
+            schemas.FriendRequestCreate(username="bob"),
+            current_user=self.alice,
+            db=self.db,
+        )
+
+        self.assertEqual(repeated.id, first.id)
+        self.assertEqual(
+            [request.id for request in list_requests(current_user=self.bob, db=self.db).incoming],
+            [first.id],
+        )
+        self.assertEqual(self.db.query(Friendship).count(), 1)
+
+    def test_friend_request_accept_and_delete_retries_are_idempotent(self):
+        request = create_request(
+            schemas.FriendRequestCreate(username="bob"),
+            current_user=self.alice,
+            db=self.db,
+        )
+
+        accepted = accept_request(request.id, current_user=self.bob, db=self.db)
+        accepted_again = accept_request(request.id, current_user=self.bob, db=self.db)
+        self.assertEqual(accepted_again.friendship_id, accepted.friendship_id)
+        self.assertEqual(self.db.get(Friendship, request.id).status, "accepted")
+
+        remove_friendship(request.id, current_user=self.alice, db=self.db)
+        remove_friendship(request.id, current_user=self.alice, db=self.db)
+        self.assertIsNone(self.db.get(Friendship, request.id))
+
+    @patch(
+        "app.core.routers.join_codes.invite_and_join",
+        side_effect=MatrixError("matrix temporarily unavailable"),
+    )
+    def test_share_code_joins_server_and_voice_without_friendship(self, _invite_and_join):
+        server = Server(name="Ses Ekibi", owner_id=self.alice.id)
+        self.db.add(server)
+        self.db.flush()
+        default_role = Role(
+            server_id=server.id,
+            name="@everyone",
+            is_default=True,
+            permissions=int(Permission.default()),
+        )
+        self.db.add(default_role)
+        self.db.add(ServerMember(user_id=self.alice.id, server_id=server.id))
+        self.db.add_all(
+            [
+                Channel(
+                    server_id=server.id,
+                    name="genel",
+                    type=ChannelType.TEXT,
+                    matrix_room_id="!join-code:test",
+                ),
+                Channel(server_id=server.id, name="Ses", type=ChannelType.VOICE),
+            ]
+        )
+        self.db.commit()
+
+        record = create_join_code(server.id, current_user=self.alice, db=self.db)
+        joined = join_server(
+            schemas.ServerJoinRequest(code=record.code.lower()),
+            current_user=self.bob,
+            db=self.db,
+        )
+        joined_again = join_server(
+            schemas.ServerJoinRequest(code=record.code),
+            current_user=self.bob,
+            db=self.db,
+        )
+
+        self.assertEqual(joined.id, server.id)
+        self.assertEqual(joined_again.id, server.id)
+        self.assertIsNone(
+            self.db.query(Friendship)
+            .filter(
+                Friendship.user_low_id == min(self.alice.id, self.bob.id),
+                Friendship.user_high_id == max(self.alice.id, self.bob.id),
+            )
+            .first()
+        )
+        self.assertIsNotNone(
+            self.db.get(ServerMember, {"user_id": self.bob.id, "server_id": server.id})
+        )
+        self.assertIn(default_role, self.bob.roles)
+        self.assertEqual(
+            [channel.name for channel in list_channels(server.id, current_user=self.bob, db=self.db)],
+            ["genel", "Ses"],
+        )
+
+        rotated = rotate_join_code(server.id, current_user=self.alice, db=self.db)
+        self.assertNotEqual(rotated.code, record.code)
+        with self.assertRaises(HTTPException) as invalid:
+            join_server(
+                schemas.ServerJoinRequest(code=record.code),
+                current_user=self.bob,
+                db=self.db,
+            )
+        self.assertEqual(invalid.exception.status_code, 404)
+
+        revoke_join_code(server.id, current_user=self.alice, db=self.db)
+        with self.assertRaises(HTTPException) as revoked:
+            join_server(
+                schemas.ServerJoinRequest(code=rotated.code),
+                current_user=self.bob,
+                db=self.db,
+            )
+        self.assertEqual(revoked.exception.status_code, 404)
 
     @patch("app.core.routers.direct.matrix_client.send_message", return_value="$dm")
     @patch("app.core.routers.direct.matrix_client.join_room")

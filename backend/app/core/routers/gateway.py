@@ -75,11 +75,16 @@ class GatewayManager:
         return False
 
     async def send_to_user(self, user_id: int, message: dict) -> None:
+        failed: list[WebSocket] = []
         for ws in list(self._connections.get(user_id, set())):
             try:
                 await ws.send_json(message)
             except Exception:
-                pass  # bağlantı kopmuş olabilir; disconnect handler temizler
+                failed.append(ws)
+        # Bazı ağ kopmalarında disconnect olayı geç gelebilir. Bozuk soketleri burada da
+        # temizleyerek kullanıcının yanlış biçimde çevrimiçi görünmesini engelle.
+        for ws in failed:
+            self.remove(user_id, ws)
 
 
 gateway_manager = GatewayManager()
@@ -257,6 +262,9 @@ async def gateway_socket(websocket: WebSocket, token: str = Query(...)):
         gateway_manager.presence_payload(uid) for uid in co_members if gateway_manager.is_online(uid)
     ]
     await websocket.send_json({"type": "presence-init", "presences": presences, "self_id": user_id})
+    # WebSocket olayı bağlantı kesikken kaçmış olsa bile istemci bu sinyalle kalıcı sosyal
+    # durumu API'den yeniden uzlaştırır.
+    await websocket.send_json({"type": "social-sync"})
 
     # Başlangıç snapshot'ı: kullanıcının görmeye yetkili olduğu ses kanallarındaki mevcut roster.
     # (Sayfa yenilendiğinde doğru mevcut durumun backend'den alınmasını sağlar.)
@@ -309,6 +317,10 @@ async def gateway_socket(websocket: WebSocket, token: str = Query(...)):
                         "server_id": channel.server_id,
                     },
                 )
+            elif msg_type == "ping":
+                # Uygulama katmanı heartbeat'i Cloudflare/NAT üzerindeki yarı-açık
+                # bağlantıları hızlıca fark eder ve istemcinin yeniden bağlanmasını sağlar.
+                await websocket.send_json({"type": "pong"})
             elif msg_type == "set-status":
                 status = data.get("status")
                 if status in VALID_STATUSES:

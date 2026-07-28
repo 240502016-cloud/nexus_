@@ -85,6 +85,15 @@ class ServerInviteList(BaseModel):
     outgoing: list[ServerInviteRead] = Field(default_factory=list)
 
 
+class ServerJoinCodeRead(BaseModel):
+    code: str
+    created_at: datetime
+
+
+class ServerJoinRequest(BaseModel):
+    code: str = Field(min_length=8, max_length=128)
+
+
 # ---- Server ----
 
 
