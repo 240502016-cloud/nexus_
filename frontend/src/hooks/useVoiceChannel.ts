@@ -126,10 +126,10 @@ function buildCameraConstraints(vs: VoiceSettings, deviceId: string | null): Med
 }
 
 function buildScreenConstraints(vs: VoiceSettings): MediaTrackConstraints {
-  const preset = VIDEO_QUALITY_PRESETS[vs.videoQuality];
+  // Ekranın doğal en-boy oranını koru. Aynı anda width/height üst sınırı istemek bazı
+  // tarayıcılarda paylaşımı hedef oranına kırpar. Çözünürlük sınırı aşağıda WebRTC
+  // encoder'ında orantılı ölçeklenir; kaynak görüntünün hiçbir kenarı kaybolmaz.
   return {
-    width: { ideal: preset.width, max: preset.width },
-    height: { ideal: preset.height, max: preset.height },
     frameRate: { ideal: vs.videoFrameRate, max: vs.videoFrameRate },
   };
 }
@@ -147,6 +147,18 @@ async function optimizeVideoSender(
     if (!parameters.encodings?.length) parameters.encodings = [{}];
     parameters.encodings[0].maxBitrate = Math.round(baseBitrate * frameRateMultiplier);
     parameters.encodings[0].maxFramerate = vs.videoFrameRate;
+    if (kind === "screen") {
+      const source = sender.track?.getSettings();
+      const sourceWidth = source?.width ?? preset.width;
+      const sourceHeight = source?.height ?? preset.height;
+      const proportionalScale = Math.max(
+        1,
+        sourceWidth / preset.width,
+        sourceHeight / preset.height,
+      );
+      parameters.encodings[0].scaleResolutionDownBy =
+        Math.round(proportionalScale * 100) / 100;
+    }
     parameters.degradationPreference = "maintain-resolution";
     await sender.setParameters(parameters);
   } catch {

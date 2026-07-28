@@ -14,8 +14,24 @@ function hasVideo(stream: MediaStream | null): stream is MediaStream {
   ));
 }
 
+type StageTileKind = "profile" | "camera" | "screen";
+
+interface StageTile {
+  key: string;
+  kind: StageTileKind;
+  name: string;
+  avatar?: string | null;
+  stream: MediaStream | null;
+  mirror: boolean;
+  speaking: boolean;
+  label?: string;
+  userId?: number;
+  paused?: boolean;
+}
+
 function MediaTile({
   stream,
+  kind,
   name,
   avatar,
   label,
@@ -27,6 +43,7 @@ function MediaTile({
   onFocus,
 }: {
   stream: MediaStream | null;
+  kind: StageTileKind;
   name: string;
   avatar?: string | null;
   label?: string;
@@ -43,6 +60,7 @@ function MediaTile({
   }, [stream]);
   const className = [
     "stage-person",
+    `stage-person--${kind}`,
     speaking ? "stage-person--speaking" : "",
     focused ? "stage-person--focused" : "",
   ].filter(Boolean).join(" ");
@@ -61,7 +79,14 @@ function MediaTile({
       aria-label={onFocus ? (focused ? `${name} odak görünümünden çık` : `${name} akışına odaklan`) : undefined}
     >
       {hasVideo(stream) ? (
-        <video ref={ref} autoPlay playsInline muted className={mirror ? "stage-person__video stage-person__video--mirror" : "stage-person__video"} />
+        <video
+          ref={ref}
+          autoPlay
+          playsInline
+          muted
+          disablePictureInPicture
+          className={mirror ? "stage-person__video stage-person__video--mirror" : "stage-person__video"}
+        />
       ) : avatar ? (
         <img className="stage-person__avatar" src={avatar} alt="" />
       ) : (
@@ -112,9 +137,10 @@ export function VideoStage({
   const streamFor = (userId: number, kind: "camera" | "screen") =>
     remotes.find((item: RemoteVideoStream) => item.userId === userId && item.kind === kind)?.stream ?? null;
 
-  const tiles = [
+  const tiles: StageTile[] = [
     ...(!hasVideo(voice.localScreenStream) || hasVideo(voice.localCameraStream) ? [{
       key: "self",
+      kind: hasVideo(voice.localCameraStream) ? "camera" as const : "profile" as const,
       name: `${currentUser.display_name || currentUser.username} (sen)`,
       avatar: currentUser.avatar_url,
       stream: voice.localCameraStream,
@@ -129,6 +155,7 @@ export function VideoStage({
       return !hasVideo(screen) || hasVideo(camera);
     }).map((participant) => ({
       key: `user-${participant.user_id}`,
+      kind: hasVideo(streamFor(participant.user_id, "camera")) ? "camera" as const : "profile" as const,
       name: participant.username,
       avatar: participant.avatar_url,
       stream: voice.ignoredRemoteVideoIds.has(participant.user_id)
@@ -141,6 +168,7 @@ export function VideoStage({
     })),
     ...(voice.localScreenStream ? [{
       key: "self-screen",
+      kind: "screen" as const,
       name: `${currentUser.display_name || currentUser.username} ekranı`,
       avatar: null,
       stream: voice.localScreenStream,
@@ -154,6 +182,7 @@ export function VideoStage({
       !voice.ignoredRemoteVideoIds.has(item.userId),
     ).map((item) => ({
       key: `screen-${item.userId}`,
+      kind: "screen" as const,
       name: `${participants.find((p) => p.user_id === item.userId)?.username ?? "Katılımcı"} ekranı`,
       avatar: null,
       stream: item.stream,
@@ -166,6 +195,10 @@ export function VideoStage({
   const focusedTile = focusedTileKey
     ? tiles.find((tile) => tile.key === focusedTileKey) ?? null
     : null;
+  const broadcastTile = tiles.find((tile) => tile.kind === "screen" && hasVideo(tile.stream)) ?? null;
+  const previewTiles = broadcastTile
+    ? tiles.filter((tile) => tile.key !== broadcastTile.key)
+    : [];
 
   useEffect(() => {
     if (focusedTileKey && !tiles.some((tile) => tile.key === focusedTileKey)) {
@@ -185,7 +218,7 @@ export function VideoStage({
     else await stageRef.current.requestFullscreen();
   }
 
-  function renderTile(tile: (typeof tiles)[number], focused = false) {
+  function renderTile(tile: StageTile, focused = false) {
     const { key, ...mediaTile } = tile;
     return (
       <MediaTile
@@ -201,14 +234,51 @@ export function VideoStage({
   }
 
   return (
-    <section className="video-stage" ref={stageRef}>
+    <section
+      className={[
+        "video-stage",
+        broadcastTile ? "video-stage--broadcast" : "",
+        focusedTile ? "video-stage--focused" : "",
+      ].filter(Boolean).join(" ")}
+      ref={stageRef}
+    >
       <header className="video-stage__header">
-        <div><span className="video-stage__eyebrow">SESLİ SAHNE</span><strong>{tiles.length} katılımcı/yayın</strong></div>
-        <span className="video-stage__quality"><span className="video-stage__live-dot" />{qualityLabel}</span>
+        <div className="video-stage__identity">
+          <span className="video-stage__identity-icon"><Icon name={broadcastTile ? "screen" : "volume"} /></span>
+          <div>
+            <span className="video-stage__eyebrow">{broadcastTile ? "CANLI YAYIN" : "SESLİ SAHNE"}</span>
+            <strong>{focusedTile?.name || broadcastTile?.name || `${tiles.length} katılımcı`}</strong>
+          </div>
+          {broadcastTile ? <span className="video-stage__live-badge">YAYINDA</span> : null}
+        </div>
+        <div className="video-stage__status">
+          <span className="video-stage__viewers"><Icon name="users" />{Math.max(participants.length + 1, 1)} kişi</span>
+          <span className="video-stage__quality"><span className="video-stage__live-dot" />{qualityLabel}</span>
+          <button
+            type="button"
+            className="video-stage__fullscreen"
+            onClick={() => void toggleFullscreen()}
+            title={isFullscreen ? "Tam ekrandan çık" : "Tam ekran"}
+            aria-label={isFullscreen ? "Tam ekrandan çık" : "Tam ekran"}
+          >
+            <Icon name="screen" />
+          </button>
+        </div>
       </header>
       {focusedTile ? (
         <div className="voice-focus-layout">
           {renderTile(focusedTile, true)}
+        </div>
+      ) : broadcastTile ? (
+        <div className={previewTiles.length ? "broadcast-layout broadcast-layout--with-previews" : "broadcast-layout"}>
+          <div className="broadcast-layout__main">
+            {renderTile(broadcastTile)}
+          </div>
+          {previewTiles.length ? (
+            <aside className="broadcast-layout__previews" aria-label="Diğer katılımcılar">
+              {previewTiles.map((tile) => renderTile(tile))}
+            </aside>
+          ) : null}
         </div>
       ) : (
         <div className={`voice-grid voice-grid--${Math.min(tiles.length, 9)}`}>

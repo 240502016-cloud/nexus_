@@ -23,8 +23,16 @@ Tarih: 28 Temmuz 2026
   Furkan'ın davet kutusunda **Kabul et / Reddet**, Mert'in giden davetlerinde **İptal et**
   seçenekleri bulunur. Kabulde üyelik, varsayılan rol ve Matrix metin odası üyelikleri birlikte
   oluşturulur. Sol sunucu şeridinde bekleyen davet sayacı vardır.
+- Ekran paylaşımı yayın odası görünümüne geçirildi: aktif paylaşım otomatik olarak ana sahneye
+  alınır, kamera/profil kartları masaüstünde sağdaki önizleme şeridine ve dar ekranda alt şeride
+  taşınır. Video elemanı mutlak sahne sınırlarına sabitlendi ve `object-fit: contain` kullanıyor;
+  kaynak ekranın dört kenarı hiçbir en-boy oranında kırpılmaz.
+- Ekran yakalamada genişlik/yükseklik zorlaması kaldırıldı. Kaynak oranı doğal hâliyle korunur;
+  480p/720p/1080p tercihi gerekiyorsa WebRTC encoder'ında `scaleResolutionDownBy` ile orantılı
+  ölçeklenir. Böylece kalite ayarı ekranın üstünü, altını veya yanlarını kesmez.
 - Veritabanı migration head'i: `0007_server_invites`.
-- Doğrulama: frontend type-check/build başarılı; backend test paketi **28/28** başarılı.
+- Doğrulama: frontend type-check/build başarılı; yayın sahnesi masaüstü ve 390×844 dar ekran
+  görünümünde dört köşe test deseniyle doğrulandı; backend test paketi **28/28** başarılı.
 
 ## 27 Temmuz 2026 — Hamachi gerektirmeyen ücretsiz dış erişim
 
