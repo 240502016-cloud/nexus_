@@ -135,6 +135,30 @@ class ServerMember(Base):
     server: Mapped["Server"] = relationship(back_populates="members")
 
 
+class ServerInvite(Base):
+    """Bir arkadaşın sunucuya katılmadan önce kabul veya ret verebildiği kalıcı davet."""
+
+    __tablename__ = "server_invites"
+    __table_args__ = (
+        UniqueConstraint("server_id", "invitee_id", name="uq_server_invite_target"),
+        Index("ix_server_invites_invitee_status", "invitee_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"))
+    inviter_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    invitee_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    server: Mapped["Server"] = relationship()
+    inviter: Mapped["User"] = relationship(foreign_keys=[inviter_id])
+    invitee: Mapped["User"] = relationship(foreign_keys=[invitee_id])
+
+
 class Channel(Base):
     __tablename__ = "channels"
 

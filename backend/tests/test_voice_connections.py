@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
-from app.core.routers.voice import VoiceConnectionManager
+from app.config import settings
+from app.core.models import User
+from app.core.routers.voice import VoiceConnectionManager, voice_ice_servers
 
 
 class VoiceConnectionManagerTests(unittest.IsolatedAsyncioTestCase):
@@ -29,6 +32,20 @@ class VoiceConnectionManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([participant["user_id"] for participant in manager.roster(10)], [1])
         self.assertTrue(manager.leave(10, 1, second_socket))
         self.assertEqual(manager.roster(10), [])
+
+    def test_hamachi_turn_is_not_advertised_to_public_clients(self):
+        user = User(id=1, username="alice", email="alice@example.test", hashed_password="x")
+        with (
+            patch.object(settings, "turn_domain", "25.49.22.166"),
+            patch.object(settings, "turn_external_ip", "25.49.22.166"),
+            patch.object(settings, "turn_auth_secret", "secret"),
+        ):
+            result = voice_ice_servers(current_user=user)
+
+        self.assertEqual(
+            result["ice_servers"],
+            [{"urls": "stun:stun.cloudflare.com:3478"}],
+        )
 
 
 if __name__ == "__main__":

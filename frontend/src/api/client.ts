@@ -17,6 +17,8 @@ import type {
   PluginManifest,
   PublicUser,
   Server,
+  ServerInvite,
+  ServerInviteList,
   User,
 } from "../types";
 
@@ -145,10 +147,15 @@ export const coreApi = {
 
   listMembers: (serverId: number) => request<Member[]>(`/servers/${serverId}/members`),
   addMember: (serverId: number, userId: number) =>
-    request<{ status: string }>(`/servers/${serverId}/members`, {
+    request<ServerInvite>(`/servers/${serverId}/members`, {
       method: "POST",
       body: JSON.stringify({ user_id: userId }),
     }),
+  listServerInvites: () => request<ServerInviteList>("/server-invites"),
+  acceptServerInvite: (inviteId: number) =>
+    request<Server>(`/server-invites/${inviteId}/accept`, { method: "POST" }),
+  declineServerInvite: (inviteId: number) =>
+    request<void>(`/server-invites/${inviteId}`, { method: "DELETE" }),
   removeMember: (serverId: number, userId: number) =>
     request<void>(`/servers/${serverId}/members/${userId}`, { method: "DELETE" }),
 

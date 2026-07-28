@@ -8,11 +8,12 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core import schemas
 from app.core.matrix_client import MatrixError
-from app.core.models import Channel, ChannelType, Friendship, Server, ServerMember, User
+from app.core.models import Channel, ChannelType, Friendship, Server, ServerInvite, ServerMember, User
 from app.core.routers.direct import list_direct_messages, send_direct_message
 from app.core.routers.friends import accept_request, create_request, list_friends
 from app.core.routers.members import add_member
 from app.core.routers.messages import send_message
+from app.core.routers.server_invites import accept_server_invite, decline_or_cancel_server_invite
 from app.database import Base
 
 
@@ -52,7 +53,13 @@ class SocialFlowTests(unittest.TestCase):
         accept_request(request.id, current_user=self.bob, db=self.db)
         return self.db.get(Friendship, request.id)
 
-    def test_friend_request_acceptance_and_friend_only_server_invite(self):
+    @patch("app.core.routers.server_invites.matrix_client.join_room")
+    @patch("app.core.routers.server_invites.matrix_client.invite_user")
+    def test_friend_request_acceptance_and_friend_only_server_invite(
+        self,
+        invite_matrix_user,
+        join_matrix_room,
+    ):
         friendship = self.accept_friendship()
         alice_friends = list_friends(current_user=self.alice, db=self.db)
         self.assertEqual([item.user.username for item in alice_friends], ["bob"])
@@ -60,16 +67,57 @@ class SocialFlowTests(unittest.TestCase):
         server = Server(name="Test", owner_id=self.alice.id)
         self.db.add(server)
         self.db.commit()
-        add_member(
+        channel = Channel(
+            server_id=server.id,
+            name="genel",
+            type=ChannelType.TEXT,
+            matrix_room_id="!server:test",
+        )
+        self.db.add(channel)
+        self.db.commit()
+        invite = add_member(
             server.id,
             schemas.MemberInvite(user_id=self.bob.id),
             current_user=self.alice,
             db=self.db,
         )
+        self.assertIsNone(
+            self.db.get(ServerMember, {"user_id": self.bob.id, "server_id": server.id})
+        )
+        self.assertEqual(invite.status, "pending")
+
+        accepted_server = accept_server_invite(
+            invite.id,
+            current_user=self.bob,
+            db=self.db,
+        )
+        self.assertEqual(accepted_server.id, server.id)
         self.assertIsNotNone(
             self.db.get(ServerMember, {"user_id": self.bob.id, "server_id": server.id})
         )
+        self.assertEqual(self.db.get(ServerInvite, invite.id).status, "accepted")
         self.assertEqual(friendship.status, "accepted")
+        invite_matrix_user.assert_called_once()
+        join_matrix_room.assert_called_once()
+
+    def test_server_invite_can_be_rejected_without_membership(self):
+        self.accept_friendship()
+        server = Server(name="Reject", owner_id=self.alice.id)
+        self.db.add(server)
+        self.db.commit()
+        invite = add_member(
+            server.id,
+            schemas.MemberInvite(user_id=self.bob.id),
+            current_user=self.alice,
+            db=self.db,
+        )
+
+        decline_or_cancel_server_invite(invite.id, current_user=self.bob, db=self.db)
+
+        self.assertEqual(self.db.get(ServerInvite, invite.id).status, "rejected")
+        self.assertIsNone(
+            self.db.get(ServerMember, {"user_id": self.bob.id, "server_id": server.id})
+        )
 
     @patch("app.core.routers.direct.matrix_client.send_message", return_value="$dm")
     @patch("app.core.routers.direct.matrix_client.join_room")

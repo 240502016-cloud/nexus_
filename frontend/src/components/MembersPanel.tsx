@@ -13,6 +13,7 @@ interface MembersPanelProps {
   currentUserId: number;
   presences?: Map<number, PresenceInfo>;
   onCallMember?: (userId: number, username: string) => void;
+  onInviteSent?: () => void;
   onClose: () => void;
 }
 
@@ -30,6 +31,7 @@ export function MembersPanel({
   currentUserId,
   presences,
   onCallMember,
+  onInviteSent,
   onClose,
 }: MembersPanelProps) {
   const [members, setMembers] = useState<Member[]>([]);
@@ -53,11 +55,23 @@ export function MembersPanel({
 
   useEffect(() => {
     if (!inviteOpen) return;
-    coreApi
-      .listFriends()
-      .then((list) => setFriends(list.filter((friend) => !members.some((member) => member.id === friend.user.id))))
-      .catch(() => setError("Arkadaş listesi yüklenemedi"));
-  }, [inviteOpen, members]);
+    Promise.all([coreApi.listFriends(), coreApi.listServerInvites()])
+      .then(([list, invites]) => {
+        const pendingIds = new Set(
+          invites.outgoing
+            .filter((invite) => invite.server_id === serverId)
+            .map((invite) => invite.invitee.id),
+        );
+        setFriends(
+          list.filter(
+            (friend) =>
+              !members.some((member) => member.id === friend.user.id) &&
+              !pendingIds.has(friend.user.id),
+          ),
+        );
+      })
+      .catch(() => setError("Arkadaş ve davet listesi yüklenemedi"));
+  }, [inviteOpen, members, serverId]);
 
   async function handleKick(userId: number, name: string) {
     if (!window.confirm(`${name} sunucudan çıkarılsın mı?`)) return;
@@ -81,9 +95,10 @@ export function MembersPanel({
     setInviting(true);
     try {
       await coreApi.addMember(serverId, userId);
-      setNotice(`${friend?.user.display_name || friend?.user.username || "Arkadaş"} sunucuya eklendi.`);
+      setNotice(`${friend?.user.display_name || friend?.user.username || "Arkadaş"} kullanıcısına davet gönderildi.`);
       setSelectedFriendId("");
-      loadMembers();
+      setFriends((current) => current.filter((item) => item.user.id !== userId));
+      onInviteSent?.();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Üye eklenemedi");
     } finally {
@@ -153,7 +168,7 @@ export function MembersPanel({
       {canInvite ? (
         <div className="members-dock__invite">
           <button type="button" onClick={() => setInviteOpen((open) => !open)}>
-            {inviteOpen ? "Davet formunu kapat" : "+ Kullanıcı davet et"}
+            {inviteOpen ? "Davet formunu kapat" : "+ Arkadaşını davet et"}
           </button>
           {inviteOpen ? (
             <form onSubmit={handleInvite}>
@@ -170,7 +185,7 @@ export function MembersPanel({
                 ))}
               </select>
               <button type="submit" disabled={inviting || !selectedFriendId}>
-                {inviting ? "…" : "Ekle"}
+                {inviting ? "Gönderiliyor…" : "Davet gönder"}
               </button>
             </form>
           ) : null}

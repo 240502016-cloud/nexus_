@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import "./App.css";
 import { coreApi, getToken, setToken } from "./api/client";
@@ -10,6 +10,7 @@ import { MembersPanel } from "./components/MembersPanel";
 import { ProfilePanel } from "./components/ProfilePanel";
 import { RegisterForm } from "./components/RegisterForm";
 import { ServerRail } from "./components/ServerRail";
+import { ServerInvitesPanel } from "./components/ServerInvitesPanel";
 import { ServerSettingsPanel } from "./components/ServerSettingsPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { VideoStage } from "./components/VideoStage";
@@ -18,7 +19,7 @@ import { useVoiceChannel } from "./hooks/useVoiceChannel";
 import { playMessageNotification } from "./notifications";
 import type { VoiceSettings } from "./settings";
 import { loadVoiceSettings } from "./settings";
-import type { Channel, ChannelType, Message, Server, User } from "./types";
+import type { Channel, ChannelType, Message, Server, ServerInviteList, User } from "./types";
 import { composeAttachmentMessage } from "./messageContent";
 
 const MESSAGE_LIMIT = 50;
@@ -97,6 +98,12 @@ export default function App() {
   const [callError, setCallError] = useState<string | null>(null);
   const [voiceStageVisible, setVoiceStageVisible] = useState(true);
   const [membersVisible, setMembersVisible] = useState(false);
+  const [serverInvitesOpen, setServerInvitesOpen] = useState(false);
+  const [serverInvitesLoading, setServerInvitesLoading] = useState(false);
+  const [serverInvites, setServerInvites] = useState<ServerInviteList>({
+    incoming: [],
+    outgoing: [],
+  });
 
   // Sesli kanal ve gateway (presence + çağrı) hook'ları uygulama seviyesinde tutulur ki video
   // ana alanda, kontroller yan panelde gösterilebilsin ve çağrılar her yerde alınabilsin.
@@ -110,6 +117,25 @@ export default function App() {
   const callNotificationRef = useRef<Notification | null>(null);
   const activeChannelIdRef = useRef(activeChannelId);
   activeChannelIdRef.current = activeChannelId;
+
+  const loadServerInvites = useCallback(async () => {
+    if (!user) return;
+    setServerInvitesLoading(true);
+    try {
+      setServerInvites(await coreApi.listServerInvites());
+    } catch {
+      // Gateway olayı veya panel yeniden açıldığında tekrar denenir.
+    } finally {
+      setServerInvitesLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    void loadServerInvites();
+    const timer = window.setInterval(() => void loadServerInvites(), 30_000);
+    return () => window.clearInterval(timer);
+  }, [gateway.socialEventSequence, loadServerInvites, user]);
 
   // Gelen çağrıda masaüstü bildirimi (sekme arka plandayken bile duyulur). Ayar + izin gerektirir.
   useEffect(() => {
@@ -424,6 +450,7 @@ export default function App() {
     setProfileOpen(false);
     setSettingsOpen(false);
     setServerSettingsOpen(false);
+    setServerInvitesOpen(false);
     setToken(null);
     setUser(null);
     setServers([]);
@@ -433,6 +460,24 @@ export default function App() {
     setActiveVoiceChannelId(null);
     setActiveVoiceServerId(null);
     setMessages([]);
+    setServerInvites({ incoming: [], outgoing: [] });
+  }
+
+  async function handleAcceptServerInvite(inviteId: number): Promise<Server> {
+    const joinedServer = await coreApi.acceptServerInvite(inviteId);
+    setServers((current) => [
+      ...current.filter((server) => server.id !== joinedServer.id),
+      joinedServer,
+    ]);
+    setActiveServerId(joinedServer.id);
+    setServerInvitesOpen(false);
+    await loadServerInvites();
+    return joinedServer;
+  }
+
+  async function handleDeclineServerInvite(inviteId: number): Promise<void> {
+    await coreApi.declineServerInvite(inviteId);
+    await loadServerInvites();
   }
 
   async function handleCreateServer(name: string) {
@@ -686,6 +731,11 @@ export default function App() {
         activeServerId={activeServerId}
         onSelect={setActiveServerId}
         onCreateServer={handleCreateServer}
+        inviteCount={serverInvites.incoming.length}
+        onOpenInvites={() => {
+          setServerInvitesOpen(true);
+          void loadServerInvites();
+        }}
       />
       {activeServer && membersVisible ? (
         <MembersPanel
@@ -696,6 +746,7 @@ export default function App() {
           presences={gateway.presences}
           onCallMember={handleCallMember}
           onClose={() => setMembersVisible(false)}
+          onInviteSent={() => void loadServerInvites()}
         />
       ) : null}
       <ChannelSidebar
@@ -754,6 +805,15 @@ export default function App() {
             ) : null}
           </div>
         </header>
+        {!window.isSecureContext ? (
+          <div className="security-context-banner" role="alert">
+            <strong>Bağlantı güvenli değil</strong>
+            <span>
+              Ses, kamera ve bildirimler bu oturumda çalışmayabilir. Adresi yalnız
+              {" "}<b>https://cekin.gen.tr</b> üzerinden açın ve sertifika uyarısını geçmeyin.
+            </span>
+          </div>
+        ) : null}
         {voiceStageVisible && voice.connected ? <VideoStage
           currentUser={user}
           participants={voice.participants}
@@ -786,6 +846,15 @@ export default function App() {
           onClose={() => setProfileOpen(false)}
           onOpenSettings={() => setSettingsOpen(true)}
           onLogout={handleLogout}
+        />
+      ) : null}
+      {serverInvitesOpen ? (
+        <ServerInvitesPanel
+          invites={serverInvites}
+          loading={serverInvitesLoading}
+          onAccept={handleAcceptServerInvite}
+          onDecline={handleDeclineServerInvite}
+          onClose={() => setServerInvitesOpen(false)}
         />
       ) : null}
       {activeServer && serverSettingsOpen ? (

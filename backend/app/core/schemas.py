@@ -67,6 +67,24 @@ class MemberInvite(BaseModel):
     user_id: int = Field(gt=0)
 
 
+class ServerInviteRead(BaseModel):
+    id: int
+    server_id: int
+    server_name: str
+    server_icon_url: str | None = None
+    inviter: PublicUserRead
+    invitee: PublicUserRead
+    direction: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ServerInviteList(BaseModel):
+    incoming: list[ServerInviteRead] = Field(default_factory=list)
+    outgoing: list[ServerInviteRead] = Field(default_factory=list)
+
+
 # ---- Server ----
 
 

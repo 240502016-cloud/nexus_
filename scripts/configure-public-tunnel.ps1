@@ -56,4 +56,10 @@ Copy-Item -LiteralPath $envPath -Destination $backupPath
 Write-Host ''
 Write-Host '[OK] Cloudflare Tunnel tokeni .env dosyasina guvenli sekilde kaydedildi.' -ForegroundColor Green
 Write-Host "Yedek: $backupPath"
+Write-Host ''
+Write-Host 'Cloudflare panelinde zorunlu son kontrol:' -ForegroundColor Cyan
+Write-Host '  Public Hostname: cekin.gen.tr'
+Write-Host '  Service:         http://reverse-proxy:8081'
+Write-Host '  DNS:             Eski 25.49.22.166 A kaydini kaldirin.'
+Write-Host 'Furkan sertifika uyarisini gecmemeli; yalniz https://cekin.gen.tr adresini acmali.'
 Write-Host 'Simdi Arkadas-Sunucuyu-Guncelle.cmd dosyasini calistirin.'

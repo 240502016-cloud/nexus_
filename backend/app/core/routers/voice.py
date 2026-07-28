@@ -20,6 +20,7 @@ import json
 import base64
 import hashlib
 import hmac
+import ipaddress
 import time
 from typing import Awaitable, Callable, Optional
 
@@ -187,11 +188,36 @@ router = APIRouter(tags=["voice"])
 
 @router.get("/voice/ice-servers")
 def voice_ice_servers(current_user: User = Depends(get_current_user)) -> dict:
-    """Return short-lived TURN credentials; the shared coturn secret never reaches browsers."""
-    if not settings.turn_domain or not settings.turn_auth_secret:
-        raise HTTPException(status_code=503, detail="TURN sunucusu yapılandırılmamış")
-
+    """Return free public STUN plus TURN only when its external address is Internet-routable."""
     expires_at = int(time.time()) + max(60, settings.turn_credential_ttl_seconds)
+    ice_servers: list[dict] = [{"urls": "stun:stun.cloudflare.com:3478"}]
+
+    # Hamachi/özel/CGNAT adresini dış istemcilere TURN diye vermek bağlantıyı saniyelerce
+    # bekletir. Ücretsiz STUN ile doğrudan P2P denenir; yalnız gerçekten genel bir coturn
+    # adresi yapılandırıldıysa relay kimlik bilgisi eklenir.
+    external_address = (settings.turn_external_ip or settings.turn_domain).strip()
+    turn_is_public = bool(settings.turn_domain and settings.turn_auth_secret and external_address)
+    try:
+        address = ipaddress.ip_address(external_address)
+        hamachi_range = ipaddress.ip_network("25.0.0.0/8")
+        cgnat_range = ipaddress.ip_network("100.64.0.0/10")
+        turn_is_public = turn_is_public and not (
+            address in hamachi_range
+            or address in cgnat_range
+            or address.is_private
+            or address.is_loopback
+            or address.is_link_local
+            or address.is_unspecified
+            or address.is_reserved
+        )
+    except ValueError:
+        # Alan adı kullanılmışsa yönlendirilebilir kabul edilir; yönetici coturn DNS kaydını
+        # Cloudflare proxy'siz (DNS only) olarak yayınlamalıdır.
+        pass
+
+    if not turn_is_public:
+        return {"ice_servers": ice_servers, "expires_at": expires_at}
+
     username = f"{expires_at}:{current_user.id}"
     digest = hmac.new(
         settings.turn_auth_secret.encode("utf-8"), username.encode("utf-8"), hashlib.sha1
@@ -202,14 +228,13 @@ def voice_ice_servers(current_user: User = Depends(get_current_user)) -> dict:
         f"turn:{turn_host}:{settings.turn_port}?transport=udp",
         f"turn:{turn_host}:{settings.turn_port}?transport=tcp",
     ]
-    return {
-        "ice_servers": [
-            {"urls": "stun:stun.cloudflare.com:3478"},
+    ice_servers.extend(
+        [
             {"urls": f"stun:{turn_host}:{settings.turn_port}"},
             {"urls": turn_urls, "username": username, "credential": credential},
-        ],
-        "expires_at": expires_at,
-    }
+        ]
+    )
+    return {"ice_servers": ice_servers, "expires_at": expires_at}
 
 
 @router.websocket("/channels/{channel_id}/voice")

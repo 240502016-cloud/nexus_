@@ -2,15 +2,25 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 
 import type { Server } from "../types";
+import { Icon } from "./Icon";
 
 interface ServerRailProps {
   servers: Server[];
   activeServerId: number | null;
   onSelect: (serverId: number) => void;
   onCreateServer: (name: string) => Promise<void>;
+  inviteCount: number;
+  onOpenInvites: () => void;
 }
 
-export function ServerRail({ servers, activeServerId, onSelect, onCreateServer }: ServerRailProps) {
+export function ServerRail({
+  servers,
+  activeServerId,
+  onSelect,
+  onCreateServer,
+  inviteCount,
+  onOpenInvites,
+}: ServerRailProps) {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
 
@@ -24,6 +34,17 @@ export function ServerRail({ servers, activeServerId, onSelect, onCreateServer }
 
   return (
     <nav className="server-rail">
+      <button
+        type="button"
+        className="server-icon server-icon--inbox"
+        onClick={onOpenInvites}
+        title="Sunucu davetleri"
+        aria-label={`Sunucu davetleri${inviteCount ? `, ${inviteCount} bekleyen` : ""}`}
+      >
+        <Icon name="inbox" />
+        {inviteCount ? <span className="server-icon__badge">{inviteCount > 9 ? "9+" : inviteCount}</span> : null}
+      </button>
+      <div className="server-rail__separator" />
       {servers.map((server) => (
         <button
           key={server.id}

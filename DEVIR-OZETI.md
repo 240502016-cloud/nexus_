@@ -1,6 +1,30 @@
 # Nexus — Devir Özeti (yeni sohbete yapıştırılabilir)
 
-Tarih: 26 Temmuz 2026
+Tarih: 28 Temmuz 2026
+
+## 28 Temmuz 2026 — güvenli dış erişim, ses bağlantısı ve sunucu davetleri
+
+- **Canlı dış erişimde kalan zorunlu ayar:** Genel DNS sorgusunda `cekin.gen.tr` hâlâ
+  `25.49.22.166` Hamachi adresine çözülüyor. Bu yüzden sıkı güvenlik uygulayan tarayıcılar
+  sertifikayı reddediyor; uyarıyı atlayan tarayıcılarda da güvenli WebSocket/mikrofon koşulları
+  bozulabildiği için ses kanalı `Bağlanıyor` durumunda kalabiliyor.
+- Bunu **sunucu sahibi Mert** Cloudflare panelinde düzeltmeli: tünelin Public Hostname değeri
+  `cekin.gen.tr`, servis adresi `http://reverse-proxy:8081` olmalı ve eski `25.49.22.166`
+  A kaydı silinmelidir. Kullanılacak değer Replica ID değil, `eyJ...` biçimindeki tünel tokenidir.
+  **Misafir Furkan** Hamachi/DNS/sertifika kurmayacak; yalnızca `https://cekin.gen.tr` açacak.
+- Sunucu yöneticisinin dış erişim testi artık `curl --insecure` kullanmıyor. Token ayarlı olduğu
+  hâlde alan adı hâlâ `25.x` adresine gidiyorsa güncelleme script'i yanıltıcı biçimde başarılı
+  görünmek yerine Mert'e yapılacak Cloudflare ayarını açıkça bildiriyor.
+- Ses bağlantısına güvenli bağlam, mikrofon izni, WSS açılışı ve ICE yapılandırması için süre
+  sınırları ve anlaşılır hata mesajları eklendi; arayüz sonsuza kadar `Bağlanıyor` göstermez.
+- Hamachi, özel, CGNAT veya ayrılmış IP coturn dış adresi olarak verilmişse bu erişilemez TURN
+  kaydı istemciye artık gönderilmiyor. Ücretsiz Cloudflare STUN kullanılmaya devam ediyor.
+- Discord benzeri kalıcı sunucu davetleri eklendi: davet artık kullanıcıyı doğrudan üye yapmaz;
+  Furkan'ın davet kutusunda **Kabul et / Reddet**, Mert'in giden davetlerinde **İptal et**
+  seçenekleri bulunur. Kabulde üyelik, varsayılan rol ve Matrix metin odası üyelikleri birlikte
+  oluşturulur. Sol sunucu şeridinde bekleyen davet sayacı vardır.
+- Veritabanı migration head'i: `0007_server_invites`.
+- Doğrulama: frontend type-check/build başarılı; backend test paketi **28/28** başarılı.
 
 ## 27 Temmuz 2026 — Hamachi gerektirmeyen ücretsiz dış erişim
 
@@ -19,7 +43,7 @@ Sunucu makinesi: `C:\Users\merte\Github\nexus-server`
 
 ---
 
-## 1. Şu anki durum: ÇALIŞIYOR
+## 1. Önceki canlı durum (28 Temmuz notu bunun üzerindedir)
 
 - **Adres:** https://cekin.gen.tr (port 80/443)
 - **Sertifika:** Let's Encrypt, **gerçek/güvenilir** — istemciler artık sertifika KURMUYOR.

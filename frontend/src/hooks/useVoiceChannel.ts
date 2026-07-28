@@ -63,6 +63,35 @@ export interface RemoteVideoStream {
 }
 
 const SPEAKING_THRESHOLD = 12;
+const SIGNALING_TIMEOUT_MS = 12_000;
+const ICE_CONFIG_TIMEOUT_MS = 10_000;
+
+function rejectAfter<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+function microphoneErrorMessage(error: unknown): string {
+  if (error instanceof DOMException) {
+    if (error.name === "NotAllowedError" || error.name === "SecurityError") {
+      return "Mikrofon izni verilmedi. Adres çubuğundaki kilit simgesinden mikrofonu açıp kanala yeniden katılın.";
+    }
+    if (error.name === "NotFoundError") return "Kullanılabilir bir mikrofon bulunamadı.";
+    if (error.name === "NotReadableError") return "Mikrofon başka bir uygulama tarafından kullanılıyor.";
+  }
+  return `Mikrofona erişilemedi: ${error instanceof Error ? error.message : String(error)}`;
+}
 
 function sendWebSocketJson(socket: WebSocket | null, payload: unknown): boolean {
   if (!socket || socket.readyState !== WebSocket.OPEN) return false;
@@ -268,6 +297,8 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     let reconnectDelay = 1000;
     let microphoneError: string | null = null;
     let microphoneAttempted = false;
+    let socketHandshakeTimer: number | null = null;
+    let handshakeTimedOut = false;
     const peerRecoveryTimers = new Map<number, number>();
 
     function upsertRemoteStream(peerId: number, kind: "camera" | "screen", stream: MediaStream) {
@@ -323,6 +354,13 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       if (reconnectTimer !== null) {
         window.clearTimeout(reconnectTimer);
         reconnectTimer = null;
+      }
+    }
+
+    function clearSocketHandshakeTimer() {
+      if (socketHandshakeTimer !== null) {
+        window.clearTimeout(socketHandshakeTimer);
+        socketHandshakeTimer = null;
       }
     }
 
@@ -498,6 +536,12 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
 
     async function connect() {
       if (cancelled || !navigator.onLine) return;
+      if (!window.isSecureContext) {
+        setError(
+          "Sesli sohbet güvenli bir HTTPS bağlantısı gerektirir. Sertifika uyarısını geçmeyin; https://cekin.gen.tr adresini kullanın.",
+        );
+        return;
+      }
       const currentSocket = wsRef.current;
       if (
         currentSocket &&
@@ -508,7 +552,11 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       clearReconnectTimer();
       setError(null);
       try {
-        const ice = await coreApi.voiceIceServers();
+        const ice = await rejectAfter(
+          coreApi.voiceIceServers(),
+          ICE_CONFIG_TIMEOUT_MS,
+          "Ses sunucusu zaman aşımına uğradı",
+        );
         if (cancelled) return;
         iceServers = ice.ice_servers;
       } catch (err) {
@@ -520,6 +568,9 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       if (!localStreamRef.current && !microphoneAttempted) {
         microphoneAttempted = true;
         try {
+          if (!navigator.mediaDevices?.getUserMedia) {
+            throw new DOMException("Secure media API unavailable", "SecurityError");
+          }
           const stream = await navigator.mediaDevices.getUserMedia({
             audio: buildAudioConstraints(voiceSettingsRef.current),
           });
@@ -537,18 +588,33 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
             mutedRef.current = true;
           }
         } catch (err) {
-          microphoneError =
-            `Mikrofona erişilemedi: ${err instanceof Error ? err.message : String(err)} ` +
-            "(sadece dinleyici olarak katılıyorsunuz)";
+          microphoneError = `${microphoneErrorMessage(err)} (yalnız dinleyici olarak katılıyorsunuz)`;
           setError(microphoneError);
         }
       }
 
       const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-      const ws = new WebSocket(
-        `${protocol}://${window.location.host}/api/channels/${channelId}/voice?token=${getToken() ?? ""}`,
-      );
+      let ws: WebSocket;
+      try {
+        ws = new WebSocket(
+          `${protocol}://${window.location.host}/api/channels/${channelId}/voice?token=${getToken() ?? ""}`,
+        );
+      } catch (err) {
+        setError(`Ses bağlantısı başlatılamadı: ${err instanceof Error ? err.message : String(err)}`);
+        scheduleReconnect();
+        return;
+      }
       wsRef.current = ws;
+      handshakeTimedOut = false;
+      clearSocketHandshakeTimer();
+      socketHandshakeTimer = window.setTimeout(() => {
+        if (cancelled || wsRef.current !== ws || connected) return;
+        handshakeTimedOut = true;
+        setError(
+          "Ses sinyal sunucusu 12 saniye içinde yanıt vermedi. Güvenli HTTPS ve Cloudflare Tunnel bağlantısını kontrol edin.",
+        );
+        ws.close();
+      }, SIGNALING_TIMEOUT_MS);
 
       // WebSocket message event'leri async handler'ı beklemez. SDP offer/answer işlemlerini
       // tek kuyrukta işleyerek aynı RTCPeerConnection üzerinde yarışmalarını engelle.
@@ -561,6 +627,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
 
           switch (data.type) {
           case "peers": {
+            clearSocketHandshakeTimer();
             selfId = (data.self_id as number) ?? selfId;
             const peers = (data.peers as Omit<VoiceParticipant, "speaking">[]).map((p) => ({
               ...p,
@@ -679,12 +746,17 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
 
       ws.onerror = () => ws.close();
       ws.onclose = (event) => {
+        clearSocketHandshakeTimer();
         if (wsRef.current === ws) wsRef.current = null;
         setConnected(false);
         if (cancelled) return;
         resetPeersForReconnect();
         if (event.code === 4401 || event.code === 4403 || event.code === 4404) {
           setError("Ses kanalına yeniden bağlanılamadı; oturum veya kanal yetkisini kontrol edin.");
+          return;
+        }
+        if (handshakeTimedOut) {
+          scheduleReconnect();
           return;
         }
         setError("Ses bağlantısı kesildi, yeniden bağlanılıyor…");
@@ -820,6 +892,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     return () => {
       cancelled = true;
       clearReconnectTimer();
+      clearSocketHandshakeTimer();
       window.removeEventListener("online", handleOnline);
       videoControlRef.current = null;
       micControlRef.current = null;

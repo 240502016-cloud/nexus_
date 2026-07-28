@@ -388,7 +388,9 @@ function Invoke-CurlRequest {
     $previousErrorActionPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
-        $content = & curl.exe --fail --silent --show-error --insecure `
+        # Public test must validate the real certificate. --insecure would hide exactly the
+        # browser failure this readiness check is intended to catch.
+        $content = & curl.exe --fail --silent --show-error `
             --max-time ([string]$TimeoutSeconds) $Url 2>$null
         $exitCode = $LASTEXITCODE
     }
@@ -402,6 +404,38 @@ function Invoke-CurlRequest {
     }
 }
 
+function Assert-PublicTunnelDns {
+    param([Parameter(Mandatory = $true)][string]$PublicUrl)
+    if (-not (Test-PublicTunnelConfigured)) { return }
+
+    $uri = [Uri]$PublicUrl
+    if ($uri.Scheme -ne 'https' -or -not $uri.IsDefaultPort) {
+        throw 'Cloudflare Tunnel public URL must use standard HTTPS without a custom port (for example https://cekin.gen.tr).'
+    }
+    if (-not (Get-Command Resolve-DnsName -ErrorAction SilentlyContinue)) { return }
+
+    try {
+        $records = Resolve-DnsName $uri.Host -Type A -Server 1.1.1.1 -DnsOnly -QuickTimeout `
+            -ErrorAction Stop
+    }
+    catch {
+        Write-Warning "Public DNS could not be checked through 1.1.1.1: $($_.Exception.Message)"
+        return
+    }
+    $hamachiAddresses = @(
+        $records |
+            Where-Object { $_.IPAddress -and $_.IPAddress -match '^25\.' } |
+            ForEach-Object { $_.IPAddress }
+    )
+    if ($hamachiAddresses.Count -gt 0) {
+        throw (
+            "$($uri.Host) still resolves to Hamachi address $($hamachiAddresses -join ', '). " +
+            "In Cloudflare Tunnel, add Public Hostname $($uri.Host) -> http://reverse-proxy:8081 " +
+            "and remove the old Hamachi A record. Do not bypass the browser certificate warning."
+        )
+    }
+}
+
 function Test-PublicEndpoints {
     $values = Read-EnvironmentFile
     $publicUrl = if ($values.ContainsKey('NEXUS_PUBLIC_URL')) {
@@ -411,6 +445,7 @@ function Test-PublicEndpoints {
         $port = if ($values.ContainsKey('NEXUS_HTTPS_PORT')) { [int]$values['NEXUS_HTTPS_PORT'] } else { 443 }
         Get-PublicUrl -HostName $values['NEXUS_DOMAIN'] -Port $port
     }
+    Assert-PublicTunnelDns -PublicUrl $publicUrl
     if (-not (Get-Command curl.exe -ErrorAction SilentlyContinue)) {
         Write-Warning "curl.exe not found; public endpoint checks were skipped: $publicUrl"
         return

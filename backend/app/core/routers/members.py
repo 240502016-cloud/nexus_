@@ -4,8 +4,8 @@ from sqlalchemy.orm import Session
 from app.core import schemas
 from app.core.auth import get_current_user
 from app.core.authz import ensure_server_member, ensure_server_owner
-from app.core.matrix_client import MatrixError, matrix_client
-from app.core.models import Friendship, Server, ServerMember, User
+from app.core.models import Friendship, Server, ServerInvite, ServerMember, User, utcnow
+from app.core.routers.gateway import notify_social_event
 from app.database import get_db
 
 router = APIRouter(prefix="/servers/{server_id}/members", tags=["members"])
@@ -50,7 +50,26 @@ def list_members(
     return members
 
 
-@router.post("", status_code=201)
+def _public(user: User) -> schemas.PublicUserRead:
+    return schemas.PublicUserRead.model_validate(user)
+
+
+def _invite_read(invite: ServerInvite, current_user_id: int) -> schemas.ServerInviteRead:
+    return schemas.ServerInviteRead(
+        id=invite.id,
+        server_id=invite.server_id,
+        server_name=invite.server.name,
+        server_icon_url=invite.server.icon_url,
+        inviter=_public(invite.inviter),
+        invitee=_public(invite.invitee),
+        direction="outgoing" if invite.inviter_id == current_user_id else "incoming",
+        status=invite.status,
+        created_at=invite.created_at,
+        updated_at=invite.updated_at,
+    )
+
+
+@router.post("", response_model=schemas.ServerInviteRead, status_code=201)
 def add_member(
     server_id: int,
     payload: schemas.MemberInvite,
@@ -75,6 +94,8 @@ def add_member(
     )
     if not friendship:
         raise HTTPException(status_code=403, detail="Sunucuya yalnızca arkadaşlar davet edilebilir")
+    if user.id == current_user.id:
+        raise HTTPException(status_code=400, detail="Kendinize sunucu daveti gönderemezsiniz")
     if not user.matrix_access_token:
         raise HTTPException(status_code=409, detail="Kullanıcının Matrix hesabı yok")
 
@@ -82,23 +103,31 @@ def add_member(
     if existing:
         raise HTTPException(status_code=409, detail="Kullanıcı zaten bu sunucunun üyesi")
 
-    owner = server.owner
-    for channel in server.channels:
-        if not channel.matrix_room_id:
-            continue
-        try:
-            matrix_client.invite_user(owner.matrix_access_token, channel.matrix_room_id, user.matrix_user_id)
-            matrix_client.join_room(user.matrix_access_token, channel.matrix_room_id)
-        except MatrixError as exc:
-            raise HTTPException(status_code=502, detail=f"Kanala katılım başarısız: {exc}") from exc
-
-    db.add(ServerMember(user_id=user.id, server_id=server.id))
-    default_role = next((r for r in server.roles if r.is_default), None)
-    if default_role:
-        user.roles.append(default_role)
+    invite = (
+        db.query(ServerInvite)
+        .filter(ServerInvite.server_id == server.id, ServerInvite.invitee_id == user.id)
+        .first()
+    )
+    if invite and invite.status == "pending":
+        raise HTTPException(status_code=409, detail="Bu kullanıcıya zaten bekleyen bir davet var")
+    if invite:
+        invite.inviter_id = current_user.id
+        invite.status = "pending"
+        invite.created_at = utcnow()
+        invite.updated_at = utcnow()
+    else:
+        invite = ServerInvite(
+            server_id=server.id,
+            inviter_id=current_user.id,
+            invitee_id=user.id,
+            status="pending",
+        )
+        db.add(invite)
 
     db.commit()
-    return {"status": "ok"}
+    db.refresh(invite)
+    notify_social_event(user.id, "server-invite")
+    return _invite_read(invite, current_user.id)
 
 
 @router.delete("/{user_id}", status_code=204)

@@ -17,6 +17,7 @@ from app.core.routers import (
     messages,
     plugins,
     servers,
+    server_invites,
     users,
     voice,
 )
@@ -31,6 +32,7 @@ app.include_router(auth.router)
 app.include_router(attachments.router)
 app.include_router(users.router)
 app.include_router(servers.router)
+app.include_router(server_invites.router)
 app.include_router(channels.router)
 app.include_router(members.router)
 app.include_router(messages.router)

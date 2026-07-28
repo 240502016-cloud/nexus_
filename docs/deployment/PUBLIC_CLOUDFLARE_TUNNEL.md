@@ -18,6 +18,16 @@ genel IP gerekmez. Nexus'un HTTP, HTTPS, API, Matrix ve WebSocket trafiği bu ba
 5. Connector kurulum ekranındaki komutta `--token` sonrasında bulunan tünel tokenini kopyalayın.
    Token bir paroladır; Git'e, mesaja veya ekran görüntüsüne koymayın.
 
+> Bu işlemleri sunucu sahibi **Mert** yapar. **Furkan** yalnızca siteyi kullanan misafirdir;
+> Furkan'ın Hamachi açması, DNS değiştirmesi veya sertifika kurması gerekmez.
+
+### Replica ID ile token aynı şey değildir
+
+- **Replica/Connector ID**, çalışan bağlayıcıyı tanımlayan kısa kimliktir; başlatma parolası değildir.
+- **Tunnel token**, Connector kurulum komutundaki `--token` sonrasında yer alan uzun ve genellikle
+  `eyJ...` ile başlayan gizli değerdir.
+- `Public-Tunnel-Ayarla.cmd` içine yalnız tunnel token girilmelidir.
+
 ## Sunucu bilgisayarında
 
 Arkadaşınız güncel `cekingen` dalını çektikten sonra:
@@ -61,3 +71,18 @@ curl.exe https://cekin.gen.tr/healthz
 ```
 
 İlk komutta `public-tunnel` çalışıyor, son komutta `ok` görünmelidir.
+
+Alan adının artık Hamachi'ye gitmediğini ayrıca doğrulayın:
+
+```powershell
+Resolve-DnsName cekin.gen.tr -Type A -Server 1.1.1.1
+```
+
+Sonuç `25.49.22.166` veya başka bir `25.x.x.x` adresiyse Cloudflare Tunnel henüz alan adına
+bağlanmamıştır. Mert, Cloudflare Zero Trust içindeki Public Hostname ayarını kontrol etmeli ve
+DNS bölümündeki eski Hamachi A kaydını silmelidir. Public Hostname kaydı Cloudflare tarafından
+yönetilen proxied CNAME olarak kalmalıdır.
+
+Sertifika uyarısını tarayıcıdan geçici olarak atlamak çözüm değildir. Site doğru tünel üzerinden
+yayına alındığında Furkan doğrudan `https://cekin.gen.tr` adresini açar; tarayıcı güvenlik uyarısı
+göstermez ve ses için gereken güvenli WebSocket/mikrofon koşulları sağlanır.

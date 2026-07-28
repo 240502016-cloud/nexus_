@@ -55,6 +55,24 @@ export interface Server {
   created_at: string;
 }
 
+export interface ServerInvite {
+  id: number;
+  server_id: number;
+  server_name: string;
+  server_icon_url: string | null;
+  inviter: PublicUser;
+  invitee: PublicUser;
+  direction: "incoming" | "outgoing";
+  status: "pending" | "accepted" | "rejected" | "cancelled";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ServerInviteList {
+  incoming: ServerInvite[];
+  outgoing: ServerInvite[];
+}
+
 export interface Channel {
   id: number;
   server_id: number;

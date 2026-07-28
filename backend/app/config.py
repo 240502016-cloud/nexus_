@@ -49,6 +49,7 @@ class Settings(BaseSettings):
 
     # TASK-011: coturn long-term REST credentials for WebRTC ICE.
     turn_domain: str = ""
+    turn_external_ip: str = ""
     turn_port: int = 3478
     turn_auth_secret: str = ""
     turn_credential_ttl_seconds: int = 3600
