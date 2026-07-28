@@ -64,18 +64,26 @@ export class ApiError extends Error {
 
 interface RequestOptions extends RequestInit {
   retry?: boolean;
+  maxAttempts?: number;
+  retryBaseMs?: number;
   timeoutMs?: number;
 }
 
 const RETRYABLE_STATUSES = new Set([502, 503, 504]);
 
-function retryDelay(attempt: number): Promise<void> {
-  const delay = 350 * 2 ** attempt + Math.round(Math.random() * 150);
+function retryDelay(attempt: number, baseMs = 350): Promise<void> {
+  const delay = Math.min(1_500, baseMs * 2 ** attempt) + Math.round(Math.random() * 100);
   return new Promise((resolve) => window.setTimeout(resolve, delay));
 }
 
 async function request<T>(path: string, init?: RequestOptions): Promise<T> {
-  const { retry, timeoutMs = 15_000, ...fetchInit } = init ?? {};
+  const {
+    retry,
+    maxAttempts: requestedMaxAttempts,
+    retryBaseMs = 350,
+    timeoutMs = 15_000,
+    ...fetchInit
+  } = init ?? {};
   const headers: Record<string, string> = { ...(init?.headers as Record<string, string> | undefined) };
   if (token) {
     headers.Authorization = `Bearer ${token}`;
@@ -86,8 +94,8 @@ async function request<T>(path: string, init?: RequestOptions): Promise<T> {
   }
 
   const method = (fetchInit.method ?? "GET").toUpperCase();
-  const canRetry = retry === true || method === "GET" || method === "HEAD";
-  const maxAttempts = canRetry ? 3 : 1;
+  const canRetry = retry ?? (method === "GET" || method === "HEAD");
+  const maxAttempts = canRetry ? Math.max(1, requestedMaxAttempts ?? 3) : 1;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const controller = new AbortController();
@@ -98,7 +106,7 @@ async function request<T>(path: string, init?: RequestOptions): Promise<T> {
     } catch (error) {
       window.clearTimeout(timer);
       if (attempt + 1 < maxAttempts) {
-        await retryDelay(attempt);
+        await retryDelay(attempt, retryBaseMs);
         continue;
       }
       const timeout = error instanceof DOMException && error.name === "AbortError";
@@ -113,7 +121,7 @@ async function request<T>(path: string, init?: RequestOptions): Promise<T> {
 
     if (!response.ok) {
       if (RETRYABLE_STATUSES.has(response.status) && attempt + 1 < maxAttempts) {
-        await retryDelay(attempt);
+        await retryDelay(attempt, retryBaseMs);
         continue;
       }
       let detail = response.statusText;
@@ -137,15 +145,33 @@ async function request<T>(path: string, init?: RequestOptions): Promise<T> {
 export const coreApi = {
   health: () => request<{ status: string }>("/health"),
 
-  voiceIceServers: () => request<{ ice_servers: RTCIceServer[]; expires_at: number }>("/voice/ice-servers"),
+  voiceIceServers: () =>
+    request<{ ice_servers: RTCIceServer[]; expires_at: number }>("/voice/ice-servers", {
+      retry: false,
+      timeoutMs: 1_500,
+    }),
 
   login: (username: string, password: string) => {
     const body = new URLSearchParams({ username, password });
-    return request<LoginResponse>("/auth/login", { method: "POST", body });
+    return request<LoginResponse>("/auth/login", {
+      method: "POST",
+      body,
+      retry: true,
+      maxAttempts: 8,
+      retryBaseMs: 200,
+      timeoutMs: 8_000,
+    });
   },
 
   register: (username: string, email: string, password: string) =>
-    request<User>("/users", { method: "POST", body: JSON.stringify({ username, email, password }) }),
+    request<User>("/users", {
+      method: "POST",
+      body: JSON.stringify({ username, email, password }),
+      retry: true,
+      maxAttempts: 8,
+      retryBaseMs: 200,
+      timeoutMs: 20_000,
+    }),
 
   me: () => request<User>("/users/me"),
   updateProfile: (displayName: string | null) =>

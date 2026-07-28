@@ -10,18 +10,24 @@ from app.database import get_db
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-# IP başına 5 dakikada en fazla 10 giriş denemesi - kaba kuvvet (brute-force) saldırılarını yavaşlatır.
+# Kullanıcı adı + istemci adresi başına sınır koy. Aynı ev/okul ağı veya reverse proxy
+# arkasındaki farklı kullanıcılar birbirinin giriş hakkını tüketmemeli.
 _login_limiter = RateLimiter(max_calls=10, window_seconds=300)
 
 
-def _enforce_login_rate_limit(request: Request) -> None:
+def _enforce_login_rate_limit(request: Request, username: str) -> None:
     client_ip = request.client.host if request.client else "unknown"
-    if not _login_limiter.allow(client_ip):
+    if not _login_limiter.allow(f"{client_ip}:{username.strip().casefold()}"):
         raise HTTPException(status_code=429, detail="Çok fazla giriş denemesi, birkaç dakika sonra tekrar deneyin")
 
 
-@router.post("/login", dependencies=[Depends(_enforce_login_rate_limit)])
-def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+@router.post("/login")
+def login(
+    request: Request,
+    form: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db),
+):
+    _enforce_login_rate_limit(request, form.username)
     user = db.query(User).filter(User.username == form.username).first()
     if not user or not user.is_active or not verify_password(form.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Kullanıcı adı veya parola hatalı")

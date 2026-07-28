@@ -56,8 +56,19 @@ def _delete_avatar_file(avatar_url: str | None) -> None:
 
 @router.post("", response_model=schemas.UserRead, status_code=201)
 def create_user(payload: schemas.UserCreate, db: Session = Depends(get_db)):
-    if db.query(User).filter(User.username == payload.username).first():
+    existing = db.query(User).filter(User.username == payload.username).first()
+    # Ağ katmanında başarılı yanıt kaybolursa istemci aynı kayıt isteğini yeniden yollar.
+    # Üç alan da aynı hesabı doğruluyorsa bu tekrar güvenle aynı sonucu döndürür.
+    if (
+        existing
+        and existing.email.casefold() == payload.email.casefold()
+        and verify_password(payload.password, existing.hashed_password)
+    ):
+        return existing
+    if existing:
         raise HTTPException(status_code=409, detail="Bu kullanıcı adı zaten alınmış")
+    if db.query(User).filter(User.email == payload.email).first():
+        raise HTTPException(status_code=409, detail="Bu e-posta adresi zaten kullanılıyor")
 
     try:
         matrix_account = matrix_client.register_user(payload.username, payload.password)

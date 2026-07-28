@@ -2,6 +2,29 @@
 
 Tarih: 28 Temmuz 2026
 
+## 28 Temmuz 2026 — giriş, ses bağlantısı ve uzak video dayanıklılığı
+
+- Giriş ve kayıt POST istekleri geçici `502/503/504` ile bağlantı kopmalarında tek tık
+  içinde hızlı ve sınırlı biçimde yeniden denenir. Kayıt işlemi aynı kullanıcı adı,
+  e-posta ve parola için idempotenttir; ilk başarılı yanıt ağda kaybolsa bile ikinci
+  deneme aynı hesabı döndürür.
+- Giriş hız sınırı istemci adresi + kullanıcı adına ayrıldı. Aynı ağ veya reverse proxy
+  arkasındaki 5–6 kullanıcı artık birbirinin deneme hakkını tüketmez.
+- ICE ayar API'si geçici olarak erişilemezse sesliye katılım durmaz; istemci Cloudflare
+  ve Google STUN yedekleriyle hemen devam eder. Ses WebSocket yeniden deneme aralığı
+  250 ms'den başlar ve geçici kopmalarda gereksiz peer yenilemesini azaltmak için ICE
+  kurtarma toleransı artırılmıştır.
+- İlk WebRTC teklifini yalnızca kanala yeni katılan taraf üretir. Kamera/ekran açma,
+  kapama ve uzak videoyu duraklatma işlemleri kaybolmayan sıralı yeniden pazarlık
+  başlatır; video transceiver eşleştirmesi sıra yedeğiyle tarayıcı farklılıklarına
+  dayanıklıdır.
+- Canlı kontrolde `https://cekin.gen.tr/healthz` için 12 isteğin 7'si hâlâ Cloudflare
+  kaynaklı `502` dönmüştür. Bu sürüm kullanıcı işlemlerini söz konusu geçici hataya
+  dayanıklı yapar; Cloudflare İstanbul ağ olayı/origin-tunnel kararsızlığı tamamen
+  uygulama koduyla ortadan kaldırılamaz.
+- Doğrulama: backend testleri **33/33**, frontend type-check ve production build
+  başarılı.
+
 ## 28 Temmuz 2026 — arkadaşlık gerektirmeyen paylaşılabilir sunucu daveti
 
 - Sunucu sahibi, Sunucu Yönetimi → Genel alanından 16 karakterli kalıcı bir davet kodu ve

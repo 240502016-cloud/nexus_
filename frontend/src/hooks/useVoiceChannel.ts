@@ -51,6 +51,9 @@ interface PeerState {
   makingOffer: boolean;
   ignoreOffer: boolean;
   polite: boolean;
+  negotiationEnabled: boolean;
+  negotiationPending: boolean;
+  requestNegotiation: () => void;
   cameraSender: RTCRtpSender;
   cameraTransceiver: RTCRtpTransceiver;
   screenSender: RTCRtpSender;
@@ -64,8 +67,12 @@ export interface RemoteVideoStream {
 }
 
 const SPEAKING_THRESHOLD = 12;
-const SIGNALING_TIMEOUT_MS = 12_000;
-const ICE_CONFIG_TIMEOUT_MS = 10_000;
+const SIGNALING_TIMEOUT_MS = 6_000;
+const ICE_CONFIG_TIMEOUT_MS = 1_600;
+const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
+  { urls: "stun:stun.cloudflare.com:3478" },
+  { urls: "stun:stun.l.google.com:19302" },
+];
 
 function rejectAfter<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -277,6 +284,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         else if (transceiver.direction === "sendrecv") transceiver.direction = "sendonly";
       }
     });
+    peer?.requestNegotiation();
   }, []);
 
   const toggleRemoteVideo = useCallback(
@@ -327,10 +335,10 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     }
 
     let cancelled = false;
-    let iceServers: RTCIceServer[] = [];
+    let iceServers: RTCIceServer[] = DEFAULT_ICE_SERVERS;
     let selfId = 0;
     let reconnectTimer: number | null = null;
-    let reconnectDelay = 1000;
+    let reconnectDelay = 250;
     let microphoneError: string | null = null;
     let microphoneAttempted = false;
     let socketHandshakeTimer: number | null = null;
@@ -404,15 +412,23 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       if (cancelled || !navigator.onLine) return;
       clearReconnectTimer();
       const delay = Math.round(reconnectDelay * (0.85 + Math.random() * 0.3));
-      reconnectDelay = Math.min(reconnectDelay * 2, 15_000);
+      reconnectDelay = Math.min(reconnectDelay * 2, 5_000);
       reconnectTimer = window.setTimeout(() => void connect(), delay);
     }
 
-    function createPeerConnection(peerId: number, ws: WebSocket): PeerState {
+    function createPeerConnection(
+      peerId: number,
+      ws: WebSocket,
+      initiateNegotiation = true,
+    ): PeerState {
       const existing = peersRef.current.get(peerId);
       if (existing) return existing;
 
-      const pc = new RTCPeerConnection({ iceServers });
+      const pc = new RTCPeerConnection({
+        iceServers,
+        bundlePolicy: "max-bundle",
+        iceCandidatePoolSize: 2,
+      });
       // Politeness deterministik: büyük user_id "polite". Aynı anda iki taraf offer üretirse
       // (glare) polite taraf geri çekilir, böylece bağlantı kilitlenmez.
       // Her bağlantıda m-line sırasını baştan ve daima audio→video olarak sabitle. Sonradan
@@ -441,6 +457,9 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         makingOffer: false,
         ignoreOffer: false,
         polite: selfId > peerId,
+        negotiationEnabled: initiateNegotiation,
+        negotiationPending: false,
+        requestNegotiation: () => {},
         cameraSender: cameraTransceiver.sender,
         cameraTransceiver,
         screenSender: screenTransceiver.sender,
@@ -461,9 +480,17 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         void optimizeVideoSender(peer.screenSender, "screen", voiceSettingsRef.current);
       }
 
-      pc.onnegotiationneeded = async () => {
+      async function negotiate() {
+        if (peer.makingOffer) return;
+        if (
+          !peer.negotiationEnabled ||
+          pc.signalingState !== "stable"
+        ) {
+          peer.negotiationPending = true;
+          return;
+        }
         try {
-          if (pc.signalingState !== "stable") return;
+          peer.negotiationPending = false;
           peer.makingOffer = true;
           await pc.setLocalDescription();
           sendWebSocketJson(ws, { type: "offer", to: peerId, sdp: pc.localDescription?.sdp });
@@ -472,13 +499,23 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
             cancelled ||
             wsRef.current !== ws ||
             peersRef.current.get(peerId)?.pc !== pc ||
-            pc.signalingState === "closed" ||
             isExpectedConnectionAbort(err)
           ) return;
           setError(`Bağlantı pazarlığı hatası: ${err instanceof Error ? err.message : String(err)}`);
         } finally {
           peer.makingOffer = false;
+          if (peer.negotiationPending && pc.signalingState === "stable") {
+            queueMicrotask(() => void negotiate());
+          }
         }
+      }
+
+      pc.onnegotiationneeded = () => {
+        void negotiate();
+      };
+      peer.requestNegotiation = () => {
+        peer.negotiationPending = true;
+        void negotiate();
       };
 
       pc.onicecandidate = (event) => {
@@ -488,8 +525,9 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       };
 
       pc.ontrack = (event) => {
-        const isCamera = event.transceiver === peer.cameraTransceiver;
-        const isScreen = event.transceiver === peer.screenTransceiver;
+        const transceiverIndex = pc.getTransceivers().indexOf(event.transceiver);
+        const isCamera = event.transceiver === peer.cameraTransceiver || transceiverIndex === 1;
+        const isScreen = event.transceiver === peer.screenTransceiver || transceiverIndex === 2;
         if (event.track.kind === "audio") {
           const stream = event.streams[0] ?? new MediaStream([event.track]);
           let audioEl = audioElsRef.current.get(peerId);
@@ -537,7 +575,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
           return;
         }
         if (pc.connectionState === "disconnected" || pc.connectionState === "failed") {
-          const delay = pc.connectionState === "failed" ? 0 : 3_000;
+          const delay = pc.connectionState === "failed" ? 1_000 : 8_000;
           const timer = window.setTimeout(() => {
             peerRecoveryTimers.delete(peerId);
             if (
@@ -595,11 +633,11 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
           "Ses sunucusu zaman aşımına uğradı",
         );
         if (cancelled) return;
-        iceServers = ice.ice_servers;
-      } catch (err) {
-        setError(`TURN sunucusuna bağlanılamadı: ${err instanceof Error ? err.message : String(err)}`);
-        scheduleReconnect();
-        return;
+        if (ice.ice_servers.length) iceServers = ice.ice_servers;
+      } catch {
+        // Ayar uç noktası geçici olarak 502 verse bile sesliyi durdurma. Genel STUN
+        // yedeğiyle hemen devam et; sonraki reconnect sunucu ayarını yeniden alır.
+        iceServers = DEFAULT_ICE_SERVERS;
       }
 
       if (!localStreamRef.current && !microphoneAttempted) {
@@ -648,7 +686,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         if (cancelled || wsRef.current !== ws || connected) return;
         handshakeTimedOut = true;
         setError(
-          "Ses sinyal sunucusu 12 saniye içinde yanıt vermedi. Güvenli HTTPS ve Cloudflare Tunnel bağlantısını kontrol edin.",
+          "Ses sinyal sunucusu 6 saniye içinde yanıt vermedi; yeniden bağlanılıyor…",
         );
         ws.close();
       }, SIGNALING_TIMEOUT_MS);
@@ -672,11 +710,11 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
             }));
             setParticipants(peers);
             setConnected(true);
-            reconnectDelay = 1000;
+            reconnectDelay = 250;
             setError(microphoneError);
             // Mevcut herkesle bağlantı kur. Track ekleme onnegotiationneeded'i tetikleyip offer üretir.
             for (const peer of peers) {
-              createPeerConnection(peer.user_id, ws);
+              createPeerConnection(peer.user_id, ws, true);
             }
             break;
           }
@@ -697,8 +735,9 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
             // Aynı kullanıcı F5/reconnect yaptıysa eski peer'i kapatıp yeni oturumla temiz
             // bağlantı kur. Eski peer üzerinde yeni SDP uygulamak connection-aborted yarışı doğurur.
             if (peersRef.current.has(joinedUserId)) closePeerConnection(joinedUserId);
-            // Yeni gelen için de PC kur; iki taraf da offer üretebilir, glare perfect negotiation ile çözülür.
-            createPeerConnection(joinedUserId, ws);
+            // Teklif üretme sorumluluğu yeni katılanda. Bu taraf PC'yi cevap vermeye hazırlar;
+            // aynı anda iki offer üretilmediği için ses/video m-line'ları karışmaz.
+            createPeerConnection(joinedUserId, ws, false);
             break;
           }
           case "peer-left": {
@@ -709,7 +748,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
           }
           case "offer": {
             const fromId = data.from as number;
-            const peer = createPeerConnection(fromId, ws);
+            const peer = createPeerConnection(fromId, ws, false);
             const pc = peer.pc;
             const description: RTCSessionDescriptionInit = { type: "offer", sdp: data.sdp as string };
             const offerCollision = peer.makingOffer || pc.signalingState !== "stable";
@@ -725,6 +764,8 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
             await flushPendingIce(fromId, pc);
             await pc.setLocalDescription();
             sendWebSocketJson(ws, { type: "answer", to: fromId, sdp: pc.localDescription?.sdp });
+            peer.negotiationEnabled = true;
+            peer.negotiationPending = false;
             break;
           }
           case "answer": {
@@ -732,6 +773,8 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
             if (peer && peer.pc.signalingState === "have-local-offer") {
               await peer.pc.setRemoteDescription({ type: "answer", sdp: data.sdp as string });
               await flushPendingIce(data.from as number, peer.pc);
+              peer.negotiationEnabled = true;
+              if (peer.negotiationPending) peer.requestNegotiation();
             }
             break;
           }
@@ -846,6 +889,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
             ? "sendonly"
             : "sendrecv";
           await optimizeVideoSender(sender, kind, currentSettings);
+          peer.requestNegotiation();
         }
       } catch (err) {
         setError(`Video başlatılamadı: ${err instanceof Error ? err.message : String(err)}`);
@@ -890,6 +934,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         transceiver.direction = ignoredRemoteVideoIdsRef.current.has(peerId)
           ? "inactive"
           : "recvonly";
+        peer.requestNegotiation();
       }
     }
 
@@ -920,7 +965,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     micControlRef.current = { switchMic };
 
     function handleOnline() {
-      reconnectDelay = 1000;
+      reconnectDelay = 250;
       void connect();
     }
 

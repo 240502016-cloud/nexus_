@@ -190,7 +190,10 @@ router = APIRouter(tags=["voice"])
 def voice_ice_servers(current_user: User = Depends(get_current_user)) -> dict:
     """Return free public STUN plus TURN only when its external address is Internet-routable."""
     expires_at = int(time.time()) + max(60, settings.turn_credential_ttl_seconds)
-    ice_servers: list[dict] = [{"urls": "stun:stun.cloudflare.com:3478"}]
+    ice_servers: list[dict] = [
+        {"urls": "stun:stun.cloudflare.com:3478"},
+        {"urls": "stun:stun.l.google.com:19302"},
+    ]
 
     # Hamachi/özel/CGNAT adresini dış istemcilere TURN diye vermek bağlantıyı saniyelerce
     # bekletir. Ücretsiz STUN ile doğrudan P2P denenir; yalnız gerçekten genel bir coturn
