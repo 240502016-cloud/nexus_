@@ -65,12 +65,13 @@ internet sağlayıcısından genel IPv4 alınmadan garantili TURN mümkün deği
 ## Kontrol
 
 ```powershell
-docker compose --profile public-tunnel ps
-docker compose --profile public-tunnel logs --tail 100 public-tunnel
-curl.exe https://cekin.gen.tr/healthz
+.\scripts\nexus-server.ps1 -Action Diagnose
 ```
 
-İlk komutta `public-tunnel` çalışıyor, son komutta `ok` görünmelidir.
+Tanı komutu container durumlarını ve loglarını gösterir; Caddy'nin `8081` listener'ını hem kendi
+içinden hem Docker `app` ağı üzerinden sınar, varsa eski Windows `cloudflared` servisini uyarır ve
+public `/healthz` sonucunu yerel origin sonucuyla karşılaştırır. Sağlıklı durumda bütün origin
+kontrolleri ve public Cloudflare rotası `[OK]` görünmelidir.
 
 ### Bir yenilemede açılıp diğerinde 502 görülüyorsa
 

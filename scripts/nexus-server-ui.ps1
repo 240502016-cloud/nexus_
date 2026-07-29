@@ -754,7 +754,7 @@ Routine operation:
 - "Safe update" preserves local changes in Git stash, updates the current branch and deploys.
 - "Deploy current code" builds, repairs databases, migrates and starts.
 - "Start stack" starts existing containers without rebuilding.
-- "Diagnose" prints service states and recent logs.
+- "Diagnose" classifies local origin, Docker network and public Tunnel failures.
 
 Database:
 - Create verified PostgreSQL backups.

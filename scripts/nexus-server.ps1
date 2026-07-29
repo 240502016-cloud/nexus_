@@ -390,7 +390,8 @@ function Invoke-CurlRequest {
         $ErrorActionPreference = 'Continue'
         # Public test must validate the real certificate. --insecure would hide exactly the
         # browser failure this readiness check is intended to catch.
-        $content = & curl.exe --fail --silent --show-error `
+        $rawContent = & curl.exe --fail --silent --show-error `
+            --write-out "`nNEXUS_HTTP_STATUS:%{http_code}" `
             --max-time ([string]$TimeoutSeconds) $Url 2>$null
         $exitCode = $LASTEXITCODE
     }
@@ -398,9 +399,119 @@ function Invoke-CurlRequest {
         $ErrorActionPreference = $previousErrorActionPreference
     }
 
+    $content = (($rawContent | Out-String).Trim())
+    $statusCode = 0
+    if ($content -match '(?s)^(.*?)(?:\r?\n)?NEXUS_HTTP_STATUS:(\d{3})$') {
+        $content = $Matches[1].Trim()
+        $statusCode = [int]$Matches[2]
+    }
+
     return [pscustomobject]@{
         ExitCode = $exitCode
-        Content = (($content | Out-String).Trim())
+        StatusCode = $statusCode
+        Content = $content
+    }
+}
+
+function Test-TunnelOriginPath {
+    Write-Step 'Testing the Cloudflare Tunnel origin path'
+    $checks = @(
+        @{
+            Label = 'Caddy HTTP listener'
+            Service = 'reverse-proxy'
+            Url = 'http://127.0.0.1:8081/healthz'
+        },
+        @{
+            Label = 'Docker app network to Caddy'
+            Service = 'frontend'
+            Url = 'http://reverse-proxy:8081/healthz'
+        }
+    )
+
+    foreach ($check in $checks) {
+        try {
+            $result = Invoke-Compose -Arguments @(
+                'exec', '-T', $check.Service,
+                'wget', '-qO-', $check.Url
+            ) -Capture
+        }
+        catch {
+            Write-Warning "$($check.Label) failed: $($_.Exception.Message)"
+            return $false
+        }
+        if ($result.Trim() -ne 'ok') {
+            Write-Warning "$($check.Label) returned an unexpected response."
+            return $false
+        }
+        Write-Host "[OK] $($check.Label)"
+    }
+
+    return $true
+}
+
+function Test-LegacyWindowsCloudflared {
+    if (-not (Test-PublicTunnelConfigured)) { return }
+
+    $service = Get-Service -Name 'cloudflared' -ErrorAction SilentlyContinue
+    if ($service -and $service.Status -eq 'Running') {
+        Write-Warning (
+            "A Windows cloudflared service is running alongside the Docker connector. " +
+            "If it uses the same tunnel, remove or stop the obsolete connector after " +
+            "confirming the Docker public-tunnel service is connected."
+        )
+    }
+}
+
+function Show-PublicTunnelDiagnostic {
+    param([bool]$OriginPathHealthy)
+
+    if (-not (Test-PublicTunnelConfigured)) {
+        Write-Warning 'Cloudflare Tunnel is not configured in .env; public probing was skipped.'
+        return
+    }
+
+    $values = Read-EnvironmentFile
+    $publicUrl = if ($values.ContainsKey('NEXUS_PUBLIC_URL')) {
+        $values['NEXUS_PUBLIC_URL'].TrimEnd('/')
+    }
+    else {
+        $port = if ($values.ContainsKey('NEXUS_HTTPS_PORT')) { [int]$values['NEXUS_HTTPS_PORT'] } else { 443 }
+        Get-PublicUrl -HostName $values['NEXUS_DOMAIN'] -Port $port
+    }
+
+    Write-Step "Testing the public Cloudflare route: $publicUrl/healthz"
+    if (-not (Get-Command curl.exe -ErrorAction SilentlyContinue)) {
+        Write-Warning 'curl.exe was not found; the public probe was skipped.'
+        return
+    }
+
+    try {
+        Assert-PublicTunnelDns -PublicUrl $publicUrl
+    }
+    catch {
+        Write-Warning $_.Exception.Message
+    }
+
+    $health = Invoke-CurlRequest -Url "$publicUrl/healthz" -TimeoutSeconds 15
+    if ($health.ExitCode -eq 0 -and $health.StatusCode -eq 200 -and $health.Content -eq 'ok') {
+        Write-Host '[OK] Public Cloudflare route'
+        return
+    }
+
+    $status = if ($health.StatusCode -gt 0) { "HTTP $($health.StatusCode)" } else { "curl exit $($health.ExitCode)" }
+    if ($OriginPathHealthy) {
+        Write-Warning (
+            "Public route failed ($status), while the local origin path is healthy. " +
+            "In Cloudflare Zero Trust, set cekin.gen.tr to HTTP " +
+            "http://reverse-proxy:8081 and remove obsolete connector replicas."
+        )
+    }
+    else {
+        Write-Warning (
+            "Public route failed ($status), and the local origin path is unhealthy. " +
+            "Repair reverse-proxy/frontend container health or Docker app-network " +
+            "connectivity before changing Cloudflare settings."
+        )
     }
 }
 
@@ -586,6 +697,8 @@ function Invoke-Validation {
 
 function Invoke-Diagnose {
     Show-Status
+    $originPathHealthy = Test-TunnelOriginPath
+    Test-LegacyWindowsCloudflared
     Write-Step 'Recent service logs'
     $services = @(
         'logs', '--tail', '120',
@@ -594,6 +707,7 @@ function Invoke-Diagnose {
     )
     if (Test-PublicTunnelConfigured) { $services += 'public-tunnel' }
     Invoke-Compose -Arguments $services
+    Show-PublicTunnelDiagnostic -OriginPathHealthy $originPathHealthy
 }
 
 function Show-Help {
@@ -622,7 +736,7 @@ Other actions:
   -Action Stop       Stop containers without deleting them or their volumes
   -Action Restart    Restart the existing stack
   -Action Status     Show all container states
-  -Action Diagnose   Show states and recent logs
+  -Action Diagnose   Classify local origin, Docker network and public Tunnel failures
   -Action Backup     Create PostgreSQL backups
   -Action RepairDatabase  Back up and repair Synapse C/C locale
 '@ | Write-Host
