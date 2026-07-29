@@ -174,6 +174,17 @@ async function optimizeVideoSender(
   }
 }
 
+function videoDirection(
+  hasLocalTrack: boolean,
+  receivingRemoteVideo: boolean,
+): RTCRtpTransceiverDirection {
+  // Video m-line'larını normal durumda baştan sendrecv pazarlamak bilinçlidir. Sender'da
+  // henüz track olmasa bile daha sonra replaceTrack(track) ile kamera/yayın başlatılabilir;
+  // böylece her açma işleminde kaybolabilen ayrı bir SDP yeniden-pazarlık turuna gerek kalmaz.
+  if (receivingRemoteVideo) return "sendrecv";
+  return hasLocalTrack ? "sendonly" : "inactive";
+}
+
 export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSettings) {
   const [connected, setConnected] = useState(false);
   const [participants, setParticipants] = useState<VoiceParticipant[]>([]);
@@ -274,17 +285,20 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     // Yalnızca videoyu DOM'dan gizlemek veri akışını durdurmaz. Alıcı yönünü kapatarak
     // WebRTC yeniden pazarlığında karşı tarafın bu kullanıcıya video göndermesini keseriz.
     const peer = peersRef.current.get(peerId);
-    peer?.pc.getTransceivers().forEach((transceiver) => {
-      if (transceiver.receiver.track.kind !== "video") return;
-      if (enabled) {
-        if (transceiver.direction === "inactive") transceiver.direction = "recvonly";
-        else if (transceiver.direction === "sendonly") transceiver.direction = "sendrecv";
-      } else {
-        if (transceiver.direction === "recvonly") transceiver.direction = "inactive";
-        else if (transceiver.direction === "sendrecv") transceiver.direction = "sendonly";
+    if (peer) {
+      const videoTransceivers = [
+        [peer.cameraTransceiver, cameraTrackRef.current],
+        [peer.screenTransceiver, screenTrackRef.current],
+      ] as const;
+      let directionChanged = false;
+      for (const [transceiver, localTrack] of videoTransceivers) {
+        const nextDirection = videoDirection(Boolean(localTrack), enabled);
+        if (transceiver.direction === nextDirection) continue;
+        transceiver.direction = nextDirection;
+        directionChanged = true;
       }
-    });
-    peer?.requestNegotiation();
+      if (directionChanged) peer.requestNegotiation();
+    }
   }, []);
 
   const toggleRemoteVideo = useCallback(
@@ -443,14 +457,10 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       }
       const receivingVideo = !ignoredRemoteVideoIdsRef.current.has(peerId);
       const cameraTransceiver = pc.addTransceiver("video", {
-        direction: cameraTrackRef.current
-          ? (receivingVideo ? "sendrecv" : "sendonly")
-          : (receivingVideo ? "recvonly" : "inactive"),
+        direction: videoDirection(Boolean(cameraTrackRef.current), receivingVideo),
       });
       const screenTransceiver = pc.addTransceiver("video", {
-        direction: screenTrackRef.current
-          ? (receivingVideo ? "sendrecv" : "sendonly")
-          : (receivingVideo ? "recvonly" : "inactive"),
+        direction: videoDirection(Boolean(screenTrackRef.current), receivingVideo),
       });
       const peer: PeerState = {
         pc,
@@ -885,11 +895,16 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
           const sender = kind === "camera" ? peer.cameraSender : peer.screenSender;
           const transceiver = kind === "camera" ? peer.cameraTransceiver : peer.screenTransceiver;
           await sender.replaceTrack(track);
-          transceiver.direction = ignoredRemoteVideoIdsRef.current.has(peerId)
-            ? "sendonly"
-            : "sendrecv";
+          const nextDirection = videoDirection(
+            true,
+            !ignoredRemoteVideoIdsRef.current.has(peerId),
+          );
+          const directionChanged = transceiver.direction !== nextDirection;
+          if (directionChanged) transceiver.direction = nextDirection;
           await optimizeVideoSender(sender, kind, currentSettings);
-          peer.requestNegotiation();
+          // Normal akışta m-line zaten sendrecv'dir; replaceTrack tek başına yayını başlatır.
+          // Kullanıcı bu eşin videosunu özellikle kapattıysa sendonly'ye geçiş SDP gerektirir.
+          if (directionChanged) peer.requestNegotiation();
         }
       } catch (err) {
         setError(`Video başlatılamadı: ${err instanceof Error ? err.message : String(err)}`);
@@ -931,10 +946,15 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         const sender = kind === "camera" ? peer.cameraSender : peer.screenSender;
         const transceiver = kind === "camera" ? peer.cameraTransceiver : peer.screenTransceiver;
         void sender.replaceTrack(null);
-        transceiver.direction = ignoredRemoteVideoIdsRef.current.has(peerId)
-          ? "inactive"
-          : "recvonly";
-        peer.requestNegotiation();
+        const nextDirection = videoDirection(
+          false,
+          !ignoredRemoteVideoIdsRef.current.has(peerId),
+        );
+        const directionChanged = transceiver.direction !== nextDirection;
+        if (directionChanged) {
+          transceiver.direction = nextDirection;
+          peer.requestNegotiation();
+        }
       }
     }
 
