@@ -54,16 +54,22 @@ interface PeerState {
   negotiationEnabled: boolean;
   negotiationPending: boolean;
   requestNegotiation: () => void;
-  cameraSender: RTCRtpSender;
-  cameraTransceiver: RTCRtpTransceiver;
-  screenSender: RTCRtpSender;
-  screenTransceiver: RTCRtpTransceiver;
+  audioTransceiver: RTCRtpTransceiver | null;
+  cameraTransceiver: RTCRtpTransceiver | null;
+  screenTransceiver: RTCRtpTransceiver | null;
+  remoteMediaMids: MediaMids;
 }
 
 export interface RemoteVideoStream {
   userId: number;
   kind: "camera" | "screen";
   stream: MediaStream;
+}
+
+interface MediaMids {
+  audio: string | null;
+  camera: string | null;
+  screen: string | null;
 }
 
 const SPEAKING_THRESHOLD = 12;
@@ -185,6 +191,33 @@ function videoDirection(
   return hasLocalTrack ? "sendonly" : "inactive";
 }
 
+function mediaMidsFromSdp(sdp: string | undefined): MediaMids {
+  const result: MediaMids = { audio: null, camera: null, screen: null };
+  if (!sdp) return result;
+  const videoMids: string[] = [];
+  for (const section of sdp.split(/\r?\nm=/).slice(1)) {
+    const mediaType = section.split(/\s+/, 1)[0];
+    const mid = section.match(/(?:^|\r?\n)a=mid:([^\r\n]+)/)?.[1] ?? null;
+    if (!mid) continue;
+    if (mediaType === "audio" && result.audio === null) result.audio = mid;
+    if (mediaType === "video") videoMids.push(mid);
+  }
+  result.camera = videoMids[0] ?? null;
+  result.screen = videoMids[1] ?? null;
+  return result;
+}
+
+function mediaMidsFromSignal(value: unknown, sdp: string | undefined): MediaMids {
+  const fallback = mediaMidsFromSdp(sdp);
+  if (!value || typeof value !== "object") return fallback;
+  const candidate = value as Record<string, unknown>;
+  return {
+    audio: typeof candidate.audio === "string" ? candidate.audio : fallback.audio,
+    camera: typeof candidate.camera === "string" ? candidate.camera : fallback.camera,
+    screen: typeof candidate.screen === "string" ? candidate.screen : fallback.screen,
+  };
+}
+
 export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSettings) {
   const [connected, setConnected] = useState(false);
   const [participants, setParticipants] = useState<VoiceParticipant[]>([]);
@@ -202,6 +235,9 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
   const microphoneGraphRef = useRef<{ context: AudioContext; gain: GainNode } | null>(null);
   const cameraTrackRef = useRef<MediaStreamTrack | null>(null);
   const screenTrackRef = useRef<MediaStreamTrack | null>(null);
+  const placeholderVideoRef = useRef<
+    Partial<Record<"camera" | "screen", { canvas: HTMLCanvasElement; track: MediaStreamTrack }>>
+  >({});
   const peersRef = useRef<Map<number, PeerState>>(new Map());
   const pendingIceRef = useRef<Map<number, RTCIceCandidateInit[]>>(new Map());
   const audioElsRef = useRef<Map<number, HTMLAudioElement>>(new Map());
@@ -225,6 +261,18 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
   // connect() effect'i sadece channelId'ye bağlı çalışır; bağlantı anındaki modu okumak için ref kullanılır.
   const voiceSettingsRef = useRef(voiceSettings);
   voiceSettingsRef.current = voiceSettings;
+
+  function placeholderVideoTrack(kind: "camera" | "screen"): MediaStreamTrack {
+    const existing = placeholderVideoRef.current[kind];
+    if (existing?.track.readyState === "live") return existing.track;
+    const canvas = document.createElement("canvas");
+    canvas.width = 2;
+    canvas.height = 2;
+    const track = canvas.captureStream(0).getVideoTracks()[0];
+    if (!track) throw new Error("Tarayıcı video yer tutucusu oluşturamadı.");
+    placeholderVideoRef.current[kind] = { canvas, track };
+    return track;
+  }
 
   const processMicrophoneStream = useCallback(async (sourceStream: MediaStream) => {
     const context = new AudioContext();
@@ -292,6 +340,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       ] as const;
       let directionChanged = false;
       for (const [transceiver, localTrack] of videoTransceivers) {
+        if (!transceiver) continue;
         const nextDirection = videoDirection(Boolean(localTrack), enabled);
         if (transceiver.direction === nextDirection) continue;
         transceiver.direction = nextDirection;
@@ -329,6 +378,8 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     screenTrackRef.current?.stop();
     cameraTrackRef.current = null;
     screenTrackRef.current = null;
+    Object.values(placeholderVideoRef.current).forEach((source) => source?.track.stop());
+    placeholderVideoRef.current = {};
     setConnected(false);
     setParticipants([]);
     setMuted(false);
@@ -443,25 +494,28 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         bundlePolicy: "max-bundle",
         iceCandidatePoolSize: 2,
       });
-      // Politeness deterministik: büyük user_id "polite". Aynı anda iki taraf offer üretirse
-      // (glare) polite taraf geri çekilir, böylece bağlantı kilitlenmez.
-      // Her bağlantıda m-line sırasını baştan ve daima audio→video olarak sabitle. Sonradan
-      // addTrack/removeTrack kullanmak Chrome'da yeni teklifin m-line sırasını değiştirip
-      // setRemoteDescription hatasına yol açabiliyor.
-      const audioTransceiver = pc.addTransceiver("audio", {
-        direction: localStreamRef.current ? "sendrecv" : "recvonly",
-      });
-      if (localStreamRef.current) {
-        const audioTrack = localStreamRef.current.getAudioTracks()[0];
-        if (audioTrack) void audioTransceiver.sender.replaceTrack(audioTrack);
+      // Yalnız ilk offer'ı üreten taraf m-line'ları oluşturur. Cevaplayan taraf bunları
+      // setRemoteDescription sonrasında bağlar; iki tarafta önceden transceiver oluşturmak
+      // Chromium'un ikinci bir audio/video seti eklemesine ve track'lerin yanlış sender'da
+      // kalmasına neden olur.
+      let audioTransceiver: RTCRtpTransceiver | null = null;
+      let cameraTransceiver: RTCRtpTransceiver | null = null;
+      let screenTransceiver: RTCRtpTransceiver | null = null;
+      if (initiateNegotiation) {
+        const audioTrack = localStreamRef.current?.getAudioTracks()[0] ?? null;
+        audioTransceiver = pc.addTransceiver(audioTrack ?? "audio", {
+          direction: audioTrack ? "sendrecv" : "recvonly",
+        });
+        const receivingVideo = !ignoredRemoteVideoIdsRef.current.has(peerId);
+        cameraTransceiver = pc.addTransceiver(
+          cameraTrackRef.current ?? placeholderVideoTrack("camera"),
+          { direction: videoDirection(Boolean(cameraTrackRef.current), receivingVideo) },
+        );
+        screenTransceiver = pc.addTransceiver(
+          screenTrackRef.current ?? placeholderVideoTrack("screen"),
+          { direction: videoDirection(Boolean(screenTrackRef.current), receivingVideo) },
+        );
       }
-      const receivingVideo = !ignoredRemoteVideoIdsRef.current.has(peerId);
-      const cameraTransceiver = pc.addTransceiver("video", {
-        direction: videoDirection(Boolean(cameraTrackRef.current), receivingVideo),
-      });
-      const screenTransceiver = pc.addTransceiver("video", {
-        direction: videoDirection(Boolean(screenTrackRef.current), receivingVideo),
-      });
       const peer: PeerState = {
         pc,
         makingOffer: false,
@@ -470,24 +524,22 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         negotiationEnabled: initiateNegotiation,
         negotiationPending: false,
         requestNegotiation: () => {},
-        cameraSender: cameraTransceiver.sender,
+        audioTransceiver,
         cameraTransceiver,
-        screenSender: screenTransceiver.sender,
         screenTransceiver,
+        remoteMediaMids: { audio: null, camera: null, screen: null },
       };
       peersRef.current.set(peerId, peer);
 
-      if (cameraTrackRef.current) {
-        void peer.cameraSender.replaceTrack(cameraTrackRef.current);
+      if (cameraTrackRef.current && cameraTransceiver) {
         void optimizeVideoSender(
-          peer.cameraSender,
+          cameraTransceiver.sender,
           "camera",
           voiceSettingsRef.current,
         );
       }
-      if (screenTrackRef.current) {
-        void peer.screenSender.replaceTrack(screenTrackRef.current);
-        void optimizeVideoSender(peer.screenSender, "screen", voiceSettingsRef.current);
+      if (screenTrackRef.current && screenTransceiver) {
+        void optimizeVideoSender(screenTransceiver.sender, "screen", voiceSettingsRef.current);
       }
 
       async function negotiate() {
@@ -503,7 +555,16 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
           peer.negotiationPending = false;
           peer.makingOffer = true;
           await pc.setLocalDescription();
-          sendWebSocketJson(ws, { type: "offer", to: peerId, sdp: pc.localDescription?.sdp });
+          sendWebSocketJson(ws, {
+            type: "offer",
+            to: peerId,
+            sdp: pc.localDescription?.sdp,
+            media_mids: {
+              audio: peer.audioTransceiver?.mid ?? null,
+              camera: peer.cameraTransceiver?.mid ?? null,
+              screen: peer.screenTransceiver?.mid ?? null,
+            },
+          });
         } catch (err) {
           if (
             cancelled ||
@@ -535,9 +596,14 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       };
 
       pc.ontrack = (event) => {
-        const transceiverIndex = pc.getTransceivers().indexOf(event.transceiver);
-        const isCamera = event.transceiver === peer.cameraTransceiver || transceiverIndex === 1;
-        const isScreen = event.transceiver === peer.screenTransceiver || transceiverIndex === 2;
+        const isCamera =
+          event.transceiver === peer.cameraTransceiver ||
+          (peer.remoteMediaMids.camera !== null &&
+            event.transceiver.mid === peer.remoteMediaMids.camera);
+        const isScreen =
+          event.transceiver === peer.screenTransceiver ||
+          (peer.remoteMediaMids.screen !== null &&
+            event.transceiver.mid === peer.remoteMediaMids.screen);
         if (event.track.kind === "audio") {
           const stream = event.streams[0] ?? new MediaStream([event.track]);
           let audioEl = audioElsRef.current.get(peerId);
@@ -615,6 +681,52 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
           await pc.addIceCandidate(candidate);
         } catch {
           // yok sayılabilir (perfect negotiation: reddedilen offer'ın candidate'leri)
+        }
+      }
+    }
+
+    async function bindResponderMedia(peerId: number, peer: PeerState) {
+      const transceivers = peer.pc.getTransceivers();
+      const findByMid = (mid: string | null, kind: "audio" | "video") =>
+        transceivers.find(
+          (transceiver) =>
+            transceiver.mid === mid && transceiver.receiver.track.kind === kind,
+        ) ?? null;
+      const videoTransceivers = transceivers.filter(
+        (transceiver) => transceiver.receiver.track.kind === "video",
+      );
+      peer.audioTransceiver =
+        findByMid(peer.remoteMediaMids.audio, "audio") ??
+        transceivers.find((transceiver) => transceiver.receiver.track.kind === "audio") ??
+        null;
+      peer.cameraTransceiver =
+        findByMid(peer.remoteMediaMids.camera, "video") ??
+        videoTransceivers[0] ??
+        null;
+      peer.screenTransceiver =
+        findByMid(peer.remoteMediaMids.screen, "video") ??
+        videoTransceivers[1] ??
+        null;
+
+      const audioTrack = localStreamRef.current?.getAudioTracks()[0] ?? null;
+      if (peer.audioTransceiver) {
+        await peer.audioTransceiver.sender.replaceTrack(audioTrack);
+        peer.audioTransceiver.direction = audioTrack ? "sendrecv" : "recvonly";
+      }
+
+      const receivingVideo = !ignoredRemoteVideoIdsRef.current.has(peerId);
+      const localVideo = [
+        ["camera", peer.cameraTransceiver, cameraTrackRef.current],
+        ["screen", peer.screenTransceiver, screenTrackRef.current],
+      ] as const;
+      for (const [kind, transceiver, localTrack] of localVideo) {
+        if (!transceiver) continue;
+        await transceiver.sender.replaceTrack(
+          localTrack ?? placeholderVideoTrack(kind),
+        );
+        transceiver.direction = videoDirection(Boolean(localTrack), receivingVideo);
+        if (localTrack) {
+          await optimizeVideoSender(transceiver.sender, kind, voiceSettingsRef.current);
         }
       }
     }
@@ -761,6 +873,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
             const peer = createPeerConnection(fromId, ws, false);
             const pc = peer.pc;
             const description: RTCSessionDescriptionInit = { type: "offer", sdp: data.sdp as string };
+            peer.remoteMediaMids = mediaMidsFromSignal(data.media_mids, description.sdp);
             const offerCollision = peer.makingOffer || pc.signalingState !== "stable";
             peer.ignoreOffer = !peer.polite && offerCollision;
             if (peer.ignoreOffer) break;
@@ -771,9 +884,25 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
               await pc.setLocalDescription({ type: "rollback" });
             }
             await pc.setRemoteDescription(description);
+            if (
+              !peer.audioTransceiver ||
+              !peer.cameraTransceiver ||
+              !peer.screenTransceiver
+            ) {
+              await bindResponderMedia(fromId, peer);
+            }
             await flushPendingIce(fromId, pc);
             await pc.setLocalDescription();
-            sendWebSocketJson(ws, { type: "answer", to: fromId, sdp: pc.localDescription?.sdp });
+            sendWebSocketJson(ws, {
+              type: "answer",
+              to: fromId,
+              sdp: pc.localDescription?.sdp,
+              media_mids: {
+                audio: peer.audioTransceiver?.mid ?? null,
+                camera: peer.cameraTransceiver?.mid ?? null,
+                screen: peer.screenTransceiver?.mid ?? null,
+              },
+            });
             peer.negotiationEnabled = true;
             peer.negotiationPending = false;
             break;
@@ -781,6 +910,10 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
           case "answer": {
             const peer = peersRef.current.get(data.from as number);
             if (peer && peer.pc.signalingState === "have-local-offer") {
+              peer.remoteMediaMids = mediaMidsFromSignal(
+                data.media_mids,
+                data.sdp as string,
+              );
               await peer.pc.setRemoteDescription({ type: "answer", sdp: data.sdp as string });
               await flushPendingIce(data.from as number, peer.pc);
               peer.negotiationEnabled = true;
@@ -892,16 +1025,16 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         track.onended = () => stopVideo(kind);
 
         for (const [peerId, peer] of peersRef.current) {
-          const sender = kind === "camera" ? peer.cameraSender : peer.screenSender;
           const transceiver = kind === "camera" ? peer.cameraTransceiver : peer.screenTransceiver;
-          await sender.replaceTrack(track);
+          if (!transceiver) continue;
+          await transceiver.sender.replaceTrack(track);
           const nextDirection = videoDirection(
             true,
             !ignoredRemoteVideoIdsRef.current.has(peerId),
           );
           const directionChanged = transceiver.direction !== nextDirection;
           if (directionChanged) transceiver.direction = nextDirection;
-          await optimizeVideoSender(sender, kind, currentSettings);
+          await optimizeVideoSender(transceiver.sender, kind, currentSettings);
           // Normal akışta m-line zaten sendrecv'dir; replaceTrack tek başına yayını başlatır.
           // Kullanıcı bu eşin videosunu özellikle kapattıysa sendonly'ye geçiş SDP gerektirir.
           if (directionChanged) peer.requestNegotiation();
@@ -926,11 +1059,11 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
           // Kaynak yeni tercihi tam desteklemiyorsa tarayıcının en yakın uygun değeri kullanılır.
         }
         for (const [, peer] of peersRef.current) {
-          await optimizeVideoSender(
-            kind === "camera" ? peer.cameraSender : peer.screenSender,
-            kind,
-            currentSettings,
-          );
+          const transceiver =
+            kind === "camera" ? peer.cameraTransceiver : peer.screenTransceiver;
+          if (transceiver) {
+            await optimizeVideoSender(transceiver.sender, kind, currentSettings);
+          }
         }
       }
     }
@@ -943,9 +1076,11 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       if (kind === "camera") setLocalCameraStream(null);
       else setLocalScreenStream(null);
       for (const [peerId, peer] of peersRef.current) {
-        const sender = kind === "camera" ? peer.cameraSender : peer.screenSender;
         const transceiver = kind === "camera" ? peer.cameraTransceiver : peer.screenTransceiver;
-        void sender.replaceTrack(null);
+        if (!transceiver) continue;
+        // İlk SDP'deki yer tutucu ontrack/MSID'yi hazırladığı için burada null'a dönmek
+        // güvenlidir; uzak track hemen susar, sonraki gerçek track aynı m-line'da devam eder.
+        void transceiver.sender.replaceTrack(null);
         const nextDirection = videoDirection(
           false,
           !ignoredRemoteVideoIdsRef.current.has(peerId),
@@ -970,8 +1105,16 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         if (!newTrack) return;
         newTrack.enabled = !mutedRef.current;
         for (const [, peer] of peersRef.current) {
-          const sender = peer.pc.getSenders().find((s) => s.track && s.track.kind === "audio");
-          if (sender) await sender.replaceTrack(newTrack);
+          const transceiver = peer.audioTransceiver;
+          if (!transceiver) continue;
+          await transceiver.sender.replaceTrack(newTrack);
+          if (transceiver.direction === "recvonly") {
+            transceiver.direction = "sendrecv";
+            peer.requestNegotiation();
+          } else if (transceiver.direction === "inactive") {
+            transceiver.direction = "sendonly";
+            peer.requestNegotiation();
+          }
         }
         localStreamRef.current?.getAudioTracks().forEach((t) => t.stop());
         localStreamRef.current = processedStream;
