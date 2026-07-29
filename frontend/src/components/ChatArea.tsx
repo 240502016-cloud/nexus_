@@ -29,10 +29,10 @@ interface ChatAreaProps {
   channel: Channel | undefined;
   messages: Message[];
   currentMatrixUserId: string | null;
-  onSendMessage: (content: string, file?: File) => Promise<void>;
+  onSendMessage: (content: string, file?: File, replyTo?: Message) => Promise<void>;
   onEditMessage: (eventId: string, content: string) => Promise<void>;
   onDeleteMessage: (eventId: string) => void;
-  onRetryMessage: (clientId: string, content: string) => void;
+  onRetryMessage: (clientId: string, content: string, replyTo?: Message["reply_to"]) => void;
   hasMoreMessages: boolean;
   loadingOlder: boolean;
   onLoadOlder: () => Promise<void>;
@@ -84,6 +84,7 @@ export function ChatArea({
   const [draft, setDraft] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [editing, setEditing] = useState<{ eventId: string; content: string } | null>(null);
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [gameActionBusy, setGameActionBusy] = useState<string | null>(null);
   const [unseenMessageCount, setUnseenMessageCount] = useState(0);
   const messagesRef = useRef<HTMLDivElement | null>(null);
@@ -127,7 +128,9 @@ export function ChatArea({
     setSelectedFile(null);
     requestAnimationFrame(() => resizeComposer());
     forceScrollToBottomRef.current = true;
-    const pending = onSendMessage(content, file);
+    const replyTarget = replyingTo ?? undefined;
+    setReplyingTo(null);
+    const pending = onSendMessage(content, file, replyTarget);
     // İyimser mesajın React tarafından DOM'a işlendiği iki çizim turundan sonra kesin olarak
     // en alta in. Ağ yanıtını beklemek kullanıcının kendi mesajını görmesini geciktirirdi.
     requestAnimationFrame(() => requestAnimationFrame(() => scrollToLatest("auto")));
@@ -168,11 +171,22 @@ export function ChatArea({
   );
   const currentUsername = currentMatrixUserId ? displayName(currentMatrixUserId).toLocaleLowerCase("tr") : "";
 
+  function selectReply(message: Message) {
+    setReplyingTo(message);
+    requestAnimationFrame(() => composerRef.current?.focus());
+  }
+
+  function scrollToMessage(eventId: string) {
+    const element = document.getElementById(`message-${encodeURIComponent(eventId)}`);
+    element?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
   useEffect(() => {
     knownMessageIdsRef.current = new Set();
     initializedChannelRef.current = channel?.id ?? null;
     isNearBottomRef.current = true;
     forceScrollToBottomRef.current = false;
+    setReplyingTo(null);
     setUnseenMessageCount(0);
   }, [channel?.id]);
 
@@ -275,8 +289,24 @@ export function ChatArea({
               .filter(Boolean)
               .join(" ");
             return (
-              <div key={message.event_id} className={className}>
+              <div
+                key={message.event_id}
+                id={`message-${encodeURIComponent(message.event_id)}`}
+                className={className}
+              >
                 <span className="chat-message__sender">{displayName(message.sender)}</span>
+                <div className="chat-message__body">
+                {message.reply_to ? (
+                  <button
+                    type="button"
+                    className="message-reply-quote"
+                    onClick={() => scrollToMessage(message.reply_to!.event_id)}
+                    title="Yanıtlanan mesaja git"
+                  >
+                    <strong>{displayName(message.reply_to.sender)}</strong>
+                    <span>{message.reply_to.content || "(silindi)"}</span>
+                  </button>
+                ) : null}
                 {editing?.eventId === message.event_id ? (
                   <form className="chat-message__edit-form" onSubmit={saveEdit}>
                     <textarea
@@ -368,20 +398,28 @@ export function ChatArea({
                     {message.edited ? <small className="chat-message__edited"> (düzenlendi)</small> : null}
                   </span>
                 )}
+                </div>
                 {message.delivery_status === "sending" ? (
                   <span className="chat-message__delivery">Gönderiliyor…</span>
                 ) : message.delivery_status === "failed" && message.client_id ? (
                   <button
                     type="button"
                     className="chat-message__delivery chat-message__retry"
-                    onClick={() => onRetryMessage(message.client_id!, message.content)}
+                    onClick={() => onRetryMessage(message.client_id!, message.content, message.reply_to)}
                   >
                     Gönderilemedi · Tekrar dene
                   </button>
                 ) : null}
-                {own && message.content && !message.delivery_status ? (
+                {message.content && !message.delivery_status ? (
                   <div className="chat-message__actions">
-                    {!gameMessage ? (
+                    <button
+                      type="button"
+                      title="Yanıtla"
+                      onClick={() => selectReply(message)}
+                    >
+                      <Icon name="reply" />
+                    </button>
+                    {own && !gameMessage ? (
                       <button
                         type="button"
                         title="Mesajı düzenle"
@@ -390,15 +428,17 @@ export function ChatArea({
                         <Icon name="edit" />
                       </button>
                     ) : null}
-                    <button
-                      type="button"
-                      title="Mesajı sil"
-                      onClick={() => {
-                        if (window.confirm("Bu mesaj silinsin mi?")) onDeleteMessage(message.event_id);
-                      }}
-                    >
-                      <Icon name="trash" />
-                    </button>
+                    {own ? (
+                      <button
+                        type="button"
+                        title="Mesajı sil"
+                        onClick={() => {
+                          if (window.confirm("Bu mesaj silinsin mi?")) onDeleteMessage(message.event_id);
+                        }}
+                      >
+                        <Icon name="trash" />
+                      </button>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
@@ -419,6 +459,18 @@ export function ChatArea({
       ) : null}
       {channel ? (
         <form className="chat-area__composer" onSubmit={handleSubmit}>
+          {replyingTo ? (
+            <div className="composer-reply-preview">
+              <Icon name="reply" />
+              <div>
+                <strong>{displayName(replyingTo.sender)} kullanıcısına yanıt</strong>
+                <span>{replyingTo.content || "(silindi)"}</span>
+              </div>
+              <button type="button" onClick={() => setReplyingTo(null)} aria-label="Yanıtı iptal et">
+                <Icon name="close" />
+              </button>
+            </div>
+          ) : null}
           <input
             id="chat-file-input"
             className="visually-hidden"

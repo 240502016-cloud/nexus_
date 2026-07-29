@@ -700,6 +700,14 @@ https://cekin.gen.tr/?invite=<kod>
 - Silinen mesaj normal geçmişten elenir/güncellenir.
 - Düzenleme ve silme ikonları küçük, ortak modern SVG setindedir.
 
+### Mesaja yanıt
+
+- Kanal mesajları ve birebir özel mesajlar Discord/WhatsApp benzeri alıntılı yanıtı destekler.
+- Kalıcı ilişki Matrix `m.in_reply_to` sözleşmesiyle saklanır.
+- Kısa yanıt önizlemesi optimistic gönderimde, gateway canlı olayında ve F5 sonrası Matrix
+  geçmişinde korunur.
+- Kullanıcı yanıt önizlemesine tıklayarak hedef mesaj hâlâ yüklenen sayfadaysa ona kayabilir.
+
 ### Çok satırlı mesaj
 
 - Enter mesajı gönderir.
@@ -834,6 +842,8 @@ The order of m-lines in subsequent offer doesn't match order from previous offer
 - İkisi aynı anda açık olabilir.
 - Birini kapatmak diğerini kesmez.
 - Kamera kapanınca son video karesi donmuş şekilde kalmaz.
+- Kamera/ekran açık-kapalı durumu eşlere ayrıca `video-state` sinyaliyle iletilir; tarayıcı
+  `replaceTrack(null)` sonrasında son kareyi tutsa bile uzak döşeme anında kaldırılır.
 - Kamera/yayın yoksa profil fotoğrafı veya kullanıcı baş harfi görünür.
 
 ### Dinamik sahne
@@ -858,6 +868,9 @@ The order of m-lines in subsequent offer doesn't match order from previous offer
 - Video mutlak sahne sınırlarına oturur ve `object-fit: contain` kullanır.
 - Kaynak en-boy oranı bozulmaz.
 - Ekran paylaşan kullanıcının üstü/altı/yanları hiçbir sahne oranında kesilmemelidir.
+- Normal sahnede tekrar eden üst yayın bilgi bloğu ve alt görüşme kontrol çubuğu yoktur.
+- Sahneyi gizle ve tam ekran kontrolleri medya üzerinde soldaki kompakt çubuktadır; kaldırılan
+  dikey alan sohbet ekranına geri verilirken gerçek medya görüntü alanı küçültülmez.
 
 ### Focus ve grid'e dönüş
 

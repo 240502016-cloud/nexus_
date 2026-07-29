@@ -244,6 +244,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
   // Her peer için tek bir birleşik uzak MediaStream. Ses ve video ayrı MSID'lerle gelse de
   // aynı stream'de biriktirilir; böylece video eklenince ses stream'i ezilmez (Hata 1).
   const remoteMediaRef = useRef<Map<string, MediaStream>>(new Map());
+  const remoteVideoStateRef = useRef<Map<string, boolean>>(new Map());
   const ignoredRemoteVideoIdsRef = useRef<Set<number>>(new Set());
   const mutedRef = useRef(false);
   const deafenedRef = useRef(false);
@@ -368,6 +369,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     });
     audioElsRef.current.clear();
     remoteMediaRef.current.clear();
+    remoteVideoStateRef.current.clear();
     localStreamRef.current?.getTracks().forEach((track) => track.stop());
     localStreamRef.current = null;
     microphoneSourceRef.current?.getTracks().forEach((track) => track.stop());
@@ -419,10 +421,12 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       });
     }
 
-    function dropRemoteStream(peerId: number) {
+    function dropRemoteStream(peerId: number, kind?: "camera" | "screen") {
       setRemoteStreams((prev) => {
         const next = new Map(
-          [...prev].filter(([, value]) => value.userId !== peerId),
+          [...prev].filter(([, value]) =>
+            value.userId !== peerId || (kind !== undefined && value.kind !== kind),
+          ),
         );
         return next;
       });
@@ -440,6 +444,9 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       for (const key of [...remoteMediaRef.current.keys()]) {
         if (key.startsWith(`${peerId}:`)) remoteMediaRef.current.delete(key);
       }
+      for (const key of [...remoteVideoStateRef.current.keys()]) {
+        if (key.startsWith(`${peerId}:`)) remoteVideoStateRef.current.delete(key);
+      }
       pendingIceRef.current.delete(peerId);
       dropRemoteStream(peerId);
     }
@@ -455,6 +462,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       });
       audioElsRef.current.clear();
       remoteMediaRef.current.clear();
+      remoteVideoStateRef.current.clear();
       setParticipants([]);
       setRemoteStreams(new Map());
     }
@@ -624,14 +632,23 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         const stream = new MediaStream([event.track]);
         remoteMediaRef.current.set(key, stream);
         event.track.enabled = !ignoredRemoteVideoIdsRef.current.has(peerId);
-        upsertRemoteStream(peerId, kind, stream);
+        // Güncellenmemiş bir istemci video-state göndermese de önceki WebRTC davranışı çalışsın.
+        // Güncel istemcilerde explicit false bu geçici akışı hemen kaldırır.
+        if (remoteVideoStateRef.current.get(key) !== false) {
+          upsertRemoteStream(peerId, kind, stream);
+        }
 
         // Track susunca/bitince (ör. karşı taraf kamerayı kapatınca) döşemeyi güncelle/kaldır.
         const refresh = () => {
           if (event.track.readyState === "ended") {
             remoteMediaRef.current.delete(key);
+            remoteVideoStateRef.current.set(key, false);
+            dropRemoteStream(peerId, kind);
+            return;
           }
-          upsertRemoteStream(peerId, kind, stream);
+          if (remoteVideoStateRef.current.get(key) !== false) {
+            upsertRemoteStream(peerId, kind, stream);
+          }
         };
         event.track.addEventListener("mute", refresh);
         event.track.addEventListener("unmute", refresh);
@@ -837,6 +854,18 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
             // Mevcut herkesle bağlantı kur. Track ekleme onnegotiationneeded'i tetikleyip offer üretir.
             for (const peer of peers) {
               createPeerConnection(peer.user_id, ws, true);
+              sendWebSocketJson(ws, {
+                type: "video-state",
+                to: peer.user_id,
+                kind: "camera",
+                enabled: Boolean(cameraTrackRef.current),
+              });
+              sendWebSocketJson(ws, {
+                type: "video-state",
+                to: peer.user_id,
+                kind: "screen",
+                enabled: Boolean(screenTrackRef.current),
+              });
             }
             break;
           }
@@ -860,6 +889,18 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
             // Teklif üretme sorumluluğu yeni katılanda. Bu taraf PC'yi cevap vermeye hazırlar;
             // aynı anda iki offer üretilmediği için ses/video m-line'ları karışmaz.
             createPeerConnection(joinedUserId, ws, false);
+            sendWebSocketJson(ws, {
+              type: "video-state",
+              to: joinedUserId,
+              kind: "camera",
+              enabled: Boolean(cameraTrackRef.current),
+            });
+            sendWebSocketJson(ws, {
+              type: "video-state",
+              to: joinedUserId,
+              kind: "screen",
+              enabled: Boolean(screenTrackRef.current),
+            });
             break;
           }
           case "peer-left": {
@@ -937,6 +978,20 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
                 pending.push(candidate);
                 pendingIceRef.current.set(fromId, pending);
               }
+            }
+            break;
+          }
+          case "video-state": {
+            const peerId = data.from as number;
+            const kind = data.kind === "screen" ? "screen" : "camera";
+            const enabled = data.enabled === true;
+            const key = `${peerId}:${kind}`;
+            remoteVideoStateRef.current.set(key, enabled);
+            if (!enabled) {
+              dropRemoteStream(peerId, kind);
+            } else {
+              const stream = remoteMediaRef.current.get(key);
+              if (stream) upsertRemoteStream(peerId, kind, stream);
             }
             break;
           }
@@ -1026,18 +1081,25 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
 
         for (const [peerId, peer] of peersRef.current) {
           const transceiver = kind === "camera" ? peer.cameraTransceiver : peer.screenTransceiver;
-          if (!transceiver) continue;
-          await transceiver.sender.replaceTrack(track);
-          const nextDirection = videoDirection(
-            true,
-            !ignoredRemoteVideoIdsRef.current.has(peerId),
-          );
-          const directionChanged = transceiver.direction !== nextDirection;
-          if (directionChanged) transceiver.direction = nextDirection;
-          await optimizeVideoSender(transceiver.sender, kind, currentSettings);
-          // Normal akışta m-line zaten sendrecv'dir; replaceTrack tek başına yayını başlatır.
-          // Kullanıcı bu eşin videosunu özellikle kapattıysa sendonly'ye geçiş SDP gerektirir.
-          if (directionChanged) peer.requestNegotiation();
+          if (transceiver) {
+            await transceiver.sender.replaceTrack(track);
+            const nextDirection = videoDirection(
+              true,
+              !ignoredRemoteVideoIdsRef.current.has(peerId),
+            );
+            const directionChanged = transceiver.direction !== nextDirection;
+            if (directionChanged) transceiver.direction = nextDirection;
+            await optimizeVideoSender(transceiver.sender, kind, currentSettings);
+            // Normal akışta m-line zaten sendrecv'dir; replaceTrack tek başına yayını başlatır.
+            // Kullanıcı bu eşin videosunu özellikle kapattıysa sendonly'ye geçiş SDP gerektirir.
+            if (directionChanged) peer.requestNegotiation();
+          }
+          sendWebSocketJson(wsRef.current, {
+            type: "video-state",
+            to: peerId,
+            kind,
+            enabled: true,
+          });
         }
       } catch (err) {
         setError(`Video başlatılamadı: ${err instanceof Error ? err.message : String(err)}`);
@@ -1077,19 +1139,26 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       else setLocalScreenStream(null);
       for (const [peerId, peer] of peersRef.current) {
         const transceiver = kind === "camera" ? peer.cameraTransceiver : peer.screenTransceiver;
-        if (!transceiver) continue;
-        // İlk SDP'deki yer tutucu ontrack/MSID'yi hazırladığı için burada null'a dönmek
-        // güvenlidir; uzak track hemen susar, sonraki gerçek track aynı m-line'da devam eder.
-        void transceiver.sender.replaceTrack(null);
-        const nextDirection = videoDirection(
-          false,
-          !ignoredRemoteVideoIdsRef.current.has(peerId),
-        );
-        const directionChanged = transceiver.direction !== nextDirection;
-        if (directionChanged) {
-          transceiver.direction = nextDirection;
-          peer.requestNegotiation();
+        if (transceiver) {
+          // İlk SDP'deki yer tutucu ontrack/MSID'yi hazırladığı için burada null'a dönmek
+          // güvenlidir; sonraki gerçek track aynı m-line'da devam eder.
+          void transceiver.sender.replaceTrack(null);
+          const nextDirection = videoDirection(
+            false,
+            !ignoredRemoteVideoIdsRef.current.has(peerId),
+          );
+          const directionChanged = transceiver.direction !== nextDirection;
+          if (directionChanged) {
+            transceiver.direction = nextDirection;
+            peer.requestNegotiation();
+          }
         }
+        sendWebSocketJson(wsRef.current, {
+          type: "video-state",
+          to: peerId,
+          kind,
+          enabled: false,
+        });
       }
     }
 

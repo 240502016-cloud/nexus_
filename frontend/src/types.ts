@@ -117,8 +117,15 @@ export interface Message {
   hidden?: boolean;
   is_bot?: boolean;
   edited?: boolean;
+  reply_to?: MessageReplyPreview | null;
   // Yalnızca istemci tarafındaki iyimser mesajlarda kullanılır; API snapshot'larında bulunmaz.
   delivery_status?: "sending" | "failed";
+}
+
+export interface MessageReplyPreview {
+  event_id: string;
+  sender: string;
+  content: string;
 }
 
 export interface Attachment {

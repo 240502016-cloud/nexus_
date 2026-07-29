@@ -131,18 +131,33 @@ class MatrixClient:
         if not response.ok:
             raise MatrixError(f"Odadan ayrılamadı: {response.status_code} {response.text}")
 
-    def send_message(self, access_token: str, room_id: str, content: str, txn_id: str | None = None) -> str:
+    def send_message(
+        self,
+        access_token: str,
+        room_id: str,
+        content: str,
+        txn_id: str | None = None,
+        reply_to: dict[str, str] | None = None,
+    ) -> str:
         """Odaya metin mesajı gönderir, event_id döner.
 
         Worker retries can pass a stable transaction ID so Matrix de-duplicates a request that
         timed out after the homeserver accepted it.
         """
         txn_id = txn_id or uuid.uuid4().hex
+        matrix_content: dict = {"msgtype": "m.text", "body": content}
+        if reply_to:
+            matrix_content["m.relates_to"] = {
+                "m.in_reply_to": {"event_id": reply_to["event_id"]},
+            }
+            # Matrix ilişkisi asıl kaynaktır. Kısa snapshot, hedef mesaj mevcut tarih
+            # sayfasının dışında kalsa bile Nexus istemcisinin alıntıyı gösterebilmesini sağlar.
+            matrix_content["io.nexus.reply_preview"] = reply_to
         response = self._request(
             "PUT",
             f"/_matrix/client/v3/rooms/{room_id}/send/m.room.message/{txn_id}",
             headers={"Authorization": f"Bearer {access_token}"},
-            json={"msgtype": "m.text", "body": content},
+            json=matrix_content,
         )
         if not response.ok:
             raise MatrixError(f"Mesaj gönderilemedi: {response.status_code} {response.text}")
@@ -197,6 +212,11 @@ class MatrixClient:
         payload = response.json()
         events = payload.get("chunk", [])
         replacements: dict[str, dict] = {}
+        events_by_id = {
+            event.get("event_id"): event
+            for event in events
+            if isinstance(event.get("event_id"), str)
+        }
         for event in events:
             content = event.get("content", {})
             relation = content.get("m.relates_to", {})
@@ -220,6 +240,35 @@ class MatrixClient:
                 .get("content", {})
             )
             replacement = replacements.get(event["event_id"]) or latest.get("m.new_content") or latest
+            reply_preview = content.get("io.nexus.reply_preview")
+            reply_event_id = (
+                content.get("m.relates_to", {})
+                .get("m.in_reply_to", {})
+                .get("event_id")
+            )
+            if not isinstance(reply_event_id, str):
+                reply_preview = None
+            elif (
+                isinstance(reply_preview, dict)
+                and reply_preview.get("event_id") != reply_event_id
+            ):
+                reply_preview = None
+            if not isinstance(reply_preview, dict) and isinstance(reply_event_id, str):
+                replied_event = events_by_id.get(reply_event_id, {})
+                replied_content = replied_event.get("content", {})
+                if replied_event.get("type") == "m.room.message":
+                    reply_preview = {
+                        "event_id": reply_event_id,
+                        "sender": replied_event.get("sender", ""),
+                        "content": replied_content.get("body", ""),
+                    }
+            if not (
+                isinstance(reply_preview, dict)
+                and isinstance(reply_preview.get("event_id"), str)
+                and isinstance(reply_preview.get("sender"), str)
+                and isinstance(reply_preview.get("content"), str)
+            ):
+                reply_preview = None
             messages.append(
                 {
                     "event_id": event["event_id"],
@@ -227,6 +276,7 @@ class MatrixClient:
                     "content": (replacement or content).get("body", ""),
                     "origin_server_ts": event["origin_server_ts"],
                     "edited": bool(replacement),
+                    "reply_to": reply_preview,
                 }
             )
         next_cursor = payload.get("end")

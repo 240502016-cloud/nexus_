@@ -16,6 +16,27 @@ from app.database import get_db
 router = APIRouter(prefix="/channels/{channel_id}/messages", tags=["messages"])
 
 
+def _reply_preview(
+    access_token: str,
+    room_id: str,
+    event_id: str | None,
+) -> schemas.MessageReplyPreview | None:
+    if not event_id:
+        return None
+    try:
+        event = matrix_client.get_event(access_token, room_id, event_id)
+    except MatrixError as exc:
+        raise HTTPException(status_code=404, detail="Yanıtlanan mesaj bulunamadı") from exc
+    content = event.get("content", {})
+    if event.get("type") != "m.room.message" or not isinstance(content.get("body"), str):
+        raise HTTPException(status_code=422, detail="Bu içeriğe yanıt verilemiyor")
+    return schemas.MessageReplyPreview(
+        event_id=event_id,
+        sender=str(event.get("sender", "")),
+        content=content["body"][:500],
+    )
+
+
 def _get_text_channel(db: Session, channel_id: int) -> Channel:
     channel = db.get(Channel, channel_id)
     if not channel:
@@ -67,6 +88,11 @@ def send_message(
 
     if not current_user.matrix_access_token:
         raise HTTPException(status_code=409, detail="Kullanıcının Matrix hesabı yok")
+    reply_to = _reply_preview(
+        current_user.matrix_access_token,
+        channel.matrix_room_id,
+        payload.reply_to_event_id,
+    )
 
     recipients = {sm.user_id for sm in channel.server.members}
     recipients.add(channel.server.owner_id)
@@ -97,6 +123,7 @@ def send_message(
             channel.matrix_room_id,
             payload.content,
             txn_id=payload.client_id,
+            reply_to=reply_to.model_dump() if reply_to else None,
         )
     except MatrixError as exc:
         if not is_not_in_room_error(exc):
@@ -111,6 +138,7 @@ def send_message(
                 channel.matrix_room_id,
                 payload.content,
                 txn_id=payload.client_id,
+                reply_to=reply_to.model_dump() if reply_to else None,
             )
         except MatrixError as retry_exc:
             raise HTTPException(
@@ -124,6 +152,7 @@ def send_message(
         content=payload.content,
         origin_server_ts=None,
         client_id=payload.client_id,
+        reply_to=reply_to,
     )
 
     # Kullanıcı mesajını bot işlemlerini bekletmeden tüm istemcilere aktar. İstemci doğrudan

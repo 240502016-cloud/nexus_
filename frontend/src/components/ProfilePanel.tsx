@@ -41,7 +41,12 @@ function mergeMessage(current: Message[], incoming: Message): Message[] {
   if (current.some((item) => item.event_id === incoming.event_id)) {
     return current.map((item) =>
       item.event_id === incoming.event_id
-        ? { ...item, ...incoming, delivery_status: undefined }
+        ? {
+            ...item,
+            ...incoming,
+            reply_to: incoming.reply_to ?? item.reply_to,
+            delivery_status: undefined,
+          }
         : item,
     );
   }
@@ -74,6 +79,7 @@ export function ProfilePanel({
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [draft, setDraft] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [search, setSearch] = useState("");
   const [searchResults, setSearchResults] = useState<PublicUser[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -138,6 +144,7 @@ export function ProfilePanel({
   }, [search]);
 
   useEffect(() => {
+    setReplyingTo(null);
     if (!selectedConversationId) {
       setMessages([]);
       return;
@@ -261,6 +268,7 @@ export function ProfilePanel({
       }
     }
     const id = clientId();
+    const replyTarget = replyingTo;
     const optimistic: Message = {
       event_id: `pending-${id}`,
       sender: currentUser.matrix_user_id ?? `@${currentUser.username}:nexus`,
@@ -268,9 +276,15 @@ export function ProfilePanel({
       origin_server_ts: Date.now(),
       client_id: id,
       delivery_status: "sending",
+      reply_to: replyTarget ? {
+        event_id: replyTarget.event_id,
+        sender: replyTarget.sender,
+        content: replyTarget.content,
+      } : null,
     };
     setDraft("");
     setSelectedFile(null);
+    setReplyingTo(null);
     requestAnimationFrame(() => resizeComposer());
     setMessages((current) => mergeMessage(current, optimistic));
     requestAnimationFrame(() => {
@@ -278,7 +292,12 @@ export function ProfilePanel({
       if (container) container.scrollTop = container.scrollHeight;
     });
     try {
-      const sent = await coreApi.sendDirectMessage(selectedConversationId, outgoingContent, id);
+      const sent = await coreApi.sendDirectMessage(
+        selectedConversationId,
+        outgoingContent,
+        id,
+        replyTarget?.event_id,
+      );
       setMessages((current) => mergeMessage(current, sent));
     } catch (err) {
       setMessages((current) =>
@@ -512,13 +531,26 @@ export function ProfilePanel({
                             className={own ? "direct-message direct-message--own" : "direct-message"}
                           >
                             <small>{own ? "Sen" : selectedConversation.friend.username}</small>
+                            {message.reply_to ? (
+                              <div className="message-reply-quote message-reply-quote--static">
+                                <strong>
+                                  {message.reply_to.sender === currentUser.matrix_user_id
+                                    ? "Sen"
+                                    : selectedConversation.friend.username}
+                                </strong>
+                                <span>{message.reply_to.content || "(silindi)"}</span>
+                              </div>
+                            ) : null}
                             {parseAttachmentMessage(message.content) ? (
                               <AttachmentCard {...parseAttachmentMessage(message.content)!} />
                             ) : (
                               <span>{message.content}{message.edited ? <small> (düzenlendi)</small> : null}</span>
                             )}
-                            {own && !message.delivery_status ? (
-                              <button className="direct-message__edit" type="button" onClick={() => void editDirectMessage(message)} title="Mesajı düzenle"><Icon name="edit" /></button>
+                            {!message.delivery_status ? (
+                              <div className="direct-message__actions">
+                                <button type="button" onClick={() => { setReplyingTo(message); requestAnimationFrame(() => dmComposerRef.current?.focus()); }} title="Yanıtla"><Icon name="reply" /></button>
+                                {own ? <button type="button" onClick={() => void editDirectMessage(message)} title="Mesajı düzenle"><Icon name="edit" /></button> : null}
+                              </div>
                             ) : null}
                             {message.delivery_status ? <em>{message.delivery_status === "sending" ? "Gönderiliyor…" : "Gönderilemedi"}</em> : null}
                           </div>
@@ -526,6 +558,16 @@ export function ProfilePanel({
                       })}
                     </div>
                     <form className="direct-chat__composer" onSubmit={sendDirect}>
+                      {replyingTo ? (
+                        <div className="composer-reply-preview">
+                          <Icon name="reply" />
+                          <div>
+                            <strong>{replyingTo.sender === currentUser.matrix_user_id ? "Kendine" : `${selectedConversation.friend.username} kullanıcısına`} yanıt</strong>
+                            <span>{replyingTo.content || "(silindi)"}</span>
+                          </div>
+                          <button type="button" onClick={() => setReplyingTo(null)} aria-label="Yanıtı iptal et"><Icon name="close" /></button>
+                        </div>
+                      ) : null}
                       <input id="direct-file-input" className="visually-hidden" type="file" onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)} />
                       <label htmlFor="direct-file-input" className="composer-icon-button"><Icon name="paperclip" /></label>
                       {selectedFile ? <span className="direct-chat__selected-file">{selectedFile.name}<button type="button" onClick={() => setSelectedFile(null)}><Icon name="close" /></button></span> : null}

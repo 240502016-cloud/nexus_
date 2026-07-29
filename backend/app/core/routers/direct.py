@@ -13,6 +13,7 @@ from app.core.matrix_rooms import invite_and_join, is_not_in_room_error, repair_
 from app.core.models import Friendship, User
 from app.core.routers.gateway import notify_direct_message
 from app.database import get_db
+from app.core.routers.messages import _reply_preview
 
 router = APIRouter(prefix="/direct", tags=["direct-messages"])
 
@@ -140,12 +141,18 @@ def send_direct_message(
     room_id = _ensure_room(db, friendship, current_user)
     if not current_user.matrix_access_token or not current_user.matrix_user_id:
         raise HTTPException(status_code=409, detail="Kullanıcının Matrix hesabı yok")
+    reply_to = _reply_preview(
+        current_user.matrix_access_token,
+        room_id,
+        payload.reply_to_event_id,
+    )
     try:
         event_id = matrix_client.send_message(
             current_user.matrix_access_token,
             room_id,
             payload.content,
             txn_id=payload.client_id or uuid.uuid4().hex,
+            reply_to=reply_to.model_dump() if reply_to else None,
         )
     except MatrixError as exc:
         if not is_not_in_room_error(exc):
@@ -160,6 +167,7 @@ def send_direct_message(
                 room_id,
                 payload.content,
                 txn_id=payload.client_id or uuid.uuid4().hex,
+                reply_to=reply_to.model_dump() if reply_to else None,
             )
         except MatrixError as retry_exc:
             raise HTTPException(
@@ -172,6 +180,7 @@ def send_direct_message(
         sender=current_user.matrix_user_id,
         content=payload.content,
         client_id=payload.client_id,
+        reply_to=reply_to,
     )
     friend = friendship.other_user(current_user.id)
     notify_direct_message(

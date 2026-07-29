@@ -121,14 +121,12 @@ export function VideoStage({
   voice,
   onLeave,
   onHide,
-  qualityLabel,
 }: {
   currentUser: User;
   participants: VoiceParticipant[];
   voice: VoiceChannelState;
   onLeave: () => void;
   onHide: () => void;
-  qualityLabel: string;
 }) {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -218,6 +216,20 @@ export function VideoStage({
     else await stageRef.current.requestFullscreen();
   }
 
+  async function hideStage() {
+    if (document.fullscreenElement === stageRef.current) {
+      await document.exitFullscreen().catch(() => {});
+    }
+    onHide();
+  }
+
+  async function leaveStage() {
+    if (document.fullscreenElement === stageRef.current) {
+      await document.exitFullscreen().catch(() => {});
+    }
+    onLeave();
+  }
+
   function renderTile(tile: StageTile, focused = false) {
     const { key, ...mediaTile } = tile;
     return (
@@ -242,29 +254,25 @@ export function VideoStage({
       ].filter(Boolean).join(" ")}
       ref={stageRef}
     >
-      <header className="video-stage__header">
-        <div className="video-stage__identity">
-          <span className="video-stage__identity-icon"><Icon name={broadcastTile ? "screen" : "volume"} /></span>
-          <div>
-            <span className="video-stage__eyebrow">{broadcastTile ? "CANLI YAYIN" : "SESLİ SAHNE"}</span>
-            <strong>{focusedTile?.name || broadcastTile?.name || `${tiles.length} katılımcı`}</strong>
-          </div>
-          {broadcastTile ? <span className="video-stage__live-badge">YAYINDA</span> : null}
-        </div>
-        <div className="video-stage__status">
-          <span className="video-stage__viewers"><Icon name="users" />{Math.max(participants.length + 1, 1)} kişi</span>
-          <span className="video-stage__quality"><span className="video-stage__live-dot" />{qualityLabel}</span>
-          <button
-            type="button"
-            className="video-stage__fullscreen"
-            onClick={() => void toggleFullscreen()}
-            title={isFullscreen ? "Tam ekrandan çık" : "Tam ekran"}
-            aria-label={isFullscreen ? "Tam ekrandan çık" : "Tam ekran"}
-          >
-            <Icon name="screen" />
-          </button>
-        </div>
-      </header>
+      <div
+        className={isFullscreen
+          ? "video-stage__overlay-controls video-stage__overlay-controls--full"
+          : "video-stage__overlay-controls"}
+        aria-label="Sahne kontrolleri"
+        onClick={(event) => event.stopPropagation()}
+      >
+        {isFullscreen ? (
+          <>
+            <button className={voice.muted ? "stage-control stage-control--danger" : "stage-control"} onClick={voice.toggleMute} title={voice.muted ? "Sesi aç" : "Sustur"}><Icon name={voice.muted ? "micOff" : "mic"} /><span>{voice.muted ? "Sesi aç" : "Sustur"}</span></button>
+            <button className={voice.deafened ? "stage-control stage-control--danger" : "stage-control"} onClick={voice.toggleDeafen} title={voice.deafened ? "Dinle" : "Sağırlaştır"}><Icon name={voice.deafened ? "headphonesOff" : "headphones"} /><span>{voice.deafened ? "Dinle" : "Sağırlaştır"}</span></button>
+            <button className={voice.cameraEnabled ? "stage-control stage-control--active" : "stage-control"} onClick={voice.toggleCamera} title="Kamera"><Icon name="camera" /><span>Kamera</span></button>
+            <button className={voice.screenShareEnabled ? "stage-control stage-control--active" : "stage-control"} onClick={voice.toggleScreenShare} title="Ekran paylaş"><Icon name="screen" /><span>Paylaş</span></button>
+          </>
+        ) : null}
+        <button className="stage-control" onClick={() => void hideStage()} title="Sahneyi gizle"><Icon name="hash" /><span>Sahneyi gizle</span></button>
+        <button className="stage-control" onClick={() => void toggleFullscreen()} title={isFullscreen ? "Tam ekrandan çık" : "Tam ekran"}><Icon name="screen" /><span>{isFullscreen ? "Küçült" : "Tam ekran"}</span></button>
+        {isFullscreen ? <button className="stage-control stage-control--leave" onClick={() => void leaveStage()} title="Ses kanalından ayrıl"><Icon name="phone" /><span>Ayrıl</span></button> : null}
+      </div>
       {focusedTile ? (
         <div className="voice-focus-layout">
           {renderTile(focusedTile, true)}
@@ -285,15 +293,6 @@ export function VideoStage({
           {tiles.map((tile) => renderTile(tile))}
         </div>
       )}
-      <div className="video-stage__controls" aria-label="Görüşme kontrolleri">
-        <button className={voice.muted ? "stage-control stage-control--danger" : "stage-control"} onClick={voice.toggleMute}><Icon name={voice.muted ? "micOff" : "mic"} /><span>{voice.muted ? "Sesi aç" : "Sustur"}</span></button>
-        <button className={voice.deafened ? "stage-control stage-control--danger" : "stage-control"} onClick={voice.toggleDeafen}><Icon name={voice.deafened ? "headphonesOff" : "headphones"} /><span>{voice.deafened ? "Dinle" : "Sağırlaştır"}</span></button>
-        <button className={voice.cameraEnabled ? "stage-control stage-control--active" : "stage-control"} onClick={voice.toggleCamera}><Icon name="camera" /><span>Kamera</span></button>
-        <button className={voice.screenShareEnabled ? "stage-control stage-control--active" : "stage-control"} onClick={voice.toggleScreenShare}><Icon name="screen" /><span>Paylaş</span></button>
-        <button className="stage-control" onClick={onHide}><Icon name="hash" /><span>Sahneyi gizle</span></button>
-        <button className="stage-control" onClick={() => void toggleFullscreen()}><Icon name="screen" /><span>{isFullscreen ? "Küçült" : "Tam ekran"}</span></button>
-        <button className="stage-control stage-control--leave" onClick={onLeave}><Icon name="phone" /><span>Ayrıl</span></button>
-      </div>
     </section>
   );
 }

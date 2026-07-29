@@ -210,10 +210,19 @@ export const coreApi = {
       `/direct/conversations/${conversationId}/messages?${params.toString()}`,
     );
   },
-  sendDirectMessage: (conversationId: number, content: string, clientId: string) =>
+  sendDirectMessage: (
+    conversationId: number,
+    content: string,
+    clientId: string,
+    replyToEventId?: string,
+  ) =>
     request<Message>(`/direct/conversations/${conversationId}/messages`, {
       method: "POST",
-      body: JSON.stringify({ content, client_id: clientId }),
+      body: JSON.stringify({
+        content,
+        client_id: clientId,
+        reply_to_event_id: replyToEventId,
+      }),
     }),
   editDirectMessage: (conversationId: number, eventId: string, content: string) =>
     request<Message>(
@@ -302,10 +311,19 @@ export const coreApi = {
     if (cursor) params.set("cursor", cursor);
     return request<MessagePage>(`/channels/${channelId}/messages?${params.toString()}`);
   },
-  sendMessage: (channelId: number, content: string, clientId: string) =>
+  sendMessage: (
+    channelId: number,
+    content: string,
+    clientId: string,
+    replyToEventId?: string,
+  ) =>
     request<Message>(`/channels/${channelId}/messages`, {
       method: "POST",
-      body: JSON.stringify({ content, client_id: clientId }),
+      body: JSON.stringify({
+        content,
+        client_id: clientId,
+        reply_to_event_id: replyToEventId,
+      }),
     }),
   deleteMessage: (channelId: number, eventId: string) =>
     request<void>(`/channels/${channelId}/messages/${encodeURIComponent(eventId)}`, { method: "DELETE" }),

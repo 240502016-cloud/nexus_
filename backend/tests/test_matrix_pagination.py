@@ -32,6 +32,41 @@ class FakeResponse:
 
 
 class MatrixPaginationTests(unittest.TestCase):
+    def test_send_message_uses_matrix_reply_relation_and_preview(self):
+        client = MatrixClient(base_url="http://matrix.invalid", shared_secret="test")
+        captured = {}
+
+        class SendResponse(FakeResponse):
+            def json(self):
+                return {"event_id": "$reply"}
+
+        def fake_request(method, path, **kwargs):
+            captured.update({"method": method, "path": path, **kwargs})
+            return SendResponse()
+
+        client._request = fake_request  # type: ignore[method-assign]
+        event_id = client.send_message(
+            "token",
+            "!room:nexus",
+            "yanıt",
+            txn_id="reply-transaction",
+            reply_to={
+                "event_id": "$original",
+                "sender": "@aylin:nexus",
+                "content": "ilk mesaj",
+            },
+        )
+
+        self.assertEqual(event_id, "$reply")
+        self.assertEqual(
+            captured["json"]["m.relates_to"],
+            {"m.in_reply_to": {"event_id": "$original"}},
+        )
+        self.assertEqual(
+            captured["json"]["io.nexus.reply_preview"]["content"],
+            "ilk mesaj",
+        )
+
     def test_cursor_is_forwarded_and_redacted_events_are_filtered(self):
         client = MatrixClient(base_url="http://matrix.invalid", shared_secret="test")
         captured = {}
@@ -84,6 +119,48 @@ class MatrixPaginationTests(unittest.TestCase):
         self.assertEqual(page["items"][0]["event_id"], "$original")
         self.assertEqual(page["items"][0]["content"], "düzenlendi")
         self.assertTrue(page["items"][0]["edited"])
+
+    def test_reply_preview_is_resolved_from_the_same_history_page(self):
+        client = MatrixClient(base_url="http://matrix.invalid", shared_secret="test")
+
+        class ReplyResponse(FakeResponse):
+            def json(self):
+                return {
+                    "chunk": [
+                        {
+                            "event_id": "$reply",
+                            "sender": "@berk:nexus",
+                            "type": "m.room.message",
+                            "origin_server_ts": 3,
+                            "content": {
+                                "body": "katılıyorum",
+                                "m.relates_to": {
+                                    "m.in_reply_to": {"event_id": "$original"},
+                                },
+                            },
+                        },
+                        {
+                            "event_id": "$original",
+                            "sender": "@aylin:nexus",
+                            "type": "m.room.message",
+                            "origin_server_ts": 2,
+                            "content": {"body": "ilk mesaj"},
+                        },
+                    ],
+                    "end": None,
+                }
+
+        client._request = lambda *_args, **_kwargs: ReplyResponse()  # type: ignore[method-assign]
+        page = client.get_message_page("token", "!room:nexus")
+
+        self.assertEqual(
+            page["items"][0]["reply_to"],
+            {
+                "event_id": "$original",
+                "sender": "@aylin:nexus",
+                "content": "ilk mesaj",
+            },
+        )
 
 
 if __name__ == "__main__":

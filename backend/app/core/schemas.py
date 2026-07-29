@@ -180,10 +180,17 @@ class MessageCreate(BaseModel):
     # İstemcinin iyimser mesajını Matrix event'iyle güvenle eşleştirir ve aynı isteğin
     # ağ hatasında yinelenmesi halinde Matrix transaction de-duplication anahtarı olur.
     client_id: str | None = Field(default=None, min_length=8, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    reply_to_event_id: str | None = Field(default=None, min_length=1, max_length=512)
 
 
 class MessageEdit(BaseModel):
     content: str = Field(min_length=1, max_length=20000)
+
+
+class MessageReplyPreview(BaseModel):
+    event_id: str
+    sender: str
+    content: str
 
 
 class MessageRead(BaseModel):
@@ -194,6 +201,7 @@ class MessageRead(BaseModel):
     client_id: str | None = None
     is_bot: bool = False
     edited: bool = False
+    reply_to: MessageReplyPreview | None = None
     # Özel bot komutları (örn. gizli oyun hamlesi) Matrix'e yazılmaz. İstemci bu yanıtı
     # alınca iyimser komut balonunu kaldırır.
     hidden: bool = False

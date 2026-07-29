@@ -345,6 +345,58 @@ class SocialFlowTests(unittest.TestCase):
         self.assertEqual(send_matrix_message.call_count, 2)
         repair_membership.assert_called_once_with("!repair:test", self.alice, self.bob)
 
+    @patch("app.core.routers.messages.handle_message_event", return_value=[])
+    @patch("app.core.routers.messages.matrix_client.send_message", return_value="$reply")
+    @patch(
+        "app.core.routers.messages.matrix_client.get_event",
+        return_value={
+            "event_id": "$original",
+            "type": "m.room.message",
+            "sender": "@alice:test",
+            "content": {"body": "ilk mesaj"},
+        },
+    )
+    def test_channel_reply_is_validated_and_returned(
+        self,
+        _get_event,
+        send_matrix_message,
+        _handle_message_event,
+    ):
+        server = Server(name="Reply", owner_id=self.alice.id)
+        self.db.add(server)
+        self.db.flush()
+        self.db.add(ServerMember(user_id=self.bob.id, server_id=server.id))
+        channel = Channel(
+            server_id=server.id,
+            name="genel",
+            type=ChannelType.TEXT,
+            matrix_room_id="!reply:test",
+        )
+        self.db.add(channel)
+        self.db.commit()
+
+        result = send_message(
+            channel.id,
+            schemas.MessageCreate(
+                content="katılıyorum",
+                client_id="client_reply",
+                reply_to_event_id="$original",
+            ),
+            current_user=self.bob,
+            db=self.db,
+        )
+
+        self.assertEqual(result.reply_to.event_id, "$original")
+        self.assertEqual(result.reply_to.content, "ilk mesaj")
+        self.assertEqual(
+            send_matrix_message.call_args.kwargs["reply_to"],
+            {
+                "event_id": "$original",
+                "sender": "@alice:test",
+                "content": "ilk mesaj",
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -46,7 +46,12 @@ function mergeIncomingMessage(current: Message[], incoming: Message): Message[] 
   if (current.some((message) => message.event_id === incoming.event_id)) {
     return current.map((message) =>
       message.event_id === incoming.event_id
-        ? { ...message, ...incoming, delivery_status: undefined }
+        ? {
+            ...message,
+            ...incoming,
+            reply_to: incoming.reply_to ?? message.reply_to,
+            delivery_status: undefined,
+          }
         : message,
     );
   }
@@ -772,7 +777,7 @@ export default function App() {
     if (call) joinVoiceChannel(call.serverId, call.channelId);
   }
 
-  async function handleSendMessage(content: string, file?: File) {
+  async function handleSendMessage(content: string, file?: File, replyTo?: Message) {
     if (!activeChannelId) return;
     const channelId = activeChannelId;
     let outgoingContent = content;
@@ -793,10 +798,20 @@ export default function App() {
       origin_server_ts: Date.now(),
       client_id: clientId,
       delivery_status: "sending",
+      reply_to: replyTo ? {
+        event_id: replyTo.event_id,
+        sender: replyTo.sender,
+        content: replyTo.content,
+      } : null,
     };
     setMessages((current) => mergeIncomingMessage(current, optimistic));
     try {
-      const sent = await coreApi.sendMessage(channelId, outgoingContent, clientId);
+      const sent = await coreApi.sendMessage(
+        channelId,
+        outgoingContent,
+        clientId,
+        replyTo?.event_id,
+      );
       if (activeChannelIdRef.current === channelId) {
         setMessages((current) =>
           sent.hidden
@@ -853,9 +868,18 @@ export default function App() {
     }
   }
 
-  function handleRetryMessage(clientId: string, content: string) {
+  function handleRetryMessage(clientId: string, content: string, replyTo?: Message["reply_to"]) {
     setMessages((current) => current.filter((message) => message.client_id !== clientId));
-    void handleSendMessage(content);
+    void handleSendMessage(
+      content,
+      undefined,
+      replyTo ? {
+        event_id: replyTo.event_id,
+        sender: replyTo.sender,
+        content: replyTo.content,
+        origin_server_ts: null,
+      } : undefined,
+    );
   }
 
   async function handleDeleteMessage(eventId: string) {
@@ -992,7 +1016,6 @@ export default function App() {
           currentUser={user}
           participants={voice.participants}
           voice={voice}
-          qualityLabel={`${voiceSettings.videoQuality} · ${voiceSettings.videoFrameRate} FPS`}
           onHide={() => setVoiceStageVisible(false)}
           onLeave={() => {
             if (activeVoiceChannelId) handleToggleVoice(activeVoiceChannelId);

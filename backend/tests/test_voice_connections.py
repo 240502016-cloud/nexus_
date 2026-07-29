@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from app.config import settings
 from app.core.models import User
-from app.core.routers.voice import VoiceConnectionManager, voice_ice_servers
+from app.core.routers.voice import VoiceConnectionManager, _video_state_payload, voice_ice_servers
 
 
 class VoiceConnectionManagerTests(unittest.IsolatedAsyncioTestCase):
@@ -48,6 +48,30 @@ class VoiceConnectionManagerTests(unittest.IsolatedAsyncioTestCase):
                 {"urls": "stun:stun.cloudflare.com:3478"},
                 {"urls": "stun:stun.l.google.com:19302"},
             ],
+        )
+
+    def test_video_state_signal_is_strictly_validated(self):
+        self.assertEqual(
+            _video_state_payload(
+                {"type": "video-state", "to": 8, "kind": "camera", "enabled": False},
+                3,
+            ),
+            (
+                8,
+                {"type": "video-state", "from": 3, "kind": "camera", "enabled": False},
+            ),
+        )
+        self.assertIsNone(
+            _video_state_payload(
+                {"type": "video-state", "to": 8, "kind": "camera", "enabled": "false"},
+                3,
+            )
+        )
+        self.assertIsNone(
+            _video_state_payload(
+                {"type": "video-state", "to": 8, "kind": "microphone", "enabled": False},
+                3,
+            )
         )
 
 

@@ -183,6 +183,25 @@ async def notify_voice_state(channel_id: int, recipients: set[int] | None = None
     await _notify_voice_state(channel_id, recipients)
 
 
+def _video_state_payload(data: dict, user_id: int) -> tuple[int, dict] | None:
+    """Kamera/yayın durum sinyalini bir eşe aktarmadan önce doğrula."""
+    target = data.get("to")
+    kind = data.get("kind")
+    enabled = data.get("enabled")
+    if (
+        not isinstance(target, int)
+        or kind not in ("camera", "screen")
+        or not isinstance(enabled, bool)
+    ):
+        return None
+    return target, {
+        "type": "video-state",
+        "from": user_id,
+        "kind": kind,
+        "enabled": enabled,
+    }
+
+
 router = APIRouter(tags=["voice"])
 
 
@@ -303,6 +322,11 @@ async def voice_socket(websocket: WebSocket, channel_id: int, token: str = Query
                 if isinstance(target, int):
                     payload = {k: v for k, v in data.items() if k != "to"}
                     payload["from"] = user_id
+                    await voice_manager.send_to(channel_id, target, payload)
+            elif msg_type == "video-state":
+                relay = _video_state_payload(data, user_id)
+                if relay:
+                    target, payload = relay
                     await voice_manager.send_to(channel_id, target, payload)
             elif msg_type == "mute":
                 muted = bool(data.get("muted"))
