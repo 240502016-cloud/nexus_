@@ -118,7 +118,14 @@ origin  https://github.com/240502016-cloud/nexus_.git
 cekingen
 ```
 
-### Son doğrulanan commit
+### Güncel commit ve bu paket öncesi taban
+
+```text
+git log -1 --oneline
+```
+
+Bu belge commit'in içinde yaşadığı için güncel commit hash'i burada sabitlenmez; yukarıdaki komut
+tek doğruluk kaynağıdır. Bu düzeltme paketinden önceki taban:
 
 ```text
 1bc6c43 Add advanced voice messaging and workspace tools
