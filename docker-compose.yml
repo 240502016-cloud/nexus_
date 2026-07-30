@@ -221,6 +221,28 @@ services:
     cpus: 1.5
     mem_limit: 1g
 
+  media-storage-init:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: nexus-backend:0.1.0
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "chown nexus:nexus /srv/avatars /srv/attachments"
+    network_mode: none
+    volumes:
+      - avatar_data:/srv/avatars
+      - attachment_data:/srv/attachments
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+    restart: "no"
+
   backend:
     build:
       context: .
@@ -242,6 +264,8 @@ services:
       matrix:
         condition: service_healthy
       migrate:
+        condition: service_completed_successfully
+      media-storage-init:
         condition: service_completed_successfully
       plugin-sandbox:
         condition: service_healthy

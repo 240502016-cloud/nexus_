@@ -6,7 +6,7 @@
 > içerebilir; güncel gerçeklik için öncelik sırası **kaynak kod → bu dosya → güncel deployment
 > belgeleri → eski yol haritaları** olmalıdır.
 
-Son güncelleme: **29 Temmuz 2026**
+Son güncelleme: **30 Temmuz 2026**
 
 ---
 
@@ -118,16 +118,15 @@ origin  https://github.com/240502016-cloud/nexus_.git
 cekingen
 ```
 
-### Bu geliştirme paketinin taban HEAD'i
+### Son doğrulanan commit
 
 ```text
-f34e1ec72c8f058db2b1d758b8fc83a8de843153
-f34e1ec Add message replies and polish media stage
+1bc6c43 Add advanced voice messaging and workspace tools
 ```
 
-29–30 Temmuz 2026 tarihli ses, mesajlaşma, kurulum kontrolü ve profesyonel UI geliştirmeleri
-bu tabanın üzerinde tek teslim paketi olarak birleştirilmiştir. Koda devam etmeden önce yeniden
-`git status --short --branch` ve `git log -1 --oneline` çalıştırılmalıdır.
+30 Temmuz 2026 tarihli üyeler paneli stabilizasyonu, composer/attachment storage onarımları,
+kompakt mesaj gruplama ve ses oynatma dayanıklılığı bu tabanın üzerine hazırlanmıştır. Koda devam
+etmeden önce yeniden `git status --short --branch` ve `git log -1 --oneline` çalıştırılmalıdır.
 
 ### Yakın dönem önemli commitler
 
@@ -602,8 +601,9 @@ Core veritabanında tutulur.
 ### Üye görünümü
 
 - Eski büyük/tekrarlı kullanıcı görünümü kaldırılmıştır.
-- Sunucudaki insan üyeler, sunucu şeridi ile kanal listesi arasında solda açılıp kapanabilen
-  kompakt panelde gösterilir.
+- Sunucudaki insan üyeler geniş masaüstünde sağdaki sabit grid kolonunda gösterilir.
+- Daha dar masaüstü ve yüksek zoom durumunda panel sağdan overlay olarak açılır; sol rail, kanal
+  paneli, toolbar, sahne ve chat koordinatlarını değiştirmez.
 - Botlar insan üye listesinden ayrıdır.
 - Küçük sunucular hedeflenmiştir; çoğunlukla 7–8 insan kullanıcı beklenir.
 - Durum noktaları çevrimiçi/boşta/rahatsız etmeyin/görünmez durumlarını gösterir.
@@ -736,6 +736,18 @@ https://cekin.gen.tr/?invite=<kod>
 - Shift+Enter aynı mesaj içinde yeni satır açar.
 - Textarea içeriğe göre dinamik büyür.
 - En fazla yaklaşık sekiz satır görünür; sonrasında textarea kendi içinde kaydırılır.
+- Mouse ile manuel textarea resize kapalıdır; içerik boşalınca uzun placeholder metninden
+  etkilenmeden tek satırlık minimum yüksekliğe döner.
+
+### Mesaj yüzeyi ve görsel gruplama
+
+- Kanal adı zaten birleşik üst barda bulunduğu için mesaj listesinin üzerindeki ikinci `Chat`
+  başlık bloğu kaldırılmıştır; boşalan alan doğrudan mesaj listesine kalır.
+- Aynı gönderenin beş dakika içinde, aynı takvim gününde gönderdiği ardışık düz metin mesajları
+  yalnız görsel olarak gruplanır. Kullanıcı adı ve saat yalnız grubun ilk mesajında gösterilir.
+- Gönderen veya gün değişimi, beş dakikayı aşan süre, bot/oyun mesajı, reply ve attachment yeni
+  görsel grup başlatır. Matrix event kimlikleri ve ayrı reaction/edit/delete/pin aksiyonları
+  birleştirilmez; F5 ve lazy history sonrasında aynı hesap yeniden yapılır.
 
 ### Dosya ve fotoğraf
 
@@ -744,6 +756,12 @@ https://cekin.gen.tr/?invite=<kod>
 - Dosyalar `attachment_data` Docker volume'unda kalıcı tutulur.
 - Resimler lazy-load önizlenir.
 - Diğer dosyalar güvenli indirme kartı olarak gösterilir.
+- Backend image hem `/srv/avatars` hem `/srv/attachments` dizinini `nexus` kullanıcısına ait
+  oluşturur. Tek seferlik `media-storage-init` Compose işi mevcut root sahipli volume dizinlerini
+  veri silmeden düzeltir.
+- Kanal ve özel mesaj file input'ları seçimden sonra temizlenir; aynı dosya yeniden seçilebilir.
+  Kanal yüklemesi attachment oluşturulmadan başarısız olursa açıklama, yanıt hedefi ve seçili dosya
+  composer'a geri yüklenir.
 
 ### Spam/rate limit
 
@@ -824,6 +842,11 @@ Durum ve özel durum ana araç çubuğundan kaldırılmış, Ayarlar'a taşınm�
 - Görüşme sırasında mikrofon değişimi `replaceTrack` ile bağlantı kesmeden yapılır.
 - Mikrofon seviye testi seçili cihazı, giriş seviyesini ve tarayıcı ses işleme tercihlerini
   dikkate alır; kamera önizleme ve hoparlör test sesi de vardır.
+- Giden ve uzak Web Audio context'leri tarayıcı tarafından suspend edilirse görünürlük veya bir
+  sonraki gerçek kullanıcı etkileşiminde yeniden çalıştırılır. Uzak `audio.play()` autoplay
+  engeline takılırsa hata sessizce yutulmaz; kullanıcıya sayfaya tıklama yönlendirmesi gösterilir.
+- Reconnect sırasında mevcut işlenmiş mikrofon track'i kullanılmadan önce giden mikser yeniden
+  çalıştırılır. Audio/camera/screen transceiver sırası ve m-line sayısı değiştirilmez.
 
 ### Push-to-talk
 
@@ -915,6 +938,9 @@ The order of m-lines in subsequent offer doesn't match order from previous offer
   yük bindirmez. Dosya tipi sınırlandırılmış, üst sınır 2 MB ve oynatma süresi 12 saniyedir.
 - Soundboard, mikrofon ve varsa ekran sesi mevcut tek WebRTC audio m-line'ında Web Audio ile
   karıştırılır; yeni servis veya ikinci signaling akışı yoktur.
+- Soundboard gain çıkışı hem mevcut giden miksere hem ayrı yerel monitor stream'ine bağlanır.
+  Yerel monitor seçili hoparlör ve genel çıkış seviyesini kullanır; böylece efekti başlatan
+  kullanıcı da sesi duyar, uzak kullanıcıya giden track ise aynı mevcut audio sender'da kalır.
 - Mikrofon mute yalnız mikrofon gain'ini kapatır; soundboard'un ayrı mute/seviye ayarı ve bilinçli
   ekran sesi paylaşımı korunur. Deafen açıkken soundboard oynatılamaz.
 - Soundboard paneli `document.body` portalında açılır; sidebar overflow/blur katmanları tarafından
@@ -980,9 +1006,9 @@ The order of m-lines in subsequent offer doesn't match order from previous offer
 ### Yerleşim
 
 - En solda hover/focus ile açılan sunucu şeridi.
-- Yanında solda kompakt sunucu üye paneli.
-- Kanal listesi.
+- Yanında kanal listesi.
 - Ortada medya sahnesi ve metin sohbeti.
+- Geniş ekranda sağda sabit üye kolonu; dar görünümde ana workspace'i kaydırmayan üye overlay'i.
 - Sağ/katman olarak ayarlar veya sunucu yönetimi gerektiğinde açılır.
 - Kullanılmayan eski/tekrarlı paneller kaldırılmalıdır.
 
@@ -1856,6 +1882,14 @@ AI kapalıysa mesajlaşma/ses/web uygulaması yine çalışmalıdır.
 - Mesaj geliştirmeleri Matrix kalıcılığını koruyarak reaksiyon, mention, unread sayaçları,
   typing, arama ve pin ekler. Kanal AI özeti/akıllı arama mevcut AI worker kuyruğunu kullanır.
 - Salt okunur SetupCheck kurulum öncesi port, DB, migration, tunnel/DNS ve AI durumunu raporlar.
+- Üyeler paneli grid satırları sabitlenmiştir; panel açıldığında workspace'in ikinci satıra
+  düşmesine neden olan CSS auto-placement hatası giderilmiştir.
+- Attachment volume sahipliği onarılmış, aynı dosyayı yeniden seçme ve başarısız yüklemede
+  composer durumunu koruma akışı eklenmiştir.
+- Bağımsız `Chat` başlığı kaldırılmış; ardışık düz mesajlar beş dakikalık pencereyle yalnız görsel
+  olarak gruplanmış, zengin mesajlar ve ayrı Matrix event aksiyonları korunmuştur.
+- Soundboard artık hem yerel seçili çıkışa hem mevcut WebRTC miksine bağlanır. Askıya alınan Web
+  Audio ve engellenen uzak autoplay akışları kullanıcı etkileşiminde güvenle yeniden başlatılır.
 - Yerel testler güncel HEAD'de başarılıdır:
   - backend 46/46,
   - AI Gateway 9/9,

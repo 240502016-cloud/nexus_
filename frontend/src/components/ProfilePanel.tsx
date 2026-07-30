@@ -90,6 +90,11 @@ export function ProfilePanel({
 
   function resizeComposer(element = dmComposerRef.current) {
     if (!element) return;
+    if (!element.value) {
+      element.style.height = "";
+      element.style.overflowY = "hidden";
+      return;
+    }
     element.style.height = "auto";
     const lineHeight = Number.parseFloat(getComputedStyle(element).lineHeight) || 22;
     const max = lineHeight * 8 + 24;
@@ -568,7 +573,15 @@ export function ProfilePanel({
                           <button type="button" onClick={() => setReplyingTo(null)} aria-label="Yanıtı iptal et"><Icon name="close" /></button>
                         </div>
                       ) : null}
-                      <input id="direct-file-input" className="visually-hidden" type="file" onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)} />
+                      <input
+                        id="direct-file-input"
+                        className="visually-hidden"
+                        type="file"
+                        onChange={(event) => {
+                          setSelectedFile(event.target.files?.[0] ?? null);
+                          event.target.value = "";
+                        }}
+                      />
                       <label htmlFor="direct-file-input" className="composer-icon-button"><Icon name="paperclip" /></label>
                       {selectedFile ? <span className="direct-chat__selected-file">{selectedFile.name}<button type="button" onClick={() => setSelectedFile(null)}><Icon name="close" /></button></span> : null}
                       <textarea

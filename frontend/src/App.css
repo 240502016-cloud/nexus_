@@ -3646,9 +3646,9 @@ button {
 .chat-area__composer textarea {
   min-width: 0;
   min-height: 42px;
-  max-height: 132px;
+  max-height: none;
   flex: 1;
-  resize: vertical;
+  resize: none;
   padding: 11px 13px;
   border: 1px solid var(--glass-border);
   border-radius: 11px;
@@ -6456,6 +6456,7 @@ body {
 
 .server-rail {
   grid-column: 1;
+  grid-row: 1;
   width: auto;
   justify-self: stretch;
   gap: 8px;
@@ -6496,8 +6497,10 @@ body {
 
 .channel-sidebar {
   grid-column: 2;
+  grid-row: 1;
   display: flex;
   min-width: 0;
+  min-height: 0;
   flex-direction: column;
   overflow: hidden;
   border-radius: var(--surface-radius);
@@ -6505,14 +6508,19 @@ body {
 
 .app-main {
   grid-column: 3;
+  grid-row: 1;
   min-width: 0;
+  min-height: 0;
   flex-direction: column;
   border-radius: var(--surface-radius);
 }
 
 .members-dock {
   grid-column: 4;
+  grid-row: 1;
   min-width: 0;
+  min-height: 0;
+  max-height: 100%;
   border-radius: var(--surface-radius);
 }
 
@@ -7198,6 +7206,19 @@ body {
 .chat-message__body {
   width: 100%;
   gap: 6px;
+}
+
+.chat-message--group-start {
+  margin-top: 8px;
+}
+
+.chat-message--continuation {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.chat-message--continuation .chat-message__body {
+  gap: 3px;
 }
 
 .chat-message__meta {

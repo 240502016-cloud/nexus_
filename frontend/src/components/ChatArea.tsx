@@ -10,6 +10,7 @@ import { Icon } from "./Icon";
 
 const GAME_EVENT_PREFIX = "NEXUS_GAME_EVENT:";
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "😮"];
+const MESSAGE_GROUP_WINDOW_MS = 5 * 60 * 1_000;
 
 interface GameMessageEvent {
   type: string;
@@ -34,7 +35,7 @@ interface ChatAreaProps {
   currentMatrixUserId: string | null;
   currentUserId: number;
   members: Member[];
-  onSendMessage: (content: string, file?: File, replyTo?: Message) => Promise<void>;
+  onSendMessage: (content: string, file?: File, replyTo?: Message) => Promise<boolean>;
   onEditMessage: (eventId: string, content: string) => Promise<void>;
   onDeleteMessage: (eventId: string) => void;
   onToggleReaction: (eventId: string, emoji: string) => Promise<void>;
@@ -75,6 +76,46 @@ function parseGameMessage(content: string): ParsedGameMessage | null {
   } catch {
     return null;
   }
+}
+
+function isSameCalendarDay(first: number, second: number): boolean {
+  const firstDate = new Date(first);
+  const secondDate = new Date(second);
+  return (
+    firstDate.getFullYear() === secondDate.getFullYear() &&
+    firstDate.getMonth() === secondDate.getMonth() &&
+    firstDate.getDate() === secondDate.getDate()
+  );
+}
+
+function canContinueVisualGroup(
+  previous: Message,
+  current: Message,
+  previousHasRichContent: boolean,
+  currentHasRichContent: boolean,
+): boolean {
+  if (
+    previous.sender !== current.sender ||
+    previous.is_bot ||
+    current.is_bot ||
+    previousHasRichContent ||
+    currentHasRichContent ||
+    previous.reply_to ||
+    current.reply_to ||
+    !previous.content ||
+    !current.content
+  ) {
+    return false;
+  }
+
+  const previousTime = previous.origin_server_ts ?? Date.now();
+  const currentTime = current.origin_server_ts ?? Date.now();
+  const elapsed = currentTime - previousTime;
+  return (
+    elapsed >= 0 &&
+    elapsed <= MESSAGE_GROUP_WINDOW_MS &&
+    isSameCalendarDay(previousTime, currentTime)
+  );
 }
 
 function gameCardTitle(event: GameMessageEvent): string {
@@ -191,6 +232,11 @@ export function ChatArea({
 
   function resizeComposer(element = composerRef.current) {
     if (!element) return;
+    if (!element.value) {
+      element.style.height = "";
+      element.style.overflowY = "hidden";
+      return;
+    }
     element.style.height = "auto";
     const style = window.getComputedStyle(element);
     const lineHeight = Number.parseFloat(style.lineHeight) || 22;
@@ -229,7 +275,12 @@ export function ChatArea({
     // İyimser mesajın React tarafından DOM'a işlendiği iki çizim turundan sonra kesin olarak
     // en alta in. Ağ yanıtını beklemek kullanıcının kendi mesajını görmesini geciktirirdi.
     requestAnimationFrame(() => requestAnimationFrame(() => scrollToLatest("auto")));
-    await pending;
+    const accepted = await pending;
+    if (!accepted) {
+      setDraft((current) => current || content);
+      setSelectedFile((current) => current ?? file ?? null);
+      setReplyingTo((current) => current ?? replyTarget ?? null);
+    }
   }
 
   async function saveEdit(event: FormEvent) {
@@ -248,12 +299,29 @@ export function ChatArea({
 
   // API mesajları yeniden eskiye döner; sohbet için eskiden yeniye çeviriyoruz.
   const ordered = [...messages].reverse();
-  const parsedMessages = ordered.map((message) => ({
-    message,
-    // Yapılandırılmış kart protokolü yalnızca backend'in doğruladığı gerçek bot mesajlarında
-    // yorumlanır; normal kullanıcı aynı prefix'i yazarak sahte davet kartı üretemez.
-    gameMessage: message.is_bot ? parseGameMessage(message.content) : null,
-  }));
+  const parsedMessages = ordered
+    .map((message) => ({
+      message,
+      attachment: parseAttachmentMessage(message.content),
+      // Yapılandırılmış kart protokolü yalnızca backend'in doğruladığı gerçek bot mesajlarında
+      // yorumlanır; normal kullanıcı aynı prefix'i yazarak sahte davet kartı üretemez.
+      gameMessage: message.is_bot ? parseGameMessage(message.content) : null,
+    }))
+    .map((entry, index, entries) => {
+      const previous = entries[index - 1];
+      return {
+        ...entry,
+        groupedWithPrevious: Boolean(
+          previous &&
+          canContinueVisualGroup(
+            previous.message,
+            entry.message,
+            Boolean(previous.gameMessage || previous.attachment),
+            Boolean(entry.gameMessage || entry.attachment),
+          ),
+        ),
+      };
+    });
   const resolvedChallengeIds = new Set(
     parsedMessages
       .filter(({ gameMessage }) =>
@@ -565,11 +633,6 @@ export function ChatArea({
             document.getElementById("channel-toolbar-portal")!,
           )
         : null}
-      <header className="chat-area__header">
-        <div className="chat-area__title">
-          <strong>{channel ? "Chat" : "Bir kanal seçin"}</strong>
-        </div>
-      </header>
       {channel && searchOpen ? (
         <aside className="message-tool-panel">
           <form className="message-search" onSubmit={runSearch}>
@@ -709,11 +772,12 @@ export function ChatArea({
         {!channel ? null : ordered.length === 0 ? (
           <p className="chat-area__placeholder">Henüz mesaj yok. İlk mesajı sen yaz.</p>
         ) : (
-          parsedMessages.map(({ message, gameMessage }) => {
+          parsedMessages.map(({ message, gameMessage, attachment, groupedWithPrevious }) => {
             const own = message.sender === currentMatrixUserId || Boolean(message.delivery_status);
             const className = [
               "chat-message",
               own ? "chat-message--own" : "",
+              groupedWithPrevious ? "chat-message--continuation" : "chat-message--group-start",
               message.delivery_status === "sending" ? "chat-message--sending" : "",
               message.delivery_status === "failed" ? "chat-message--failed" : "",
             ]
@@ -724,22 +788,29 @@ export function ChatArea({
                 key={message.event_id}
                 id={`message-${encodeURIComponent(message.event_id)}`}
                 className={className}
+                aria-label={
+                  groupedWithPrevious
+                    ? `${displayName(message.sender)} kullanıcısının devam mesajı`
+                    : undefined
+                }
               >
                 <div className="chat-message__body">
-                <div className="chat-message__meta">
-                  <span className="chat-message__sender">{displayName(message.sender)}</span>
-                  <time
-                    dateTime={message.origin_server_ts ? new Date(message.origin_server_ts).toISOString() : undefined}
-                    title={message.origin_server_ts ? new Date(message.origin_server_ts).toLocaleString("tr-TR") : "Yeni mesaj"}
-                  >
-                    {message.origin_server_ts
-                      ? new Date(message.origin_server_ts).toLocaleTimeString("tr-TR", {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })
-                      : "şimdi"}
-                  </time>
-                </div>
+                {!groupedWithPrevious ? (
+                  <div className="chat-message__meta">
+                    <span className="chat-message__sender">{displayName(message.sender)}</span>
+                    <time
+                      dateTime={message.origin_server_ts ? new Date(message.origin_server_ts).toISOString() : undefined}
+                      title={message.origin_server_ts ? new Date(message.origin_server_ts).toLocaleString("tr-TR") : "Yeni mesaj"}
+                    >
+                      {message.origin_server_ts
+                        ? new Date(message.origin_server_ts).toLocaleTimeString("tr-TR", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
+                        : "şimdi"}
+                    </time>
+                  </div>
+                ) : null}
                 {message.reply_to ? (
                   <button
                     type="button"
@@ -834,8 +905,8 @@ export function ChatArea({
                       )
                     ) : null}
                   </div>
-                ) : parseAttachmentMessage(message.content) ? (
-                  <AttachmentCard {...parseAttachmentMessage(message.content)!} />
+                ) : attachment ? (
+                  <AttachmentCard {...attachment} />
                 ) : (
                   <span className="chat-message__content">
                     {message.content ? renderMessageText(message.content, members) : "(silindi)"}
@@ -994,7 +1065,10 @@ export function ChatArea({
             id="chat-file-input"
             className="visually-hidden"
             type="file"
-            onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
+            onChange={(event) => {
+              setSelectedFile(event.target.files?.[0] ?? null);
+              event.target.value = "";
+            }}
           />
           <label className="composer-icon-button" htmlFor="chat-file-input" title="Fotoğraf veya dosya ekle">
             <Icon name="paperclip" />

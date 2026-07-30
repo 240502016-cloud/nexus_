@@ -61,6 +61,15 @@ interface RemoteAudioGraph {
   destination: MediaStreamAudioDestinationNode;
 }
 
+interface OutgoingAudioGraph {
+  context: AudioContext;
+  gain: GainNode;
+  soundboardGain: GainNode;
+  destination: MediaStreamAudioDestinationNode;
+  localSoundboardDestination: MediaStreamAudioDestinationNode;
+  localSoundboardElement: HTMLAudioElement;
+}
+
 export interface VoiceConnectionQuality {
   level: "good" | "fair" | "poor" | "unknown";
   pingMs: number | null;
@@ -142,6 +151,19 @@ function sendWebSocketJson(socket: WebSocket | null, payload: unknown): boolean 
   } catch {
     return false;
   }
+}
+
+async function resumeAudioContext(context: AudioContext | null | undefined): Promise<void> {
+  if (!context || context.state === "closed" || context.state === "running") return;
+  await context.resume();
+}
+
+async function startAudioPlayback(
+  context: AudioContext | null | undefined,
+  element: HTMLMediaElement,
+): Promise<void> {
+  await resumeAudioContext(context);
+  await element.play();
 }
 
 function isExpectedConnectionAbort(error: unknown): boolean {
@@ -268,12 +290,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
   const wsRef = useRef<WebSocket | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null); // mikrofon + varsa yayın sesi
   const microphoneSourceRef = useRef<MediaStream | null>(null);
-  const microphoneGraphRef = useRef<{
-    context: AudioContext;
-    gain: GainNode;
-    soundboardGain: GainNode;
-    destination: MediaStreamAudioDestinationNode;
-  } | null>(null);
+  const microphoneGraphRef = useRef<OutgoingAudioGraph | null>(null);
   const audioReplaceRef = useRef<((stream: MediaStream | null) => Promise<void>) | null>(null);
   const soundboardVolumeRef = useRef(soundboardVolume);
   const soundboardMutedRef = useRef(soundboardMuted);
@@ -331,7 +348,15 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     screenStream: MediaStream | null,
     ensureSoundboardOutput = false,
   ): MediaStream | null => {
-    void microphoneGraphRef.current?.context.close();
+    const previousGraph = microphoneGraphRef.current;
+    if (previousGraph) {
+      previousGraph.localSoundboardElement.pause();
+      previousGraph.localSoundboardElement.srcObject = null;
+      previousGraph.localSoundboardDestination.stream
+        .getTracks()
+        .forEach((track) => track.stop());
+      void previousGraph.context.close();
+    }
     microphoneGraphRef.current = null;
     const hasMicrophone = Boolean(
       microphoneStream?.getAudioTracks().some((track) => track.readyState === "live"),
@@ -345,6 +370,15 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     const gain = context.createGain();
     const soundboardGain = context.createGain();
     const destination = context.createMediaStreamDestination();
+    const localSoundboardDestination = context.createMediaStreamDestination();
+    const localSoundboardElement = new Audio();
+    localSoundboardElement.autoplay = true;
+    localSoundboardElement.srcObject = localSoundboardDestination.stream;
+    localSoundboardElement.volume = Math.max(
+      0,
+      Math.min(1, voiceSettingsRef.current.outputVolume / 100),
+    );
+    void applySinkId(localSoundboardElement, voiceSettingsRef.current.outputDeviceId);
     gain.gain.value = mutedRef.current
       ? 0
       : Math.max(0, Math.min(2, voiceSettingsRef.current.inputVolume / 100));
@@ -374,6 +408,10 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       ? 0
       : Math.max(0, Math.min(2, soundboardVolumeRef.current / 100));
     soundboardGain.connect(destination);
+    // Soundboard tek kaynak düğümünden iki ayrı hedefe gider: mevcut WebRTC audio
+    // m-line'ı ve yalnızca yerel hoparlör. Böylece yeni transceiver oluşmaz ve kullanıcı
+    // kendi efektini seçili çıkış cihazından duyarken karşı tarafa da aynı miks ulaşır.
+    soundboardGain.connect(localSoundboardDestination);
 
     if (hasScreenAudio && screenStream) {
       const screenSource = context.createMediaStreamSource(screenStream);
@@ -382,8 +420,15 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       screenSource.connect(screenGain);
       screenGain.connect(destination);
     }
-    void context.resume().catch(() => {});
-    microphoneGraphRef.current = { context, gain, soundboardGain, destination };
+    void resumeAudioContext(context).catch(() => {});
+    microphoneGraphRef.current = {
+      context,
+      gain,
+      soundboardGain,
+      destination,
+      localSoundboardDestination,
+      localSoundboardElement,
+    };
     return destination.stream;
   }, []);
 
@@ -406,7 +451,12 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       graph = microphoneGraphRef.current;
     }
     if (!graph) throw new Error("Soundboard ses hattı hazır değil.");
-    await graph.context.resume().catch(() => {});
+    await applySinkId(graph.localSoundboardElement, voiceSettingsRef.current.outputDeviceId);
+    try {
+      await startAudioPlayback(graph.context, graph.localSoundboardElement);
+    } catch {
+      throw new Error("Soundboard sesini başlatmak için sayfaya tıklayıp tekrar deneyin.");
+    }
     return graph;
   }, [rebuildOutgoingAudioStream]);
 
@@ -499,6 +549,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     microphoneSourceRef.current = sourceStream;
     const mixed = rebuildOutgoingAudioStream(sourceStream, screenAudioStreamRef.current);
     if (!mixed) throw new Error("Mikrofon ses hattı oluşturulamadı.");
+    await resumeAudioContext(microphoneGraphRef.current?.context);
     return mixed;
   }, [rebuildOutgoingAudioStream]);
 
@@ -618,7 +669,15 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     localStreamRef.current = null;
     microphoneSourceRef.current?.getTracks().forEach((track) => track.stop());
     microphoneSourceRef.current = null;
-    void microphoneGraphRef.current?.context.close();
+    const outgoingGraph = microphoneGraphRef.current;
+    if (outgoingGraph) {
+      outgoingGraph.localSoundboardElement.pause();
+      outgoingGraph.localSoundboardElement.srcObject = null;
+      outgoingGraph.localSoundboardDestination.stream
+        .getTracks()
+        .forEach((track) => track.stop());
+      void outgoingGraph.context.close();
+    }
     microphoneGraphRef.current = null;
     cameraTrackRef.current?.stop();
     screenTrackRef.current?.stop();
@@ -902,8 +961,9 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
           audioEl.muted = deafenedRef.current;
           audioEl.volume = Math.max(0, Math.min(1, voiceSettingsRef.current.outputVolume / 100));
           void applySinkId(audioEl, voiceSettingsRef.current.outputDeviceId);
-          void audioContext.resume().catch(() => {});
-          void audioEl.play().catch(() => {});
+          void startAudioPlayback(audioContext, audioEl).catch(() => {
+            setError("Uzak sesi başlatmak için Nexus sayfasına bir kez tıklayın.");
+          });
           return;
         }
         if (!isCamera && !isScreen) return;
@@ -1105,6 +1165,9 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
           setError(microphoneError);
         }
       }
+      // Reconnect aynı işlenmiş track'i yeniden kullanır. Sekme arka planda kaldıysa
+      // tarayıcının susturduğu mikseri yeni offer üretilmeden önce tekrar çalıştır.
+      await resumeAudioContext(microphoneGraphRef.current?.context).catch(() => {});
 
       let ws: WebSocket;
       try {
@@ -1400,6 +1463,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
                   microphoneSourceRef.current,
                   screenAudioStreamRef.current,
                 );
+                void resumeAudioContext(microphoneGraphRef.current?.context);
                 void replaceOutgoingAudioStream(mixedAudio);
               } catch {
                 void replaceOutgoingAudioStream(null);
@@ -1411,6 +1475,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
               microphoneSourceRef.current,
               screenAudioStreamRef.current,
             );
+            await resumeAudioContext(microphoneGraphRef.current?.context);
             await replaceOutgoingAudioStream(mixedAudio);
           } catch {
             screenAudioStreamRef.current?.getTracks().forEach((audioTrack) => audioTrack.stop());
@@ -1420,6 +1485,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
               microphoneSourceRef.current,
               null,
             );
+            await resumeAudioContext(microphoneGraphRef.current?.context);
             await replaceOutgoingAudioStream(microphoneOnly);
           }
         }
@@ -1494,6 +1560,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
             microphoneSourceRef.current,
             null,
           );
+          void resumeAudioContext(microphoneGraphRef.current?.context);
           void replaceOutgoingAudioStream(mixedAudio);
         } catch {
           void replaceOutgoingAudioStream(null);
@@ -1694,12 +1761,62 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     };
   }, [connected]);
 
+  // Tarayıcı güç tasarrufu veya autoplay politikası AudioContext/HTMLAudioElement
+  // çıkışlarını askıya alabilir. Sonraki gerçek kullanıcı etkileşiminde mevcut
+  // mikrofon mikserini, soundboard monitörünü ve uzak sesleri tekrar uyandır.
+  useEffect(() => {
+    function resumeActiveAudio() {
+      if (document.hidden) return;
+      const outgoingGraph = microphoneGraphRef.current;
+      const tasks: Promise<void>[] = [];
+      if (outgoingGraph) {
+        tasks.push(
+          startAudioPlayback(
+            outgoingGraph.context,
+            outgoingGraph.localSoundboardElement,
+          ),
+        );
+      }
+      const remoteContext = remoteAudioContextRef.current;
+      for (const audioElement of audioElsRef.current.values()) {
+        tasks.push(startAudioPlayback(remoteContext, audioElement));
+      }
+      if (tasks.length === 0) return;
+      void Promise.all(tasks)
+        .then(() => {
+          setError((current) =>
+            current === "Uzak sesi başlatmak için Nexus sayfasına bir kez tıklayın."
+              ? null
+              : current,
+          );
+        })
+        .catch(() => {});
+    }
+
+    document.addEventListener("pointerdown", resumeActiveAudio);
+    document.addEventListener("keydown", resumeActiveAudio);
+    document.addEventListener("visibilitychange", resumeActiveAudio);
+    return () => {
+      document.removeEventListener("pointerdown", resumeActiveAudio);
+      document.removeEventListener("keydown", resumeActiveAudio);
+      document.removeEventListener("visibilitychange", resumeActiveAudio);
+    };
+  }, []);
+
   // Çıkış cihazı (hoparlör) değişince mevcut uzak ses elemanlarına uygula.
   useEffect(() => {
     audioElsRef.current.forEach((el) => {
       el.volume = Math.max(0, Math.min(1, voiceSettings.outputVolume / 100));
       void applySinkId(el, voiceSettings.outputDeviceId);
     });
+    const localSoundboardElement = microphoneGraphRef.current?.localSoundboardElement;
+    if (localSoundboardElement) {
+      localSoundboardElement.volume = Math.max(
+        0,
+        Math.min(1, voiceSettings.outputVolume / 100),
+      );
+      void applySinkId(localSoundboardElement, voiceSettings.outputDeviceId);
+    }
   }, [voiceSettings.outputDeviceId, voiceSettings.outputVolume]);
 
   useEffect(() => {

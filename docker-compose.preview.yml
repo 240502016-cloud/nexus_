@@ -13,6 +13,9 @@ services:
   matrix:
     image: nexus-preview-matrix:local
 
+  media-storage-init:
+    image: nexus-preview-backend:local
+
   backend:
     image: nexus-preview-backend:local
     ports:

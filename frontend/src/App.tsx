@@ -864,7 +864,7 @@ export default function App() {
   }
 
   async function handleSendMessage(content: string, file?: File, replyTo?: Message) {
-    if (!activeChannelId) return;
+    if (!activeChannelId) return false;
     const channelId = activeChannelId;
     let outgoingContent = content;
     if (file) {
@@ -873,7 +873,7 @@ export default function App() {
         outgoingContent = composeAttachmentMessage(attachment, content);
       } catch (err) {
         setCallError(err instanceof Error ? err.message : "Dosya yüklenemedi");
-        return;
+        return false;
       }
     }
     const clientId = createMessageClientId();
@@ -915,6 +915,7 @@ export default function App() {
       }
       setCallError(err instanceof Error ? err.message : "Mesaj gönderilemedi");
     }
+    return true;
   }
 
   async function handleJoinServer(code: string) {
