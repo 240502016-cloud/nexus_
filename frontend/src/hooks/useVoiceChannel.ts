@@ -2,20 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { coreApi, getToken } from "../api/client";
 import { webSocketUrl } from "../desktopBridge";
-import { VIDEO_QUALITY_PRESETS } from "../settings";
+import { VIDEO_QUALITY_PRESETS, buildAudioConstraints } from "../settings";
 import type { VoiceSettings } from "../settings";
 import { usePushToTalk } from "./usePushToTalk";
-
-// Seçili mikrofon + ses işleme tercihlerini standart MediaTrackConstraints'e çevirir.
-function buildAudioConstraints(vs: VoiceSettings): MediaTrackConstraints {
-  const c: MediaTrackConstraints = {
-    noiseSuppression: vs.noiseSuppression,
-    echoCancellation: vs.echoCancellation,
-    autoGainControl: vs.autoGainControl,
-  };
-  if (vs.inputDeviceId) c.deviceId = { exact: vs.inputDeviceId };
-  return c;
-}
 
 // Çıkış cihazını (hoparlör) bir media elemanına uygular; desteklenmeyen tarayıcıda sessizce geçer.
 async function applySinkId(el: HTMLMediaElement, deviceId: string | null): Promise<void> {
@@ -66,6 +55,18 @@ export interface RemoteVideoStream {
   stream: MediaStream;
 }
 
+interface RemoteAudioGraph {
+  source: MediaStreamAudioSourceNode;
+  gain: GainNode;
+  destination: MediaStreamAudioDestinationNode;
+}
+
+export interface VoiceConnectionQuality {
+  level: "good" | "fair" | "poor" | "unknown";
+  pingMs: number | null;
+  packetLossPercent: number | null;
+}
+
 interface MediaMids {
   audio: string | null;
   camera: string | null;
@@ -79,6 +80,32 @@ const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun.cloudflare.com:3478" },
   { urls: "stun:stun.l.google.com:19302" },
 ];
+const REMOTE_VOLUME_STORAGE_KEY = "nexus.remoteVoiceVolumes";
+
+function loadRemoteVolumes(): Map<number, number> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(REMOTE_VOLUME_STORAGE_KEY) ?? "{}");
+    const entries = Object.entries(parsed)
+      .map(([key, value]) => [Number(key), Number(value)] as const)
+      .filter(([key, value]) =>
+        Number.isInteger(key) && key > 0 && Number.isFinite(value) && value >= 0 && value <= 200,
+      );
+    return new Map(entries);
+  } catch {
+    return new Map();
+  }
+}
+
+function saveRemoteVolumes(volumes: Map<number, number>): void {
+  try {
+    localStorage.setItem(
+      REMOTE_VOLUME_STORAGE_KEY,
+      JSON.stringify(Object.fromEntries(volumes)),
+    );
+  } catch {
+    // Gizli mod/depolama kotası sesli görüşmeyi engellememeli.
+  }
+}
 
 function rejectAfter<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -225,22 +252,43 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
   const [deafened, setDeafened] = useState(false);
   const [localCameraStream, setLocalCameraStream] = useState<MediaStream | null>(null);
   const [localScreenStream, setLocalScreenStream] = useState<MediaStream | null>(null);
+  const [screenAudioEnabled, setScreenAudioEnabled] = useState(false);
   const [remoteStreams, setRemoteStreams] = useState<Map<string, RemoteVideoStream>>(new Map());
   const [ignoredRemoteVideoIds, setIgnoredRemoteVideoIds] = useState<Set<number>>(new Set());
+  const [remoteVolumes, setRemoteVolumes] = useState<Map<number, number>>(loadRemoteVolumes);
+  const [soundboardVolume, setSoundboardVolumeState] = useState(100);
+  const [soundboardMuted, setSoundboardMuted] = useState(false);
+  const [connectionQuality, setConnectionQuality] = useState<VoiceConnectionQuality>({
+    level: "unknown",
+    pingMs: null,
+    packetLossPercent: null,
+  });
   const [error, setError] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
-  const localStreamRef = useRef<MediaStream | null>(null); // mikrofon (audio)
+  const localStreamRef = useRef<MediaStream | null>(null); // mikrofon + varsa yayın sesi
   const microphoneSourceRef = useRef<MediaStream | null>(null);
-  const microphoneGraphRef = useRef<{ context: AudioContext; gain: GainNode } | null>(null);
+  const microphoneGraphRef = useRef<{
+    context: AudioContext;
+    gain: GainNode;
+    soundboardGain: GainNode;
+    destination: MediaStreamAudioDestinationNode;
+  } | null>(null);
+  const audioReplaceRef = useRef<((stream: MediaStream | null) => Promise<void>) | null>(null);
+  const soundboardVolumeRef = useRef(soundboardVolume);
+  const soundboardMutedRef = useRef(soundboardMuted);
   const cameraTrackRef = useRef<MediaStreamTrack | null>(null);
   const screenTrackRef = useRef<MediaStreamTrack | null>(null);
+  const screenAudioStreamRef = useRef<MediaStream | null>(null);
   const placeholderVideoRef = useRef<
     Partial<Record<"camera" | "screen", { canvas: HTMLCanvasElement; track: MediaStreamTrack }>>
   >({});
   const peersRef = useRef<Map<number, PeerState>>(new Map());
   const pendingIceRef = useRef<Map<number, RTCIceCandidateInit[]>>(new Map());
   const audioElsRef = useRef<Map<number, HTMLAudioElement>>(new Map());
+  const remoteAudioContextRef = useRef<AudioContext | null>(null);
+  const remoteAudioGraphsRef = useRef<Map<number, RemoteAudioGraph>>(new Map());
+  const remoteVolumesRef = useRef(remoteVolumes);
   // Her peer için tek bir birleşik uzak MediaStream. Ses ve video ayrı MSID'lerle gelse de
   // aynı stream'de biriktirilir; böylece video eklenince ses stream'i ezilmez (Hata 1).
   const remoteMediaRef = useRef<Map<string, MediaStream>>(new Map());
@@ -262,6 +310,9 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
   // connect() effect'i sadece channelId'ye bağlı çalışır; bağlantı anındaki modu okumak için ref kullanılır.
   const voiceSettingsRef = useRef(voiceSettings);
   voiceSettingsRef.current = voiceSettings;
+  remoteVolumesRef.current = remoteVolumes;
+  soundboardVolumeRef.current = soundboardVolume;
+  soundboardMutedRef.current = soundboardMuted;
 
   function placeholderVideoTrack(kind: "camera" | "screen"): MediaStreamTrack {
     const existing = placeholderVideoRef.current[kind];
@@ -275,28 +326,195 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     return track;
   }
 
-  const processMicrophoneStream = useCallback(async (sourceStream: MediaStream) => {
-    const context = new AudioContext();
-    const source = context.createMediaStreamSource(sourceStream);
-    const gain = context.createGain();
-    const destination = context.createMediaStreamDestination();
-    gain.gain.value = Math.max(0, Math.min(2, voiceSettingsRef.current.inputVolume / 100));
-    source.connect(gain);
-    gain.connect(destination);
-    await context.resume().catch(() => {});
-
-    microphoneSourceRef.current?.getTracks().forEach((track) => track.stop());
+  const rebuildOutgoingAudioStream = useCallback((
+    microphoneStream: MediaStream | null,
+    screenStream: MediaStream | null,
+    ensureSoundboardOutput = false,
+  ): MediaStream | null => {
     void microphoneGraphRef.current?.context.close();
-    microphoneSourceRef.current = sourceStream;
-    microphoneGraphRef.current = { context, gain };
+    microphoneGraphRef.current = null;
+    const hasMicrophone = Boolean(
+      microphoneStream?.getAudioTracks().some((track) => track.readyState === "live"),
+    );
+    const hasScreenAudio = Boolean(
+      screenStream?.getAudioTracks().some((track) => track.readyState === "live"),
+    );
+    if (!hasMicrophone && !hasScreenAudio && !ensureSoundboardOutput) return null;
+
+    const context = new AudioContext();
+    const gain = context.createGain();
+    const soundboardGain = context.createGain();
+    const destination = context.createMediaStreamDestination();
+    gain.gain.value = mutedRef.current
+      ? 0
+      : Math.max(0, Math.min(2, voiceSettingsRef.current.inputVolume / 100));
+
+    if (hasMicrophone && microphoneStream) {
+      const source = context.createMediaStreamSource(microphoneStream);
+      if (voiceSettingsRef.current.noiseSuppression) {
+        const highPass = context.createBiquadFilter();
+        const compressor = context.createDynamicsCompressor();
+        highPass.type = "highpass";
+        highPass.frequency.value = 80;
+        highPass.Q.value = 0.7;
+        compressor.threshold.value = -24;
+        compressor.knee.value = 18;
+        compressor.ratio.value = 3;
+        compressor.attack.value = 0.003;
+        compressor.release.value = 0.25;
+        source.connect(highPass);
+        highPass.connect(compressor);
+        compressor.connect(gain);
+      } else {
+        source.connect(gain);
+      }
+    }
+    gain.connect(destination);
+    soundboardGain.gain.value = soundboardMutedRef.current || deafenedRef.current
+      ? 0
+      : Math.max(0, Math.min(2, soundboardVolumeRef.current / 100));
+    soundboardGain.connect(destination);
+
+    if (hasScreenAudio && screenStream) {
+      const screenSource = context.createMediaStreamSource(screenStream);
+      const screenGain = context.createGain();
+      screenGain.gain.value = 1;
+      screenSource.connect(screenGain);
+      screenGain.connect(destination);
+    }
+    void context.resume().catch(() => {});
+    microphoneGraphRef.current = { context, gain, soundboardGain, destination };
     return destination.stream;
   }, []);
+
+  const ensureSoundboardGraph = useCallback(async () => {
+    if (deafenedRef.current) {
+      throw new Error("Sağırlaştırma açıkken soundboard kullanılamaz.");
+    }
+    if (!audioReplaceRef.current) {
+      throw new Error("Soundboard için önce ses kanalına bağlanın.");
+    }
+    let graph = microphoneGraphRef.current;
+    if (!graph || graph.context.state === "closed") {
+      const stream = rebuildOutgoingAudioStream(
+        microphoneSourceRef.current,
+        screenAudioStreamRef.current,
+        true,
+      );
+      if (!stream) throw new Error("Soundboard ses hattı oluşturulamadı.");
+      await audioReplaceRef.current(stream);
+      graph = microphoneGraphRef.current;
+    }
+    if (!graph) throw new Error("Soundboard ses hattı hazır değil.");
+    await graph.context.resume().catch(() => {});
+    return graph;
+  }, [rebuildOutgoingAudioStream]);
+
+  const playSoundboardPreset = useCallback(async (
+    preset: "airhorn" | "clap" | "victory" | "fail",
+  ) => {
+    const graph = await ensureSoundboardGraph();
+    const { context, soundboardGain: output } = graph;
+    const now = context.currentTime;
+
+    if (preset === "clap") {
+      const buffer = context.createBuffer(1, Math.floor(context.sampleRate * 0.34), context.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let index = 0; index < data.length; index += 1) {
+        const decay = Math.exp(-index / (context.sampleRate * 0.055));
+        data[index] = (Math.random() * 2 - 1) * decay * (index % 130 < 72 ? 1 : 0.35);
+      }
+      const source = context.createBufferSource();
+      const highPass = context.createBiquadFilter();
+      highPass.type = "highpass";
+      highPass.frequency.value = 700;
+      source.buffer = buffer;
+      source.connect(highPass);
+      highPass.connect(output);
+      source.start(now);
+      return;
+    }
+
+    const notes = preset === "victory"
+      ? [523.25, 659.25, 783.99, 1046.5]
+      : preset === "fail"
+        ? [392, 330, 262, 196]
+        : [220, 277.18];
+    notes.forEach((frequency, index) => {
+      const oscillator = context.createOscillator();
+      const envelope = context.createGain();
+      const start = now + (preset === "airhorn" ? 0 : index * 0.14);
+      const duration = preset === "airhorn" ? 0.72 : 0.18;
+      oscillator.type = preset === "airhorn" ? "sawtooth" : "square";
+      oscillator.frequency.setValueAtTime(frequency, start);
+      if (preset === "airhorn") oscillator.frequency.linearRampToValueAtTime(frequency * 1.04, start + duration);
+      envelope.gain.setValueAtTime(0.0001, start);
+      envelope.gain.exponentialRampToValueAtTime(preset === "airhorn" ? 0.19 : 0.12, start + 0.015);
+      envelope.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+      oscillator.connect(envelope);
+      envelope.connect(output);
+      oscillator.start(start);
+      oscillator.stop(start + duration + 0.02);
+    });
+  }, [ensureSoundboardGraph]);
+
+  const playSoundboardClip = useCallback(async (blob: Blob) => {
+    const graph = await ensureSoundboardGraph();
+    const audioBuffer = await graph.context.decodeAudioData(await blob.arrayBuffer());
+    if (audioBuffer.duration > 12) {
+      throw new Error("Soundboard sesi en fazla 12 saniye olabilir.");
+    }
+    const source = graph.context.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(graph.soundboardGain);
+    source.start();
+  }, [ensureSoundboardGraph]);
+
+  const setSoundboardVolume = useCallback((volume: number) => {
+    const normalized = Math.max(0, Math.min(200, Math.round(volume)));
+    soundboardVolumeRef.current = normalized;
+    setSoundboardVolumeState(normalized);
+    const gain = microphoneGraphRef.current?.soundboardGain;
+    if (gain) {
+      gain.gain.value = soundboardMutedRef.current || deafenedRef.current
+        ? 0
+        : normalized / 100;
+    }
+  }, []);
+
+  const toggleSoundboardMute = useCallback(() => {
+    const next = !soundboardMutedRef.current;
+    soundboardMutedRef.current = next;
+    setSoundboardMuted(next);
+    const gain = microphoneGraphRef.current?.soundboardGain;
+    if (gain) {
+      gain.gain.value = next || deafenedRef.current
+        ? 0
+        : soundboardVolumeRef.current / 100;
+    }
+  }, []);
+
+  const processMicrophoneStream = useCallback(async (sourceStream: MediaStream) => {
+    microphoneSourceRef.current?.getTracks().forEach((track) => track.stop());
+    microphoneSourceRef.current = sourceStream;
+    const mixed = rebuildOutgoingAudioStream(sourceStream, screenAudioStreamRef.current);
+    if (!mixed) throw new Error("Mikrofon ses hattı oluşturulamadı.");
+    return mixed;
+  }, [rebuildOutgoingAudioStream]);
 
   const applyMuted = useCallback((nextMuted: boolean) => {
     setMuted(nextMuted);
     mutedRef.current = nextMuted;
+    const microphoneGain = microphoneGraphRef.current?.gain;
+    if (microphoneGain) {
+      microphoneGain.gain.value = nextMuted
+        ? 0
+        : Math.max(0, Math.min(2, voiceSettingsRef.current.inputVolume / 100));
+    }
     localStreamRef.current?.getAudioTracks().forEach((track) => {
-      track.enabled = !nextMuted;
+      // Birleştirilmiş çıkış açık kalır; mute yalnız mikrofon gain'ini sıfırlar.
+      // Böylece ekran sesi ve ayrı soundboard mute'u korunur.
+      track.enabled = true;
     });
     sendWebSocketJson(wsRef.current, { type: "mute", muted: nextMuted });
   }, []);
@@ -309,6 +527,12 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       audioElsRef.current.forEach((el) => {
         el.muted = nextDeafened;
       });
+      const soundboardGain = microphoneGraphRef.current?.soundboardGain;
+      if (soundboardGain) {
+        soundboardGain.gain.value = nextDeafened || soundboardMutedRef.current
+          ? 0
+          : soundboardVolumeRef.current / 100;
+      }
       if (nextDeafened) {
         preDeafenMutedRef.current = mutedRef.current;
         applyMuted(true);
@@ -319,6 +543,18 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     },
     [applyMuted],
   );
+
+  const setRemoteVolume = useCallback((peerId: number, volume: number) => {
+    const normalized = Math.max(0, Math.min(200, Math.round(volume)));
+    const next = new Map(remoteVolumesRef.current);
+    if (normalized === 100) next.delete(peerId);
+    else next.set(peerId, normalized);
+    remoteVolumesRef.current = next;
+    setRemoteVolumes(next);
+    saveRemoteVolumes(next);
+    const graph = remoteAudioGraphsRef.current.get(peerId);
+    if (graph) graph.gain.gain.value = normalized / 100;
+  }, []);
 
   const setRemoteVideoEnabled = useCallback((peerId: number, enabled: boolean) => {
     const next = new Set(ignoredRemoteVideoIdsRef.current);
@@ -368,6 +604,14 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       el.srcObject = null;
     });
     audioElsRef.current.clear();
+    remoteAudioGraphsRef.current.forEach((graph) => {
+      graph.source.disconnect();
+      graph.gain.disconnect();
+      graph.destination.stream.getTracks().forEach((track) => track.stop());
+    });
+    remoteAudioGraphsRef.current.clear();
+    void remoteAudioContextRef.current?.close();
+    remoteAudioContextRef.current = null;
     remoteMediaRef.current.clear();
     remoteVideoStateRef.current.clear();
     localStreamRef.current?.getTracks().forEach((track) => track.stop());
@@ -378,8 +622,10 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     microphoneGraphRef.current = null;
     cameraTrackRef.current?.stop();
     screenTrackRef.current?.stop();
+    screenAudioStreamRef.current?.getTracks().forEach((track) => track.stop());
     cameraTrackRef.current = null;
     screenTrackRef.current = null;
+    screenAudioStreamRef.current = null;
     Object.values(placeholderVideoRef.current).forEach((source) => source?.track.stop());
     placeholderVideoRef.current = {};
     setConnected(false);
@@ -388,6 +634,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     setDeafened(false);
     setLocalCameraStream(null);
     setLocalScreenStream(null);
+    setScreenAudioEnabled(false);
     setRemoteStreams(new Map());
     ignoredRemoteVideoIdsRef.current = new Set();
     setIgnoredRemoteVideoIds(new Set());
@@ -441,6 +688,13 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       const audioElement = audioElsRef.current.get(peerId);
       if (audioElement) audioElement.srcObject = null;
       audioElsRef.current.delete(peerId);
+      const audioGraph = remoteAudioGraphsRef.current.get(peerId);
+      if (audioGraph) {
+        audioGraph.source.disconnect();
+        audioGraph.gain.disconnect();
+        audioGraph.destination.stream.getTracks().forEach((track) => track.stop());
+      }
+      remoteAudioGraphsRef.current.delete(peerId);
       for (const key of [...remoteMediaRef.current.keys()]) {
         if (key.startsWith(`${peerId}:`)) remoteMediaRef.current.delete(key);
       }
@@ -461,6 +715,12 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         element.srcObject = null;
       });
       audioElsRef.current.clear();
+      remoteAudioGraphsRef.current.forEach((graph) => {
+        graph.source.disconnect();
+        graph.gain.disconnect();
+        graph.destination.stream.getTracks().forEach((track) => track.stop());
+      });
+      remoteAudioGraphsRef.current.clear();
       remoteMediaRef.current.clear();
       remoteVideoStateRef.current.clear();
       setParticipants([]);
@@ -614,16 +874,36 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
             event.transceiver.mid === peer.remoteMediaMids.screen);
         if (event.track.kind === "audio") {
           const stream = event.streams[0] ?? new MediaStream([event.track]);
+          let audioContext = remoteAudioContextRef.current;
+          if (!audioContext || audioContext.state === "closed") {
+            audioContext = new AudioContext();
+            remoteAudioContextRef.current = audioContext;
+          }
+          const previousGraph = remoteAudioGraphsRef.current.get(peerId);
+          if (previousGraph) {
+            previousGraph.source.disconnect();
+            previousGraph.gain.disconnect();
+            previousGraph.destination.stream.getTracks().forEach((track) => track.stop());
+          }
+          const source = audioContext.createMediaStreamSource(stream);
+          const gain = audioContext.createGain();
+          const destination = audioContext.createMediaStreamDestination();
+          gain.gain.value = (remoteVolumesRef.current.get(peerId) ?? 100) / 100;
+          source.connect(gain);
+          gain.connect(destination);
+          remoteAudioGraphsRef.current.set(peerId, { source, gain, destination });
           let audioEl = audioElsRef.current.get(peerId);
           if (!audioEl) {
             audioEl = new Audio();
             audioEl.autoplay = true;
             audioElsRef.current.set(peerId, audioEl);
           }
-          audioEl.srcObject = stream;
+          audioEl.srcObject = destination.stream;
           audioEl.muted = deafenedRef.current;
           audioEl.volume = Math.max(0, Math.min(1, voiceSettingsRef.current.outputVolume / 100));
           void applySinkId(audioEl, voiceSettingsRef.current.outputDeviceId);
+          void audioContext.resume().catch(() => {});
+          void audioEl.play().catch(() => {});
           return;
         }
         if (!isCamera && !isScreen) return;
@@ -748,6 +1028,25 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       }
     }
 
+    async function replaceOutgoingAudioStream(nextStream: MediaStream | null) {
+      const nextTrack = nextStream?.getAudioTracks()[0] ?? null;
+      if (nextTrack) nextTrack.enabled = true;
+      for (const [, peer] of peersRef.current) {
+        const transceiver = peer.audioTransceiver;
+        if (!transceiver) continue;
+        await transceiver.sender.replaceTrack(nextTrack);
+        const nextDirection: RTCRtpTransceiverDirection = nextTrack ? "sendrecv" : "recvonly";
+        if (transceiver.direction !== nextDirection) {
+          transceiver.direction = nextDirection;
+          peer.requestNegotiation();
+        }
+      }
+      localStreamRef.current?.getAudioTracks().forEach((track) => track.stop());
+      localStreamRef.current = nextStream;
+      setMicEpoch((epoch) => epoch + 1);
+    }
+    audioReplaceRef.current = replaceOutgoingAudioStream;
+
     async function connect() {
       if (cancelled || !navigator.onLine) return;
       if (!window.isSecureContext) {
@@ -796,9 +1095,8 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
           localStreamRef.current = stream;
           microphoneError = null;
           if (voiceSettingsRef.current.mode === "ptt") {
-            stream.getAudioTracks().forEach((track) => {
-              track.enabled = false;
-            });
+            const microphoneGain = microphoneGraphRef.current?.gain;
+            if (microphoneGain) microphoneGain.gain.value = 0;
             setMuted(true);
             mutedRef.current = true;
           }
@@ -1054,7 +1352,9 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
               })
             : await navigator.mediaDevices.getDisplayMedia({
                 video: buildScreenConstraints(currentSettings),
-                audio: false,
+                // Chrome/Edge'de kullanıcı paylaşım penceresindeki "sekme/sistem sesini paylaş"
+                // seçeneğini açarsa ses aynı WebRTC audio hattına güvenle karıştırılır.
+                audio: true,
               });
         const track = stream.getVideoTracks()[0];
         if (!track) return;
@@ -1074,7 +1374,55 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         trackRef.current?.stop();
         trackRef.current = track;
         if (kind === "camera") setLocalCameraStream(stream);
-        else setLocalScreenStream(stream);
+        else {
+          setLocalScreenStream(stream);
+          screenAudioStreamRef.current?.getTracks().forEach((audioTrack) => audioTrack.stop());
+          const sharedAudioTracks = stream.getAudioTracks();
+          screenAudioStreamRef.current = sharedAudioTracks.length
+            ? new MediaStream(sharedAudioTracks)
+            : null;
+          setScreenAudioEnabled(sharedAudioTracks.length > 0);
+          for (const sharedAudioTrack of sharedAudioTracks) {
+            sharedAudioTrack.onended = () => {
+              const activeAudioStream = screenAudioStreamRef.current;
+              if (!activeAudioStream?.getAudioTracks().includes(sharedAudioTrack)) return;
+              const remainingTracks = activeAudioStream
+                .getAudioTracks()
+                .filter((audioTrack) =>
+                  audioTrack !== sharedAudioTrack && audioTrack.readyState === "live"
+                );
+              screenAudioStreamRef.current = remainingTracks.length
+                ? new MediaStream(remainingTracks)
+                : null;
+              setScreenAudioEnabled(remainingTracks.length > 0);
+              try {
+                const mixedAudio = rebuildOutgoingAudioStream(
+                  microphoneSourceRef.current,
+                  screenAudioStreamRef.current,
+                );
+                void replaceOutgoingAudioStream(mixedAudio);
+              } catch {
+                void replaceOutgoingAudioStream(null);
+              }
+            };
+          }
+          try {
+            const mixedAudio = rebuildOutgoingAudioStream(
+              microphoneSourceRef.current,
+              screenAudioStreamRef.current,
+            );
+            await replaceOutgoingAudioStream(mixedAudio);
+          } catch {
+            screenAudioStreamRef.current?.getTracks().forEach((audioTrack) => audioTrack.stop());
+            screenAudioStreamRef.current = null;
+            setScreenAudioEnabled(false);
+            const microphoneOnly = rebuildOutgoingAudioStream(
+              microphoneSourceRef.current,
+              null,
+            );
+            await replaceOutgoingAudioStream(microphoneOnly);
+          }
+        }
 
         // Kullanıcı tarayıcı arayüzünden paylaşımı durdurursa temizle.
         track.onended = () => stopVideo(kind);
@@ -1136,7 +1484,21 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       trackRef.current = null;
       track?.stop();
       if (kind === "camera") setLocalCameraStream(null);
-      else setLocalScreenStream(null);
+      else {
+        setLocalScreenStream(null);
+        screenAudioStreamRef.current?.getTracks().forEach((audioTrack) => audioTrack.stop());
+        screenAudioStreamRef.current = null;
+        setScreenAudioEnabled(false);
+        try {
+          const mixedAudio = rebuildOutgoingAudioStream(
+            microphoneSourceRef.current,
+            null,
+          );
+          void replaceOutgoingAudioStream(mixedAudio);
+        } catch {
+          void replaceOutgoingAudioStream(null);
+        }
+      }
       for (const [peerId, peer] of peersRef.current) {
         const transceiver = kind === "camera" ? peer.cameraTransceiver : peer.screenTransceiver;
         if (transceiver) {
@@ -1170,24 +1532,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
           audio: buildAudioConstraints(voiceSettingsRef.current),
         });
         const processedStream = await processMicrophoneStream(newStream);
-        const newTrack = processedStream.getAudioTracks()[0];
-        if (!newTrack) return;
-        newTrack.enabled = !mutedRef.current;
-        for (const [, peer] of peersRef.current) {
-          const transceiver = peer.audioTransceiver;
-          if (!transceiver) continue;
-          await transceiver.sender.replaceTrack(newTrack);
-          if (transceiver.direction === "recvonly") {
-            transceiver.direction = "sendrecv";
-            peer.requestNegotiation();
-          } else if (transceiver.direction === "inactive") {
-            transceiver.direction = "sendonly";
-            peer.requestNegotiation();
-          }
-        }
-        localStreamRef.current?.getAudioTracks().forEach((t) => t.stop());
-        localStreamRef.current = processedStream;
-        setMicEpoch((e) => e + 1); // konuşma-tespiti analyser'ını yeni track'le yeniden kur
+        await replaceOutgoingAudioStream(processedStream);
       } catch (err) {
         setError(`Mikrofon değiştirilemedi: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -1211,6 +1556,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       window.removeEventListener("online", handleOnline);
       videoControlRef.current = null;
       micControlRef.current = null;
+      audioReplaceRef.current = null;
       cleanup();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1218,10 +1564,11 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
 
   // Konuşma tespiti: yerel mikrofon seviyesini izler, eşiği geçince "speaking" bildirir.
   useEffect(() => {
-    if (!connected || !localStreamRef.current) return;
+    if (!connected || !microphoneSourceRef.current) return;
 
     const audioContext = new AudioContext();
-    const source = audioContext.createMediaStreamSource(localStreamRef.current);
+    // Yayın sesi konuşma halkasını tetiklemesin; yalnızca ham mikrofon kaynağını ölç.
+    const source = audioContext.createMediaStreamSource(microphoneSourceRef.current);
     const analyser = audioContext.createAnalyser();
     analyser.fftSize = 256;
     source.connect(analyser);
@@ -1275,6 +1622,78 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     };
   }, [connected, micEpoch]);
 
+  useEffect(() => {
+    if (!connected) {
+      setConnectionQuality({ level: "unknown", pingMs: null, packetLossPercent: null });
+      return;
+    }
+    const previousCounters = new Map<string, { received: number; lost: number }>();
+    let cancelled = false;
+
+    async function sampleConnectionQuality() {
+      const rtts: number[] = [];
+      let receivedDelta = 0;
+      let lostDelta = 0;
+      for (const [peerId, peer] of peersRef.current) {
+        let stats: RTCStatsReport;
+        try {
+          stats = await peer.pc.getStats();
+        } catch {
+          continue;
+        }
+        stats.forEach((report) => {
+          if (
+            report.type === "candidate-pair" &&
+            report.state === "succeeded" &&
+            typeof report.currentRoundTripTime === "number"
+          ) {
+            rtts.push(report.currentRoundTripTime * 1000);
+          }
+          if (
+            report.type === "inbound-rtp" &&
+            typeof report.packetsReceived === "number" &&
+            typeof report.packetsLost === "number"
+          ) {
+            const key = `${peerId}:${report.id}`;
+            const previous = previousCounters.get(key);
+            if (previous) {
+              receivedDelta += Math.max(0, report.packetsReceived - previous.received);
+              lostDelta += Math.max(0, report.packetsLost - previous.lost);
+            }
+            previousCounters.set(key, {
+              received: report.packetsReceived,
+              lost: report.packetsLost,
+            });
+          }
+        });
+      }
+      if (cancelled) return;
+      const pingMs = rtts.length
+        ? Math.round(rtts.reduce((sum, value) => sum + value, 0) / rtts.length)
+        : null;
+      const packetTotal = receivedDelta + lostDelta;
+      const packetLossPercent = packetTotal > 0
+        ? Math.round((lostDelta / packetTotal) * 1000) / 10
+        : null;
+      const level: VoiceConnectionQuality["level"] =
+        pingMs === null && packetLossPercent === null
+          ? "unknown"
+          : (pingMs ?? 0) < 120 && (packetLossPercent ?? 0) < 2
+            ? "good"
+            : (pingMs ?? 0) < 250 && (packetLossPercent ?? 0) < 6
+              ? "fair"
+              : "poor";
+      setConnectionQuality({ level, pingMs, packetLossPercent });
+    }
+
+    void sampleConnectionQuality();
+    const timer = window.setInterval(() => void sampleConnectionQuality(), 5_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [connected]);
+
   // Çıkış cihazı (hoparlör) değişince mevcut uzak ses elemanlarına uygula.
   useEffect(() => {
     audioElsRef.current.forEach((el) => {
@@ -1285,7 +1704,11 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
 
   useEffect(() => {
     const gain = microphoneGraphRef.current?.gain;
-    if (gain) gain.gain.value = Math.max(0, Math.min(2, voiceSettings.inputVolume / 100));
+    if (gain) {
+      gain.gain.value = mutedRef.current
+        ? 0
+        : Math.max(0, Math.min(2, voiceSettings.inputVolume / 100));
+    }
   }, [voiceSettings.inputVolume]);
 
   // Mikrofon veya ses işleme ayarı değişince, görüşme sürüyorsa canlı geçiş yap.
@@ -1350,16 +1773,26 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     deafened,
     cameraEnabled: Boolean(localCameraStream),
     screenShareEnabled: Boolean(localScreenStream),
+    screenAudioEnabled,
     localCameraStream,
     localScreenStream,
     remoteStreams,
     ignoredRemoteVideoIds,
+    remoteVolumes,
+    soundboardVolume,
+    soundboardMuted,
+    connectionQuality,
     error,
     toggleMute,
     toggleDeafen,
     toggleCamera,
     toggleScreenShare,
     toggleRemoteVideo,
+    setRemoteVolume,
+    playSoundboardPreset,
+    playSoundboardClip,
+    setSoundboardVolume,
+    toggleSoundboardMute,
     disconnect: cleanup,
   };
 }

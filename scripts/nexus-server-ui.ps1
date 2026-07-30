@@ -481,7 +481,7 @@ $initializeButton = Add-Button $actionsGroup 'Initialize new server' 20 35 180
 $updateButton = Add-Button $actionsGroup 'Safe update' 215 35 180
 $deployButton = Add-Button $actionsGroup 'Deploy current code' 410 35 180
 $startButton = Add-Button $actionsGroup 'Start stack' 605 35 180
-$statusButton = Add-Button $actionsGroup 'Status' 20 95 180
+$statusButton = Add-Button $actionsGroup 'Setup readiness' 20 95 180
 $diagnoseButton = Add-Button $actionsGroup 'Diagnose' 215 95 180
 $envButton = Add-Button $actionsGroup 'Open .env' 410 95 180
 $folderButton = Add-Button $actionsGroup 'Open project folder' 605 95 180
@@ -494,7 +494,7 @@ $initializeButton.Add_Click({ Start-ServerAction 'Initialize' })
 $updateButton.Add_Click({ Start-ServerAction 'Update' })
 $deployButton.Add_Click({ Start-ServerAction 'Deploy' })
 $startButton.Add_Click({ Start-ServerAction 'Start' })
-$statusButton.Add_Click({ Start-ServerAction 'Status' })
+$statusButton.Add_Click({ Start-ServerAction 'SetupCheck' })
 $diagnoseButton.Add_Click({ Start-ServerAction 'Diagnose' })
 $validateButton.Add_Click({ Start-ServerAction 'Validate' })
 $stopButton.Add_Click({

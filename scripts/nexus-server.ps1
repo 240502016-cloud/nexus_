@@ -2,7 +2,7 @@
 param(
     [ValidateSet(
         'Help', 'Configure', 'Initialize', 'Validate', 'Deploy', 'Update',
-        'Start', 'Stop', 'Restart', 'Status', 'Diagnose', 'Backup', 'RepairDatabase'
+        'Start', 'Stop', 'Restart', 'Status', 'SetupCheck', 'Diagnose', 'Backup', 'RepairDatabase'
     )]
     [string]$Action = 'Help',
     [string]$ServerAddress,
@@ -686,6 +686,169 @@ function Show-Status {
     Invoke-Compose -Arguments @('ps', '-a')
 }
 
+function Show-SetupReadiness {
+    Write-Host "`nNexus Setup Wizard - readiness check" -ForegroundColor Cyan
+    Write-Host "This check does not start, stop, delete or migrate anything.`n" -ForegroundColor DarkGray
+
+    $dockerCommand = Get-Command docker -ErrorAction SilentlyContinue
+    if (-not $dockerCommand) {
+        Write-Host '[MISSING] Docker Desktop is not installed or docker.exe is not in PATH.' -ForegroundColor Red
+        Write-Host '[NEXT] Install Docker Desktop, restart Windows if requested, then run this check again.'
+        return
+    }
+    Write-Host '[OK] Docker command is installed.' -ForegroundColor Green
+
+    if (-not (Test-DockerEngine)) {
+        Write-Host '[WAITING] Docker Desktop is installed but the engine is not running.' -ForegroundColor Yellow
+        Write-Host '[NEXT] Open Docker Desktop and wait for Engine running.'
+        return
+    }
+    Write-Host '[OK] Docker engine is running.' -ForegroundColor Green
+
+    try {
+        Invoke-Checked -FilePath 'docker' -Arguments @('compose', 'version') | Out-Null
+        Write-Host '[OK] Docker Compose is available.' -ForegroundColor Green
+    }
+    catch {
+        Write-Host "[MISSING] Docker Compose is unavailable: $($_.Exception.Message)" -ForegroundColor Red
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $envPath)) {
+        Write-Host '[WAITING] .env has not been created.' -ForegroundColor Yellow
+        Write-Host '[NEXT] Use Initialize new server in Nexus Server Manager.'
+        return
+    }
+    Write-Host '[OK] Environment file exists (secret values are not displayed).' -ForegroundColor Green
+
+    try {
+        Assert-EnvironmentFile
+        Write-Host '[OK] Required environment values are present.' -ForegroundColor Green
+    }
+    catch {
+        Write-Host "[ACTION] Environment needs attention: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+    $values = Read-EnvironmentFile
+
+    try {
+        Invoke-Compose -Arguments @('config', '--quiet') | Out-Null
+        Write-Host '[OK] Docker Compose configuration is valid.' -ForegroundColor Green
+    }
+    catch {
+        Write-Host "[ACTION] Compose configuration is invalid: $($_.Exception.Message)" -ForegroundColor Red
+        return
+    }
+
+    $httpPort = if ($values.ContainsKey('NEXUS_HTTP_PORT')) { [int]$values['NEXUS_HTTP_PORT'] } else { 80 }
+    $httpsPort = if ($values.ContainsKey('NEXUS_HTTPS_PORT')) { [int]$values['NEXUS_HTTPS_PORT'] } else { 443 }
+    $turnPort = if ($values.ContainsKey('TURN_PORT')) { [int]$values['TURN_PORT'] } else { 3478 }
+    Write-Host "[INFO] Domain: $($values['NEXUS_DOMAIN']) | Web ports: TCP $httpPort/$httpsPort | TURN: TCP+UDP $turnPort" -ForegroundColor DarkGray
+
+    if (Test-PublicTunnelConfigured) {
+        Write-Host '[OK] Cloudflare Tunnel token is configured (value hidden).' -ForegroundColor Green
+    }
+    else {
+        Write-Host '[OPTIONAL] Cloudflare Tunnel is waiting for configuration.' -ForegroundColor Yellow
+    }
+
+    $runningServices = @()
+    try {
+        $runningServices = @(
+            (Invoke-Compose -Arguments @('ps', '--status', 'running', '--services') -Capture) `
+                -split '\r?\n' |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        )
+    }
+    catch {
+        Write-Host '[INFO] Containers have not been created yet.' -ForegroundColor DarkGray
+    }
+
+    foreach ($service in @('postgres', 'matrix', 'backend', 'frontend', 'reverse-proxy')) {
+        if ($runningServices -contains $service) {
+            Write-Host "[OK] $service is running." -ForegroundColor Green
+        }
+        else {
+            Write-Host "[WAITING] $service is not running." -ForegroundColor Yellow
+        }
+    }
+    Write-Step 'Container overview'
+    try {
+        Invoke-Compose -Arguments @('ps')
+    }
+    catch {
+        Write-Host "[INFO] Detailed container status is unavailable: $($_.Exception.Message)" -ForegroundColor DarkGray
+    }
+
+    if ($runningServices -contains 'reverse-proxy') {
+        Write-Host "[OK] Web ports $httpPort and $httpsPort are published by reverse-proxy." -ForegroundColor Green
+    }
+    elseif (Get-Command Get-NetTCPConnection -ErrorAction SilentlyContinue) {
+        foreach ($port in @($httpPort, $httpsPort)) {
+            $listener = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+            if ($listener) {
+                Write-Host "[ACTION] TCP port $port is already used by process $($listener.OwningProcess)." -ForegroundColor Yellow
+            }
+            else {
+                Write-Host "[OK] TCP port $port is available for Nexus." -ForegroundColor Green
+            }
+        }
+    }
+
+    if ($runningServices -contains 'turn') {
+        Write-Host "[OK] TURN port $turnPort is published for TCP and UDP." -ForegroundColor Green
+    }
+    else {
+        Write-Host "[WAITING] TURN service is not running; verify TCP+UDP $turnPort before public voice tests." -ForegroundColor Yellow
+    }
+
+    if ($runningServices -contains 'postgres') {
+        try {
+            Invoke-Compose -Arguments @(
+                'exec', '-T', 'postgres', 'pg_isready',
+                '-U', $values['POSTGRES_USER'], '-d', $values['POSTGRES_DB']
+            ) -Capture | Out-Null
+            Write-Host '[OK] Database accepts connections.' -ForegroundColor Green
+        }
+        catch {
+            Write-Host "[ACTION] Database container is running but not ready: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+
+    if ($runningServices -contains 'backend') {
+        try {
+            $revision = Invoke-Compose -Arguments @('exec', '-T', 'backend', 'alembic', 'current') -Capture
+            $heads = Invoke-Compose -Arguments @('exec', '-T', 'backend', 'alembic', 'heads') -Capture
+            $currentRevision = if ($revision -match '(?m)^([0-9a-f]+)') { $Matches[1] } else { '' }
+            $headRevision = if ($heads -match '(?m)^([0-9a-f]+)') { $Matches[1] } else { '' }
+            if ($currentRevision -and $currentRevision -eq $headRevision) {
+                Write-Host "[OK] Database migrations are current ($currentRevision)." -ForegroundColor Green
+            }
+            else {
+                Write-Host "[ACTION] Migration revision differs. Current='$revision' Head='$heads'." -ForegroundColor Yellow
+            }
+        }
+        catch {
+            Write-Host "[ACTION] Migration status could not be read: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+
+    $originPathHealthy = $false
+    if ($runningServices -contains 'reverse-proxy') {
+        $originPathHealthy = Test-TunnelOriginPath
+    }
+    if (Test-PublicTunnelConfigured) {
+        Show-PublicTunnelDiagnostic -OriginPathHealthy $originPathHealthy
+    }
+
+    if (-not (Test-AiGateway)) {
+        Write-Host '[OPTIONAL] AI Gateway is offline; Nexus core features can still run.' -ForegroundColor Yellow
+    }
+
+    Test-LegacyWindowsCloudflared
+    Write-Host "`nReadiness check finished. Use Diagnose for detailed logs." -ForegroundColor Cyan
+}
+
 function Invoke-Validation {
     Assert-Prerequisites
     Assert-EnvironmentFile
@@ -736,6 +899,7 @@ Other actions:
   -Action Stop       Stop containers without deleting them or their volumes
   -Action Restart    Restart the existing stack
   -Action Status     Show all container states
+  -Action SetupCheck Friendly, read-only Docker/environment/service readiness wizard
   -Action Diagnose   Classify local origin, Docker network and public Tunnel failures
   -Action Backup     Create PostgreSQL backups
   -Action RepairDatabase  Back up and repair Synapse C/C locale
@@ -790,6 +954,7 @@ switch ($Action) {
         Invoke-Compose -Arguments @('ps', '-a')
     }
     'Status' { Show-Status }
+    'SetupCheck' { Show-SetupReadiness }
     'Diagnose' { Invoke-Diagnose }
     'Backup' {
         Assert-Prerequisites

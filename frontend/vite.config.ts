@@ -1,21 +1,24 @@
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 
-export default defineConfig(({ mode }) => ({
-  // Web production keeps root-relative assets; the packaged nexus:// origin needs relative assets.
-  base: mode === "desktop" ? "./" : "/",
-  plugins: [react()],
-  server: {
-    // Allow other devices on the LAN to open the dev client.
-    host: "0.0.0.0",
-    port: 5173,
-    proxy: {
-      "/api": {
-        target: "http://localhost:8000",
-        changeOrigin: true,
-        ws: true,
-        rewrite: (path) => path.replace(/^\/api/, ""),
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, ".", "");
+  return {
+    // Web production keeps root-relative assets; the packaged nexus:// origin needs relative assets.
+    base: mode === "desktop" ? "./" : "/",
+    plugins: [react()],
+    server: {
+      // Allow other devices on the LAN to open the dev client.
+      host: "0.0.0.0",
+      port: 5173,
+      proxy: {
+        "/api": {
+          target: env.NEXUS_DEV_API_TARGET ?? "http://localhost:8000",
+          changeOrigin: true,
+          ws: true,
+          rewrite: (path) => path.replace(/^\/api/, ""),
+        },
       },
     },
-  },
-}));
+  };
+});

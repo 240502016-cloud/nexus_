@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getToken } from "../api/client";
 import { webSocketUrl } from "../desktopBridge";
-import type { Message } from "../types";
+import type { Message, MessageReaction } from "../types";
 
 export interface IncomingCall {
   fromUser: number;
@@ -52,6 +52,15 @@ export interface ChannelMessageEvent {
   sequence: number;
 }
 
+export interface ChannelMetaEvent {
+  channelId: number;
+  serverId: number;
+  eventId: string | null;
+  reactions: MessageReaction[] | null;
+  pinsChanged: boolean;
+  sequence: number;
+}
+
 export interface DirectMessageEvent {
   conversationId: number;
   senderId: number;
@@ -83,6 +92,8 @@ export function useGateway(enabled: boolean) {
   const [presences, setPresences] = useState<Map<number, PresenceInfo>>(new Map());
   const [selfStatus, setSelfStatus] = useState<SelfStatus>({ status: "online", custom: "" });
   const [channelMessage, setChannelMessage] = useState<ChannelMessageEvent | null>(null);
+  const [channelMeta, setChannelMeta] = useState<ChannelMetaEvent | null>(null);
+  const [typingUsers, setTypingUsers] = useState<Map<number, Map<number, string>>>(new Map());
   const [directMessage, setDirectMessage] = useState<DirectMessageEvent | null>(null);
   const [socialEventSequence, setSocialEventSequence] = useState(0);
   const [socialEvent, setSocialEvent] = useState<SocialEvent | null>(null);
@@ -97,6 +108,8 @@ export function useGateway(enabled: boolean) {
   const backoffRef = useRef(RECONNECT_MIN_MS);
   const messageSequenceRef = useRef(0);
   const directMessageSequenceRef = useRef(0);
+  const channelMetaSequenceRef = useRef(0);
+  const typingTimersRef = useRef<Map<string, number>>(new Map());
   const socialEventSequenceRef = useRef(0);
   const outgoingRef = useRef<OutgoingCall | null>(null);
   outgoingRef.current = outgoingCall;
@@ -106,6 +119,19 @@ export function useGateway(enabled: boolean) {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(message));
     }
+  }, []);
+
+  const clearTypingUser = useCallback((channelId: number, userId: number) => {
+    setTypingUsers((previous) => {
+      const channelUsers = previous.get(channelId);
+      if (!channelUsers?.has(userId)) return previous;
+      const next = new Map(previous);
+      const updatedUsers = new Map(channelUsers);
+      updatedUsers.delete(userId);
+      if (updatedUsers.size) next.set(channelId, updatedUsers);
+      else next.delete(channelId);
+      return next;
+    });
   }, []);
 
   useEffect(() => {
@@ -217,6 +243,44 @@ export function useGateway(enabled: boolean) {
             sequence: messageSequenceRef.current,
           });
           break;
+        case "channel-message-meta":
+          channelMetaSequenceRef.current += 1;
+          setChannelMeta({
+            channelId: data.channel_id as number,
+            serverId: data.server_id as number,
+            eventId: (data.event_id as string | undefined) ?? null,
+            reactions: (data.reactions as MessageReaction[] | undefined) ?? null,
+            pinsChanged: Boolean(data.pins_changed),
+            sequence: channelMetaSequenceRef.current,
+          });
+          break;
+        case "channel-typing": {
+          const channelId = data.channel_id as number;
+          const userId = data.user_id as number;
+          const timerKey = `${channelId}:${userId}`;
+          const previousTimer = typingTimersRef.current.get(timerKey);
+          if (previousTimer !== undefined) window.clearTimeout(previousTimer);
+          typingTimersRef.current.delete(timerKey);
+          if (!data.typing) {
+            clearTypingUser(channelId, userId);
+            break;
+          }
+          setTypingUsers((previous) => {
+            const next = new Map(previous);
+            const channelUsers = new Map(next.get(channelId) ?? []);
+            channelUsers.set(userId, (data.username as string) ?? "Bir kullanıcı");
+            next.set(channelId, channelUsers);
+            return next;
+          });
+          typingTimersRef.current.set(
+            timerKey,
+            window.setTimeout(() => {
+              typingTimersRef.current.delete(timerKey);
+              clearTypingUser(channelId, userId);
+            }, 4_500),
+          );
+          break;
+        }
         case "direct-message":
           directMessageSequenceRef.current += 1;
           setDirectMessage({
@@ -334,6 +398,9 @@ export function useGateway(enabled: boolean) {
       setConnected(false);
       setPresences(new Map());
       setVoiceStates(new Map());
+      typingTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+      typingTimersRef.current.clear();
+      setTypingUsers(new Map());
       setIncomingCall(null);
       setOutgoingCall(null);
     };
@@ -343,6 +410,13 @@ export function useGateway(enabled: boolean) {
     (status: SelfStatus["status"], custom: string) => {
       setSelfStatus({ status, custom });
       send({ type: "set-status", status, custom });
+    },
+    [send],
+  );
+
+  const sendTyping = useCallback(
+    (channelId: number, typing: boolean) => {
+      send({ type: "typing", channel_id: channelId, typing });
     },
     [send],
   );
@@ -384,6 +458,9 @@ export function useGateway(enabled: boolean) {
     selfStatus,
     setStatus,
     channelMessage,
+    channelMeta,
+    typingUsers,
+    sendTyping,
     directMessage,
     socialEvent,
     socialEventSequence,

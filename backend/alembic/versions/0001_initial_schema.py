@@ -25,6 +25,8 @@ _LATER_REVISION_TABLES = {
     "chance_game_sessions",
     "chance_wheels",
     "friendships",
+    "server_invites",
+    "server_join_codes",
 }
 
 

@@ -118,19 +118,24 @@ origin  https://github.com/240502016-cloud/nexus_.git
 cekingen
 ```
 
-### Bu devir hazırlanırken doğrulanan HEAD
+### Bu geliştirme paketinin taban HEAD'i
 
 ```text
-72a1ff11de48d5eab67dfa3df5de1579961a867d
-72a1ff1 fix auth retries and WebRTC negotiation
+f34e1ec72c8f058db2b1d758b8fc83a8de843153
+f34e1ec Add message replies and polish media stage
 ```
 
-Bu özet dosyasının yenilenmesi doğal olarak çalışma ağacında yeni bir değişiklik oluşturur.
-Koda devam etmeden önce yeniden `git status --short --branch` çalıştırılmalıdır.
+29–30 Temmuz 2026 tarihli ses, mesajlaşma, kurulum kontrolü ve profesyonel UI geliştirmeleri
+bu tabanın üzerinde tek teslim paketi olarak birleştirilmiştir. Koda devam etmeden önce yeniden
+`git status --short --branch` ve `git log -1 --oneline` çalıştırılmalıdır.
 
 ### Yakın dönem önemli commitler
 
 ```text
+f34e1ec Add message replies and polish media stage
+9f443b3 Repair bidirectional WebRTC video tracks
+1ac66ab Fix remote camera and screen sharing
+8c10129 Improve tunnel diagnostics and project handoff
 72a1ff1 fix auth retries and WebRTC negotiation
 5057922 Retry public checks during transient tunnel errors
 52ad32e Add desktop client and resilient server joining
@@ -708,6 +713,23 @@ https://cekin.gen.tr/?invite=<kod>
   geçmişinde korunur.
 - Kullanıcı yanıt önizlemesine tıklayarak hedef mesaj hâlâ yüklenen sayfadaysa ona kayabilir.
 
+### Reaksiyon, mention, unread, typing, arama ve pin
+
+- Mesaj reaksiyonları Matrix `m.reaction` / `m.annotation` ilişkileriyle kalıcıdır.
+- Aynı emojiye yeniden basmak kullanıcının reaksiyonunu Matrix redaction ile kaldırır.
+- UI optimistic güncellenir; ardından Matrix'in yetkili özeti ve
+  `channel-message-meta` gateway olayıyla uzlaştırılır.
+- `@kullanıcı` yazılırken sunucu üyeleri önerilir; Matrix `m.mentions` alanı F5 sonrası korunur.
+- Mention metin içinde vurgulanır ve kullanıcı ayarından mention bildirimi kapatılabilir.
+- Kanal unread sayaçları kullanıcı kimliğiyle localStorage'da tutulur, kanala girince temizlenir
+  ve F5 sonrası korunur. Uygulama tamamen kapalıyken kaçan mesajlar için Matrix receipt tabanlı
+  server-side unread henüz yoktur.
+- Typing durumu yalnız gateway belleğindedir; DB'ye yazılmaz, 750 ms throttle ve istemcide
+  4,5 saniyelik otomatik süre sonu vardır.
+- Kanal/kelime/kullanıcı filtreli arama Matrix `/search` üzerinden çalışır; ayrı arama servisi yoktur.
+- Sabit mesajlar Matrix `m.room.pinned_events` state'inde tutulur. En fazla 50 pin gösterilir ve
+  yönetim işlemi Nexus `MANAGE_MESSAGES` izniyle denetlenir.
+
 ### Çok satırlı mesaj
 
 - Enter mesajı gönderir.
@@ -794,8 +816,14 @@ Durum ve özel durum ana araç çubuğundan kaldırılmış, Ayarlar'a taşınm�
 - Mikrofon açık/kapalı durumu tüm peer'lere yansıtılır.
 - Hoparlör seçimi `setSinkId` destekleyen Chrome/Edge'de çalışır.
 - Gürültü bastırma, echo cancellation ve auto gain gerçek MediaTrackConstraints ile uygulanır.
+- Gürültü engelleme açıkken mikrofonda 80 Hz high-pass filtre ve yumuşak compressor da uygulanır;
+  masa/klavye kaynaklı düşük frekanslar ile ani seviye sıçramaları azaltılır.
+- Mikrofon giriş seviyesi %0–200 aralığındadır; %100 üzeri yazılımsal yükseltmedir.
+- Her uzak katılımcı için yalnız yerel tarayıcıda geçerli %0–200 ses seviyesi ayarlanabilir;
+  tercihler kullanıcı kimliğine göre localStorage'da korunur.
 - Görüşme sırasında mikrofon değişimi `replaceTrack` ile bağlantı kesmeden yapılır.
-- Mikrofon seviye testi, kamera önizleme ve hoparlör test sesi vardır.
+- Mikrofon seviye testi seçili cihazı, giriş seviyesini ve tarayıcı ses işleme tercihlerini
+  dikkate alır; kamera önizleme ve hoparlör test sesi de vardır.
 
 ### Push-to-talk
 
@@ -861,16 +889,39 @@ The order of m-lines in subsequent offer doesn't match order from previous offer
 ### Ekran paylaşımı
 
 - Aktif ekran paylaşımı yayın odası benzeri ana sahneye alınır.
+- Kullanıcı tarayıcının paylaşım penceresinde sekme/sistem sesini seçerse yayın sesi mikrofondan
+  bağımsız olarak mevcut WebRTC audio hattına karıştırılır; yeni m-line eklenmez.
+- Mikrofonu susturmak yayın sesini susturmaz. Yayın sesinin kesilmesi veya paylaşımın bitmesi
+  halinde mikrofon hattı görüşmeyi koparmadan devam eder.
+- Yayın sesi gerçekten alındığında sol ses panelinde “Yayın sesi açık”, yerel sahne etiketinde
+  “EKRAN + SES” görünür.
 - Kamera/profil önizlemeleri masaüstünde sağ şeritte, dar ekranda alt şeritte yer alır.
 - Kamera kapalı ve yalnız yayın açıksa gereksiz profil döşemesi kaldırılır.
 - Kaynak ekranın dört kenarı korunur.
+
 - Genişlik/yükseklik zorlamasıyla kırpma yapılmaz.
 - Video mutlak sahne sınırlarına oturur ve `object-fit: contain` kullanır.
 - Kaynak en-boy oranı bozulmaz.
 - Ekran paylaşan kullanıcının üstü/altı/yanları hiçbir sahne oranında kesilmemelidir.
 - Normal sahnede tekrar eden üst yayın bilgi bloğu ve alt görüşme kontrol çubuğu yoktur.
-- Sahneyi gizle ve tam ekran kontrolleri medya üzerinde soldaki kompakt çubuktadır; kaldırılan
-  dikey alan sohbet ekranına geri verilirken gerçek medya görüntü alanı küçültülmez.
+- Sahneyi gizle ve tam ekran kontrolleri normal görünümde birleşik kanal header'ındadır.
+- Tam ekranda ses/medya, görünüm ve ayrılma kontrolleri alt güvenli alanda kalır; sol üst köşe
+  medya içeriği için tamamen açıktır.
+
+### Soundboard ve bağlantı kalitesi
+
+- Ses kanalında hazır Komik/Oyun sesleri ve kullanıcıya özel kategorili klipler vardır.
+- Özel klipler yalnız kullanıcının tarayıcısındaki IndexedDB'de tutulur; server veya Matrix'e
+  yük bindirmez. Dosya tipi sınırlandırılmış, üst sınır 2 MB ve oynatma süresi 12 saniyedir.
+- Soundboard, mikrofon ve varsa ekran sesi mevcut tek WebRTC audio m-line'ında Web Audio ile
+  karıştırılır; yeni servis veya ikinci signaling akışı yoktur.
+- Mikrofon mute yalnız mikrofon gain'ini kapatır; soundboard'un ayrı mute/seviye ayarı ve bilinçli
+  ekran sesi paylaşımı korunur. Deafen açıkken soundboard oynatılamaz.
+- Soundboard paneli `document.body` portalında açılır; sidebar overflow/blur katmanları tarafından
+  kırpılmaz. Kategori sekmeleri, çıkış seviyesi, mute durumu, çalma göstergesi ve özel ses yükleme
+  alanı aynı premium UI diliyle sunulur.
+- WebRTC `getStats()` beş saniyede bir RTT ve inbound paket kaybı örnekler; kullanıcıya
+  iyi/orta/zayıf bağlantı göstergesi sunulur.
 
 ### Focus ve grid'e dönüş
 
@@ -1112,6 +1163,10 @@ POST /api/ai/jobs/{job_id}/cancel
 
 - İptal cooperative'dir.
 - Ücretli OpenAI/Anthropic API zorunluluğu yoktur.
+- Kanal araç çubuğundaki AI yardımcısı, en fazla son 60 yüklü mesajı ve sınırlı metin boyutunu
+  mevcut kalıcı AI kuyruğuna göndererek “Ben yokken ne oldu?” özeti veya akıllı arama üretir.
+- AI Gateway kapalı/ulaşılamazsa yalnız AI paneli pasiflik mesajı verir; mesaj, ses ve medya
+  işlevleri etkilenmez.
 
 ### AI Gateway
 
@@ -1181,6 +1236,7 @@ Sunulan ana işlemler:
 - Stop
 - Restart
 - Status
+- Setup readiness
 - Diagnose
 - Backup
 - RepairDatabase
@@ -1219,6 +1275,7 @@ Public-Tunnel-Ayarla.cmd
 ### PowerShell CLI
 
 ```powershell
+.\scripts\nexus-server.ps1 -Action SetupCheck
 .\scripts\nexus-server.ps1 -Action Status
 .\scripts\nexus-server.ps1 -Action Diagnose
 .\scripts\nexus-server.ps1 -Action Start
@@ -1228,6 +1285,12 @@ Public-Tunnel-Ayarla.cmd
 .\scripts\nexus-server.ps1 -Action Update -GitBranch cekingen
 .\scripts\nexus-server.ps1 -Action Backup
 ```
+
+`SetupCheck` salt okunurdur; servis başlatmaz, migration çalıştırmaz ve veri silmez. Docker/Compose,
+`.env`, web ve TURN portları, container durumu, PostgreSQL bağlantısı, mevcut/hedef Alembic revision,
+yerel reverse-proxy origin'i, public Cloudflare/DNS yolu ve AI Gateway durumunu anlaşılır
+`OK/WAITING/ACTION/OPTIONAL` satırlarıyla gösterir. Teknik olmayan kullanım için kökte
+`Nexus-Setup-Kontrol.cmd` bulunur.
 
 ---
 
@@ -1398,7 +1461,7 @@ Bu belge hazırlanırken yerelde yeniden çalıştırılan kontroller:
 ### Backend
 
 ```text
-33 passed
+46 passed
 ```
 
 ### AI Gateway
@@ -1440,6 +1503,7 @@ health ve iki gerçek kullanıcıyla smoke test edilmelidir.
 - Auth retry/idempotency
 - Şans oyunları
 - Matrix pagination
+- Matrix mention/reaction/search/pin sözleşmeleri ve mesaj endpoint yetkileri
 - Müzik botu WebRTC
 - Ollama client ve error mapping
 - Plugin loader
@@ -1545,22 +1609,15 @@ health ve iki gerçek kullanıcıyla smoke test edilmelidir.
 ### P1 — gözlemlenebilirlik
 
 - Caddy/tunnel/backend/Matrix health durumlarını tek admin ekranında göster.
-- WebRTC `getStats()` ile:
-  - bitrate,
-  - packet loss,
-  - RTT,
-  - selected candidate type,
-  - çözünürlük/FPS göster.
+- WebRTC `getStats()` göstergesini bitrate, selected candidate type ve çözünürlük/FPS ile genişlet.
 - Kullanıcıya teknik ham hata yerine eyleme dönük durum mesajı sun.
 
 ### P2 — mesajlaşma
 
-- Emoji tepkileri.
-- Yanıtlama/thread.
-- Mesaj arama.
-- Sabitlenmiş mesajlar.
-- Yazıyor göstergesi.
-- Okunmamış kanal sayaçları ve mention.
+- Matrix receipt tabanlı, cihazlar arası server-side unread/okundu durumu.
+- Reaksiyon veren kullanıcı listesini açan detay popover'ı.
+- Arama sonucunun yüklenmemiş tarih sayfasını doğrudan açma.
+- Konu/thread görünümü.
 
 ### P2 — güvenlik/yönetim
 
@@ -1577,7 +1634,7 @@ health ve iki gerçek kullanıcıyla smoke test edilmelidir.
 - Katılımcı sayısı büyürse self-hosted SFU değerlendirmesi.
 - Adaptif simulcast/SVC.
 - Otomatik kalite düşürme/yükseltme.
-- Kullanıcı başına yerel ses seviyesi ve susturma.
+- Büyük odalarda kullanıcı başına ayarları koruyacak self-hosted SFU ses miksajı.
 
 ---
 
@@ -1793,8 +1850,14 @@ AI kapalıysa mesajlaşma/ses/web uygulaması yine çalışmalıdır.
 - Kod tabanı işlevsel bir React + FastAPI + PostgreSQL + Matrix + WebRTC iletişim platformudur.
 - Mesaj, sosyal sistem, DM, attachment, bot/plugin, ses, kamera, ekran paylaşımı, kalite ayarı,
   dinamik sahne ve Electron istemcisi uygulanmıştır.
+- Ses geliştirmeleri ekran/sekme sesini mevcut audio hattında
+  paylaşır; kullanıcı başına %0–200 dinleme seviyesi, soundboard, bağlantı kalitesi ve
+  geliştirilmiş mikrofon işleme sunar.
+- Mesaj geliştirmeleri Matrix kalıcılığını koruyarak reaksiyon, mention, unread sayaçları,
+  typing, arama ve pin ekler. Kanal AI özeti/akıllı arama mevcut AI worker kuyruğunu kullanır.
+- Salt okunur SetupCheck kurulum öncesi port, DB, migration, tunnel/DNS ve AI durumunu raporlar.
 - Yerel testler güncel HEAD'de başarılıdır:
-  - backend 33/33,
+  - backend 46/46,
   - AI Gateway 9/9,
   - frontend type-check başarılı,
   - frontend production build başarılı.

@@ -58,6 +58,7 @@ export interface VoiceSettings {
   // Bildirimler.
   desktopNotifications: boolean; // mesaj ve çağrı için işletim sistemi bildirimi
   messageNotifications: boolean; // uygulama içi kenar bildirimi
+  mentionNotifications: boolean; // @mention için sistem bildirimi
   notificationSound: boolean; // yeni mesaj sesi
   callRingtone: boolean; // gelen çağrıda zil sesi
   // Görünüm.
@@ -72,6 +73,18 @@ export interface VoiceSettings {
   desktopToggleMuteKey: string;
   desktopToggleDeafenKey: string;
   desktopFocusAppKey: string;
+}
+
+export function buildAudioConstraints(settings: VoiceSettings): MediaTrackConstraints {
+  return {
+    ...(settings.inputDeviceId ? { deviceId: { exact: settings.inputDeviceId } } : {}),
+    noiseSuppression: settings.noiseSuppression,
+    echoCancellation: settings.echoCancellation,
+    autoGainControl: settings.autoGainControl,
+    channelCount: { ideal: 1 },
+    sampleRate: { ideal: 48_000 },
+    sampleSize: { ideal: 16 },
+  };
 }
 
 const STORAGE_KEY = "nexus.voiceSettings";
@@ -93,6 +106,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   autoGainControl: true,
   desktopNotifications: false,
   messageNotifications: true,
+  mentionNotifications: true,
   notificationSound: true,
   callRingtone: true,
   theme: "dark",
@@ -151,6 +165,7 @@ export function loadVoiceSettings(): VoiceSettings {
       autoGainControl: boolWithDefault(parsed.autoGainControl, true),
       desktopNotifications: boolWithDefault(parsed.desktopNotifications, false),
       messageNotifications: boolWithDefault(parsed.messageNotifications, true),
+      mentionNotifications: boolWithDefault(parsed.mentionNotifications, true),
       notificationSound: boolWithDefault(parsed.notificationSound, true),
       callRingtone: boolWithDefault(parsed.callRingtone, true),
       theme: parsed.theme === "light" || parsed.theme === "system" ? parsed.theme : "dark",

@@ -193,6 +193,12 @@ class MessageReplyPreview(BaseModel):
     content: str
 
 
+class MessageReaction(BaseModel):
+    emoji: str = Field(min_length=1, max_length=16)
+    count: int = Field(ge=0)
+    me: bool = False
+
+
 class MessageRead(BaseModel):
     event_id: str
     sender: str
@@ -202,6 +208,8 @@ class MessageRead(BaseModel):
     is_bot: bool = False
     edited: bool = False
     reply_to: MessageReplyPreview | None = None
+    reactions: list[MessageReaction] = Field(default_factory=list)
+    mentioned_user_ids: list[int] = Field(default_factory=list)
     # Özel bot komutları (örn. gizli oyun hamlesi) Matrix'e yazılmaz. İstemci bu yanıtı
     # alınca iyimser komut balonunu kaldırır.
     hidden: bool = False
@@ -213,6 +221,20 @@ class MessagePage(BaseModel):
     items: list[MessageRead]
     next_cursor: str | None = None
     has_more: bool = False
+
+
+class MessageReactionToggle(BaseModel):
+    emoji: str = Field(min_length=1, max_length=16)
+
+
+class MessageReactionUpdate(BaseModel):
+    event_id: str
+    reactions: list[MessageReaction] = Field(default_factory=list)
+
+
+class PinnedMessagesRead(BaseModel):
+    items: list[MessageRead] = Field(default_factory=list)
+    can_manage: bool = False
 
 
 class AttachmentRead(BaseModel):

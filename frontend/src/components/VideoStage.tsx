@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import type { RemoteVideoStream, VoiceChannelState, VoiceParticipant } from "../hooks/useVoiceChannel";
 import type { User } from "../types";
@@ -172,7 +173,7 @@ export function VideoStage({
       stream: voice.localScreenStream,
       mirror: false,
       speaking: false,
-      label: "EKRAN",
+      label: voice.screenAudioEnabled ? "EKRAN + SES" : "EKRAN",
     }] : []),
     ...remotes.filter((item) =>
       item.kind === "screen" &&
@@ -245,6 +246,8 @@ export function VideoStage({
     );
   }
 
+  const toolbarTarget = document.getElementById("channel-toolbar-portal");
+
   return (
     <section
       className={[
@@ -254,25 +257,41 @@ export function VideoStage({
       ].filter(Boolean).join(" ")}
       ref={stageRef}
     >
-      <div
-        className={isFullscreen
-          ? "video-stage__overlay-controls video-stage__overlay-controls--full"
-          : "video-stage__overlay-controls"}
-        aria-label="Sahne kontrolleri"
-        onClick={(event) => event.stopPropagation()}
-      >
-        {isFullscreen ? (
-          <>
+      {toolbarTarget
+        ? createPortal(
+            <button
+              type="button"
+              className="toolbar-action channel-tool--fullscreen"
+              onClick={() => void toggleFullscreen()}
+              title="Sahneyi tam ekran göster"
+            >
+              <Icon name="screen" />
+              <span>Tam ekran</span>
+            </button>,
+            toolbarTarget,
+          )
+        : null}
+      {isFullscreen ? (
+        <div
+          className="video-stage__overlay-controls video-stage__overlay-controls--full"
+          aria-label="Sahne kontrolleri"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="video-stage__control-group" aria-label="Ses ve medya kontrolleri">
             <button className={voice.muted ? "stage-control stage-control--danger" : "stage-control"} onClick={voice.toggleMute} title={voice.muted ? "Sesi aç" : "Sustur"}><Icon name={voice.muted ? "micOff" : "mic"} /><span>{voice.muted ? "Sesi aç" : "Sustur"}</span></button>
             <button className={voice.deafened ? "stage-control stage-control--danger" : "stage-control"} onClick={voice.toggleDeafen} title={voice.deafened ? "Dinle" : "Sağırlaştır"}><Icon name={voice.deafened ? "headphonesOff" : "headphones"} /><span>{voice.deafened ? "Dinle" : "Sağırlaştır"}</span></button>
             <button className={voice.cameraEnabled ? "stage-control stage-control--active" : "stage-control"} onClick={voice.toggleCamera} title="Kamera"><Icon name="camera" /><span>Kamera</span></button>
             <button className={voice.screenShareEnabled ? "stage-control stage-control--active" : "stage-control"} onClick={voice.toggleScreenShare} title="Ekran paylaş"><Icon name="screen" /><span>Paylaş</span></button>
-          </>
-        ) : null}
-        <button className="stage-control" onClick={() => void hideStage()} title="Sahneyi gizle"><Icon name="hash" /><span>Sahneyi gizle</span></button>
-        <button className="stage-control" onClick={() => void toggleFullscreen()} title={isFullscreen ? "Tam ekrandan çık" : "Tam ekran"}><Icon name="screen" /><span>{isFullscreen ? "Küçült" : "Tam ekran"}</span></button>
-        {isFullscreen ? <button className="stage-control stage-control--leave" onClick={() => void leaveStage()} title="Ses kanalından ayrıl"><Icon name="phone" /><span>Ayrıl</span></button> : null}
-      </div>
+          </div>
+          <div className="video-stage__control-group" aria-label="Sahne görünümü">
+            <button className="stage-control" onClick={() => void hideStage()} title="Sahneyi gizle"><Icon name="hash" /><span>Sahneyi gizle</span></button>
+            <button className="stage-control" onClick={() => void toggleFullscreen()} title="Tam ekrandan çık"><Icon name="screen" /><span>Küçült</span></button>
+          </div>
+          <div className="video-stage__control-group video-stage__control-group--danger" aria-label="Görüşmeden ayrıl">
+            <button className="stage-control stage-control--leave" onClick={() => void leaveStage()} title="Ses kanalından ayrıl"><Icon name="phone" /><span>Ayrıl</span></button>
+          </div>
+        </div>
+      ) : null}
       {focusedTile ? (
         <div className="voice-focus-layout">
           {renderTile(focusedTile, true)}

@@ -138,6 +138,7 @@ class MatrixClient:
         content: str,
         txn_id: str | None = None,
         reply_to: dict[str, str] | None = None,
+        mention_user_ids: list[str] | None = None,
     ) -> str:
         """Odaya metin mesajı gönderir, event_id döner.
 
@@ -153,6 +154,8 @@ class MatrixClient:
             # Matrix ilişkisi asıl kaynaktır. Kısa snapshot, hedef mesaj mevcut tarih
             # sayfasının dışında kalsa bile Nexus istemcisinin alıntıyı gösterebilmesini sağlar.
             matrix_content["io.nexus.reply_preview"] = reply_to
+        if mention_user_ids:
+            matrix_content["m.mentions"] = {"user_ids": mention_user_ids}
         response = self._request(
             "PUT",
             f"/_matrix/client/v3/rooms/{room_id}/send/m.room.message/{txn_id}",
@@ -173,8 +176,18 @@ class MatrixClient:
             raise MatrixError(f"Mesaj bulunamadı: {response.status_code} {response.text}")
         return response.json()
 
-    def edit_message(self, access_token: str, room_id: str, event_id: str, content: str) -> str:
+    def edit_message(
+        self,
+        access_token: str,
+        room_id: str,
+        event_id: str,
+        content: str,
+        mention_user_ids: list[str] | None = None,
+    ) -> str:
         txn_id = uuid.uuid4().hex
+        new_content: dict = {"msgtype": "m.text", "body": content}
+        if mention_user_ids:
+            new_content["m.mentions"] = {"user_ids": mention_user_ids}
         response = self._request(
             "PUT",
             f"/_matrix/client/v3/rooms/{room_id}/send/m.room.message/{txn_id}",
@@ -182,13 +195,135 @@ class MatrixClient:
             json={
                 "msgtype": "m.text",
                 "body": f"* {content}",
-                "m.new_content": {"msgtype": "m.text", "body": content},
+                "m.new_content": new_content,
                 "m.relates_to": {"rel_type": "m.replace", "event_id": event_id},
+                **({"m.mentions": {"user_ids": mention_user_ids}} if mention_user_ids else {}),
             },
         )
         if not response.ok:
             raise MatrixError(f"Mesaj düzenlenemedi: {response.status_code} {response.text}")
         return response.json()["event_id"]
+
+    def send_reaction(
+        self,
+        access_token: str,
+        room_id: str,
+        event_id: str,
+        emoji: str,
+    ) -> str:
+        txn_id = uuid.uuid4().hex
+        response = self._request(
+            "PUT",
+            f"/_matrix/client/v3/rooms/{room_id}/send/m.reaction/{txn_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={
+                "m.relates_to": {
+                    "rel_type": "m.annotation",
+                    "event_id": event_id,
+                    "key": emoji,
+                }
+            },
+        )
+        if not response.ok:
+            raise MatrixError(f"Reaksiyon gönderilemedi: {response.status_code} {response.text}")
+        return response.json()["event_id"]
+
+    def get_reactions(
+        self,
+        access_token: str,
+        room_id: str,
+        event_id: str,
+        limit: int = 100,
+    ) -> list[dict]:
+        response = self._request(
+            "GET",
+            f"/_matrix/client/v1/rooms/{room_id}/relations/{event_id}/m.annotation/m.reaction",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"limit": limit, "dir": "b"},
+        )
+        if not response.ok:
+            raise MatrixError(f"Reaksiyonlar alınamadı: {response.status_code} {response.text}")
+        return [
+            event
+            for event in response.json().get("chunk", [])
+            if event.get("type") == "m.reaction"
+            and "redacted_because" not in event.get("unsigned", {})
+        ]
+
+    def get_pinned_event_ids(self, access_token: str, room_id: str) -> list[str]:
+        response = self._request(
+            "GET",
+            f"/_matrix/client/v3/rooms/{room_id}/state/m.room.pinned_events",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        if response.status_code == 404:
+            return []
+        if not response.ok:
+            raise MatrixError(f"Sabit mesajlar alınamadı: {response.status_code} {response.text}")
+        return [
+            event_id
+            for event_id in response.json().get("pinned", [])
+            if isinstance(event_id, str)
+        ]
+
+    def set_pinned_event_ids(
+        self,
+        access_token: str,
+        room_id: str,
+        event_ids: list[str],
+    ) -> None:
+        response = self._request(
+            "PUT",
+            f"/_matrix/client/v3/rooms/{room_id}/state/m.room.pinned_events",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={"pinned": event_ids},
+        )
+        if not response.ok:
+            raise MatrixError(f"Sabit mesajlar güncellenemedi: {response.status_code} {response.text}")
+
+    def search_messages(
+        self,
+        access_token: str,
+        room_id: str,
+        term: str,
+        *,
+        sender: str | None = None,
+        limit: int = 30,
+    ) -> list[dict]:
+        event_filter: dict = {
+            "rooms": [room_id],
+            "types": ["m.room.message"],
+            "limit": limit,
+        }
+        if sender:
+            event_filter["senders"] = [sender]
+        response = self._request(
+            "POST",
+            "/_matrix/client/v3/search",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={
+                "search_categories": {
+                    "room_events": {
+                        "search_term": term,
+                        "order_by": "recent",
+                        "filter": event_filter,
+                    }
+                }
+            },
+        )
+        if not response.ok:
+            raise MatrixError(f"Mesaj araması başarısız: {response.status_code} {response.text}")
+        results = (
+            response.json()
+            .get("search_categories", {})
+            .get("room_events", {})
+            .get("results", [])
+        )
+        return [
+            item["result"]
+            for item in results
+            if isinstance(item, dict) and isinstance(item.get("result"), dict)
+        ]
 
     def get_message_page(
         self,
@@ -196,6 +331,7 @@ class MatrixClient:
         room_id: str,
         limit: int = 50,
         cursor: str | None = None,
+        current_matrix_user_id: str | None = None,
     ) -> dict:
         """Oda geçmişini yeniden eskiye, Matrix cursor'ıyla sayfalar."""
         params: dict[str, str | int] = {"dir": "b", "limit": limit}
@@ -222,6 +358,15 @@ class MatrixClient:
             relation = content.get("m.relates_to", {})
             if relation.get("rel_type") == "m.replace" and relation.get("event_id"):
                 replacements.setdefault(relation["event_id"], content.get("m.new_content", content))
+
+        reaction_events: dict[str, list[dict]] = {}
+        for event in events:
+            if event.get("type") != "m.reaction":
+                continue
+            relation = event.get("content", {}).get("m.relates_to", {})
+            target_id = relation.get("event_id")
+            if relation.get("rel_type") == "m.annotation" and isinstance(target_id, str):
+                reaction_events.setdefault(target_id, []).append(event)
 
         messages = []
         for event in events:
@@ -269,14 +414,41 @@ class MatrixClient:
                 and isinstance(reply_preview.get("content"), str)
             ):
                 reply_preview = None
+            reaction_counts: dict[str, int] = {}
+            bundled = (
+                event.get("unsigned", {})
+                .get("m.relations", {})
+                .get("m.annotation", {})
+                .get("chunk", [])
+            )
+            for annotation in bundled:
+                emoji = annotation.get("key")
+                count = annotation.get("count")
+                if isinstance(emoji, str) and isinstance(count, int) and count > 0:
+                    reaction_counts[emoji] = count
+            for reaction in reaction_events.get(event["event_id"], []):
+                emoji = reaction.get("content", {}).get("m.relates_to", {}).get("key")
+                if isinstance(emoji, str):
+                    reaction_counts[emoji] = max(1, reaction_counts.get(emoji, 0))
+            own_reactions = {
+                reaction.get("content", {}).get("m.relates_to", {}).get("key")
+                for reaction in reaction_events.get(event["event_id"], [])
+                if current_matrix_user_id and reaction.get("sender") == current_matrix_user_id
+            }
+            final_content = replacement or content
             messages.append(
                 {
                     "event_id": event["event_id"],
                     "sender": event["sender"],
-                    "content": (replacement or content).get("body", ""),
+                    "content": final_content.get("body", ""),
                     "origin_server_ts": event["origin_server_ts"],
                     "edited": bool(replacement),
                     "reply_to": reply_preview,
+                    "reactions": [
+                        {"emoji": emoji, "count": count, "me": emoji in own_reactions}
+                        for emoji, count in sorted(reaction_counts.items())
+                    ],
+                    "mention_user_ids": final_content.get("m.mentions", {}).get("user_ids", []),
                 }
             )
         next_cursor = payload.get("end")

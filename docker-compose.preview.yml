@@ -1,0 +1,19 @@
+# Local-only preview override.
+# Use with COMPOSE_PROJECT_NAME=nexus_preview so production volumes and containers stay untouched.
+services:
+  migrate:
+    image: nexus-preview-backend:local
+
+  plugin-sandbox:
+    image: nexus-preview-backend:local
+
+  ai-worker:
+    image: nexus-preview-backend:local
+
+  matrix:
+    image: nexus-preview-matrix:local
+
+  backend:
+    image: nexus-preview-backend:local
+    ports:
+      - "127.0.0.1:18000:8000"

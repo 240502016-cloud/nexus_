@@ -118,14 +118,56 @@ export interface Message {
   is_bot?: boolean;
   edited?: boolean;
   reply_to?: MessageReplyPreview | null;
+  reactions?: MessageReaction[];
+  mentioned_user_ids?: number[];
   // Yalnızca istemci tarafındaki iyimser mesajlarda kullanılır; API snapshot'larında bulunmaz.
   delivery_status?: "sending" | "failed";
+}
+
+export interface MessageReaction {
+  emoji: string;
+  count: number;
+  me: boolean;
 }
 
 export interface MessageReplyPreview {
   event_id: string;
   sender: string;
   content: string;
+}
+
+export interface MessageReactionUpdate {
+  event_id: string;
+  reactions: MessageReaction[];
+}
+
+export interface PinnedMessages {
+  items: Message[];
+  can_manage: boolean;
+}
+
+export interface AiConversation {
+  id: number;
+  model: string;
+  title: string | null;
+  created_at: string;
+}
+
+export type AiJobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+
+export interface AiJob {
+  id: number;
+  conversation_id: number;
+  user_message_id: number;
+  assistant_message_id: number | null;
+  status: AiJobStatus;
+  attempts: number;
+  output_text: string | null;
+  cancel_requested: boolean;
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
 }
 
 export interface Attachment {

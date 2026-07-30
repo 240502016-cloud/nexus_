@@ -4,6 +4,7 @@ import "./App.css";
 import { coreApi, getToken, setToken } from "./api/client";
 import { ChannelSidebar } from "./components/ChannelSidebar";
 import { ChatArea } from "./components/ChatArea";
+import { Icon } from "./components/Icon";
 import { IncomingCallModal, OutgoingCallToast, CallNoticeToast } from "./components/IncomingCallModal";
 import { JoinServerPanel } from "./components/JoinServerPanel";
 import { LoginForm } from "./components/LoginForm";
@@ -21,13 +22,40 @@ import { useVoiceChannel } from "./hooks/useVoiceChannel";
 import { playMessageNotification } from "./notifications";
 import type { VoiceSettings } from "./settings";
 import { loadVoiceSettings } from "./settings";
-import type { Channel, ChannelType, Message, Server, ServerInviteList, User } from "./types";
+import type { Channel, ChannelType, Member, Message, Server, ServerInviteList, User } from "./types";
 import { composeAttachmentMessage } from "./messageContent";
 
 const MESSAGE_LIMIT = 50;
 const MESSAGE_SYNC_CONNECTED_MS = 30_000;
 const MESSAGE_SYNC_DISCONNECTED_MS = 10_000;
 const MESSAGE_SYNC_BACKGROUND_MS = 300_000;
+const UNREAD_STORAGE_PREFIX = "nexus.unreadChannels.";
+
+function loadUnreadCounts(userId: number): Map<number, number> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(`${UNREAD_STORAGE_PREFIX}${userId}`) ?? "{}");
+    return new Map(
+      Object.entries(raw)
+        .map(([channelId, count]) => [Number(channelId), Number(count)] as const)
+        .filter(([channelId, count]) =>
+          Number.isInteger(channelId) && channelId > 0 && Number.isInteger(count) && count > 0
+        ),
+    );
+  } catch {
+    return new Map();
+  }
+}
+
+function saveUnreadCounts(userId: number, counts: Map<number, number>): void {
+  try {
+    localStorage.setItem(
+      `${UNREAD_STORAGE_PREFIX}${userId}`,
+      JSON.stringify(Object.fromEntries(counts)),
+    );
+  } catch {
+    // Depolama kullanılamıyorsa canlı sayaç çalışmaya devam eder.
+  }
+}
 
 function createMessageClientId(): string {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
@@ -50,6 +78,10 @@ function mergeIncomingMessage(current: Message[], incoming: Message): Message[] 
             ...message,
             ...incoming,
             reply_to: incoming.reply_to ?? message.reply_to,
+            reactions:
+              incoming.edited && (incoming.reactions?.length ?? 0) === 0
+                ? message.reactions
+                : incoming.reactions,
             delivery_status: undefined,
           }
         : message,
@@ -122,6 +154,8 @@ export default function App() {
     outgoing: [],
   });
   const [pendingFriendRequestCount, setPendingFriendRequestCount] = useState(0);
+  const [serverMembers, setServerMembers] = useState<Member[]>([]);
+  const [unreadCounts, setUnreadCounts] = useState<Map<number, number>>(new Map());
 
   // Sesli kanal ve gateway (presence + çağrı) hook'ları uygulama seviyesinde tutulur ki video
   // ana alanda, kontroller yan panelde gösterilebilsin ve çağrılar her yerde alınabilsin.
@@ -214,6 +248,21 @@ export default function App() {
   const friendNotificationRef = useRef<Notification | null>(null);
   const activeChannelIdRef = useRef(activeChannelId);
   activeChannelIdRef.current = activeChannelId;
+
+  useEffect(() => {
+    setUnreadCounts(user ? loadUnreadCounts(user.id) : new Map());
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user || !activeChannelId) return;
+    setUnreadCounts((previous) => {
+      if (!previous.has(activeChannelId)) return previous;
+      const next = new Map(previous);
+      next.delete(activeChannelId);
+      saveUnreadCounts(user.id, next);
+      return next;
+    });
+  }, [activeChannelId, user]);
 
   const loadServerInvites = useCallback(async () => {
     if (!user) return;
@@ -360,6 +409,7 @@ export default function App() {
   useEffect(() => {
     if (!activeServerId) {
       setChannels([]);
+      setServerMembers([]);
       setActiveChannelId(null);
       return;
     }
@@ -387,6 +437,7 @@ export default function App() {
         }
       }
     });
+    coreApi.listMembers(activeServerId).then(setServerMembers).catch(() => setServerMembers([]));
   }, [activeServerId]);
 
   // Gateway normal mesajları doğrudan taşır. Bu döngü yalnızca bağlantı kesintileri ve ayrı
@@ -481,6 +532,36 @@ export default function App() {
   }, [gateway.channelMessage?.sequence]);
 
   useEffect(() => {
+    const event = gateway.channelMeta;
+    if (
+      !event ||
+      !event.eventId ||
+      !event.reactions ||
+      event.channelId !== activeChannelIdRef.current
+    ) return;
+    setMessages((current) =>
+      current.map((message) =>
+        message.event_id === event.eventId
+          ? { ...message, reactions: event.reactions ?? [] }
+          : message,
+      ),
+    );
+  }, [gateway.channelMeta?.sequence]);
+
+  useEffect(() => {
+    const event = gateway.channelMessage;
+    const message = event?.message;
+    if (!event || !message || !user || message.sender === user.matrix_user_id) return;
+    if (event.channelId === activeChannelIdRef.current) return;
+    setUnreadCounts((previous) => {
+      const next = new Map(previous);
+      next.set(event.channelId, Math.min(999, (next.get(event.channelId) ?? 0) + 1));
+      saveUnreadCounts(user.id, next);
+      return next;
+    });
+  }, [gateway.channelMessage?.sequence, user]);
+
+  useEffect(() => {
     const event = gateway.directMessage;
     if (!event || !user || event.senderId === user.id) return;
     if (gateway.selfStatus.status === "dnd") return;
@@ -520,6 +601,8 @@ export default function App() {
     if (!document.hidden) return;
 
     const sender = message.sender.replace(/^@/, "").split(":")[0];
+    const mentioned = message.mentioned_user_ids?.includes(user.id) ?? false;
+    if (mentioned && !voiceSettings.mentionNotifications) return;
     if (voiceSettings.notificationSound) playMessageNotification();
     if (
       voiceSettings.desktopNotifications &&
@@ -527,10 +610,13 @@ export default function App() {
       Notification.permission === "granted"
     ) {
       try {
-        const notification = new Notification(`${sender} yeni bir mesaj gönderdi`, {
+        const notification = new Notification(
+          mentioned ? `${sender} senden bahsetti` : `${sender} yeni bir mesaj gönderdi`,
+          {
           body: message.content.slice(0, 180),
           tag: `nexus-message-${event.channelId}`,
-        });
+          },
+        );
         notification.onclick = () => {
           window.focus();
           if (event.serverId === activeServerId) setActiveChannelId(event.channelId);
@@ -868,6 +954,46 @@ export default function App() {
     }
   }
 
+  async function handleToggleReaction(eventId: string, emoji: string) {
+    if (!activeChannelId) return;
+    const channelId = activeChannelId;
+    const previous = messages.find((message) => message.event_id === eventId)?.reactions ?? [];
+    setMessages((current) =>
+      current.map((message) => {
+        if (message.event_id !== eventId) return message;
+        const reactions = [...(message.reactions ?? [])];
+        const index = reactions.findIndex((reaction) => reaction.emoji === emoji);
+        if (index < 0) reactions.push({ emoji, count: 1, me: true });
+        else if (reactions[index].me && reactions[index].count <= 1) reactions.splice(index, 1);
+        else {
+          reactions[index] = {
+            ...reactions[index],
+            count: Math.max(0, reactions[index].count + (reactions[index].me ? -1 : 1)),
+            me: !reactions[index].me,
+          };
+        }
+        return { ...message, reactions: reactions.filter((reaction) => reaction.count > 0) };
+      }),
+    );
+    try {
+      const update = await coreApi.toggleReaction(channelId, eventId, emoji);
+      if (activeChannelIdRef.current === channelId) {
+        setMessages((current) =>
+          current.map((message) =>
+            message.event_id === eventId ? { ...message, reactions: update.reactions } : message,
+          ),
+        );
+      }
+    } catch (err) {
+      setMessages((current) =>
+        current.map((message) =>
+          message.event_id === eventId ? { ...message, reactions: previous } : message,
+        ),
+      );
+      setCallError(err instanceof Error ? err.message : "Reaksiyon güncellenemedi");
+    }
+  }
+
   function handleRetryMessage(clientId: string, content: string, replyTo?: Message["reply_to"]) {
     setMessages((current) => current.filter((message) => message.client_id !== clientId));
     void handleSendMessage(
@@ -965,16 +1091,24 @@ export default function App() {
         pendingFriendRequestCount={pendingFriendRequestCount}
         onOpenProfile={() => setProfileOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
+        unreadCounts={unreadCounts}
       />
       <div className={voiceStageVisible && voice.connected ? "app-main" : "app-main app-main--chat-focus"}>
         <header className="app-main__toolbar">
           <div className="app-main__context">
-            <span>{activeServer?.name ?? "Nexus"}</span>
-            <strong>
-              {activeChannel
-                ? `${activeChannel.type === "voice" ? "Ses" : "#"} ${activeChannel.name}`
-                : "Genel görünüm"}
-            </strong>
+            <span className="app-main__channel-mark">
+              <Icon name={activeChannel?.type === "voice" ? "volume" : "hash"} />
+            </span>
+            <div className="app-main__context-copy">
+              <strong>{activeChannel?.name ?? "Genel görünüm"}</strong>
+              <span>
+                {activeServer?.name ?? "Nexus"}
+                {activeChannel
+                  ? ` · ${activeChannel.type === "voice" ? "Ses kanalı" : "Metin kanalı"}`
+                  : ""}
+                {activeServer ? ` · ${serverMembers.length} üye` : ""}
+              </span>
+            </div>
           </div>
           <div className="app-main__toolbar-actions">
             {voice.connected ? (
@@ -988,8 +1122,10 @@ export default function App() {
                 type="button"
                 className={membersVisible ? "toolbar-action toolbar-action--active" : "toolbar-action"}
                 onClick={() => setMembersVisible((visible) => !visible)}
+                title={membersVisible ? "Üyeler panelini kapat" : "Üyeler panelini aç"}
               >
-                {membersVisible ? "Üyeleri kapat" : "Üyeler"}
+                <Icon name="users" />
+                <span>{membersVisible ? "Üyeleri kapat" : "Üyeler"}</span>
               </button>
             ) : null}
             {voice.connected ? (
@@ -997,10 +1133,17 @@ export default function App() {
                 type="button"
                 className="toolbar-action"
                 onClick={() => setVoiceStageVisible((visible) => !visible)}
+                title={voiceStageVisible ? "Canlı sahneyi gizle" : "Canlı sahneyi göster"}
               >
-                {voiceStageVisible ? "Sahneyi gizle" : "Canlı sahneyi göster"}
+                <Icon name="screen" />
+                <span>{voiceStageVisible ? "Sahneyi gizle" : "Canlı sahneyi göster"}</span>
               </button>
             ) : null}
+            <div
+              id="channel-toolbar-portal"
+              className="app-main__channel-tools"
+              aria-label="Kanal araçları"
+            />
           </div>
         </header>
         {!window.isSecureContext ? (
@@ -1025,13 +1168,25 @@ export default function App() {
           channel={activeChannel}
           messages={messages}
           currentMatrixUserId={user.matrix_user_id}
+          currentUserId={user.id}
+          members={serverMembers}
           onSendMessage={handleSendMessage}
           onEditMessage={handleEditMessage}
           onDeleteMessage={handleDeleteMessage}
+          onToggleReaction={handleToggleReaction}
           onRetryMessage={handleRetryMessage}
           hasMoreMessages={hasMoreMessages}
           loadingOlder={olderMessagesLoading}
           onLoadOlder={handleLoadOlderMessages}
+          typingUsers={[...(gateway.typingUsers.get(activeChannel?.id ?? 0)?.values() ?? [])]}
+          onTypingChange={(typing) => {
+            if (activeChannel) gateway.sendTyping(activeChannel.id, typing);
+          }}
+          pinUpdateSequence={
+            gateway.channelMeta?.channelId === activeChannel?.id && gateway.channelMeta?.pinsChanged
+              ? (gateway.channelMeta?.sequence ?? 0)
+              : 0
+          }
         />
       </div>
       {profileOpen ? (

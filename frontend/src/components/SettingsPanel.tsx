@@ -8,6 +8,7 @@ import type { KeyCombo, VoiceSettings } from "../settings";
 import {
   DEFAULT_VOICE_SETTINGS,
   VIDEO_QUALITY_PRESETS,
+  buildAudioConstraints,
   comboIsEmpty,
   comboLabel,
   isModifierCode,
@@ -116,13 +117,16 @@ export function SettingsPanel({
     stopMicTest();
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: settings.inputDeviceId ? { deviceId: { exact: settings.inputDeviceId } } : true,
+        audio: buildAudioConstraints(settings),
       });
       const ctx = new AudioContext();
       const source = ctx.createMediaStreamSource(stream);
+      const gain = ctx.createGain();
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 512;
-      source.connect(analyser);
+      gain.gain.value = Math.max(0, Math.min(2, settings.inputVolume / 100));
+      source.connect(gain);
+      gain.connect(analyser);
       const buffer = new Uint8Array(analyser.frequencyBinCount);
       const tick = () => {
         analyser.getByteFrequencyData(buffer);
@@ -135,7 +139,14 @@ export function SettingsPanel({
     } catch {
       setMicTesting(false);
     }
-  }, [settings.inputDeviceId, stopMicTest]);
+  }, [
+    settings.autoGainControl,
+    settings.echoCancellation,
+    settings.inputDeviceId,
+    settings.inputVolume,
+    settings.noiseSuppression,
+    stopMicTest,
+  ]);
 
   const stopCamPreview = useCallback(() => {
     camStreamRef.current?.getTracks().forEach((t) => t.stop());
@@ -414,7 +425,7 @@ export function SettingsPanel({
             </select>
           </label>
           <label className="settings-panel__field">
-            <span>Mikrofon seviyesi · %{settings.inputVolume}</span>
+            <span>Mikrofon giriş seviyesi · %{settings.inputVolume}</span>
             <input
               type="range"
               min={0}
@@ -423,6 +434,10 @@ export function SettingsPanel({
               onChange={(event) => update({ inputVolume: Number(event.target.value) })}
             />
           </label>
+          <p className="settings-panel__hint">
+            %100 doğal seviye, %101–200 yazılımsal yükseltmedir. Yüksek değerlerde dip ses de
+            büyüyebileceği için mikrofon testiyle ayarlayın.
+          </p>
           <div className="settings-panel__test-row">
             <button onClick={micTesting ? stopMicTest : startMicTest}>
               {micTesting ? "Testi durdur" : "Mikrofonu test et"}
@@ -531,7 +546,7 @@ export function SettingsPanel({
               checked={settings.noiseSuppression}
               onChange={(e) => update({ noiseSuppression: e.target.checked })}
             />
-            Gürültü engelleme
+            Gürültü engelleme + düşük frekans temizleme
           </label>
           <label className="settings-panel__radio">
             <input
@@ -550,8 +565,9 @@ export function SettingsPanel({
             Otomatik kazanç kontrolü
           </label>
           <p className="settings-panel__hint">
-            Bu seçenekler tarayıcının standart ses işleme (MediaTrackConstraints) desteğini kullanır;
-            değişiklik kaydedilince görüşmeden çıkmadan uygulanır.
+            Tarayıcının standart ses işleme desteğine ek olarak gürültü engelleme açıkken masa/klavye
+            titreşimi gibi düşük frekanslar yumuşakça süzülür ve ani seviye sıçramaları dengelenir.
+            Değişiklik kaydedilince görüşmeden çıkmadan uygulanır.
           </p>
         </div>
 
@@ -602,6 +618,14 @@ export function SettingsPanel({
                 onChange={(e) => update({ notificationSound: e.target.checked })}
               />
               Yeni mesaj sesi
+            </label>
+            <label className="settings-panel__radio">
+              <input
+                type="checkbox"
+                checked={settings.mentionNotifications}
+                onChange={(e) => update({ mentionNotifications: e.target.checked })}
+              />
+              Bana @mention geldiğinde bildirim göster
             </label>
             <label className="settings-panel__radio">
               <input

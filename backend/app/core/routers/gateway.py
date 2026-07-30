@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
@@ -147,6 +148,55 @@ def notify_channel_message(
     )
 
 
+async def _broadcast_channel_meta(
+    channel_id: int,
+    server_id: int,
+    recipient_ids: set[int],
+    *,
+    event_id: str | None = None,
+    reactions: list[dict] | None = None,
+    pins_changed: bool = False,
+) -> None:
+    payload: dict = {
+        "type": "channel-message-meta",
+        "channel_id": channel_id,
+        "server_id": server_id,
+        "pins_changed": pins_changed,
+    }
+    if event_id is not None:
+        payload["event_id"] = event_id
+    if reactions is not None:
+        payload["reactions"] = reactions
+    for uid in recipient_ids:
+        await gateway_manager.send_to_user(uid, payload)
+
+
+def notify_channel_meta(
+    channel_id: int,
+    server_id: int,
+    recipient_ids: set[int],
+    *,
+    event_id: str | None = None,
+    reactions: list[dict] | None = None,
+    pins_changed: bool = False,
+) -> None:
+    try:
+        loop = get_main_loop()
+    except RuntimeError:
+        return
+    asyncio.run_coroutine_threadsafe(
+        _broadcast_channel_meta(
+            channel_id,
+            server_id,
+            set(recipient_ids),
+            event_id=event_id,
+            reactions=reactions,
+            pins_changed=pins_changed,
+        ),
+        loop,
+    )
+
+
 async def _push_direct_message(
     conversation_id: int,
     recipient_ids: set[int],
@@ -240,6 +290,22 @@ def _validate_invite(db: Session, caller_id: int, target_id: int, channel_id: in
     return None
 
 
+def _typing_recipients(
+    db: Session,
+    user_id: int,
+    channel_id: int,
+) -> tuple[Channel, set[int]] | None:
+    channel = db.get(Channel, channel_id)
+    if not channel or channel.type != ChannelType.TEXT:
+        return None
+    member_ids = {membership.user_id for membership in channel.server.members}
+    member_ids.add(channel.server.owner_id)
+    if user_id not in member_ids:
+        return None
+    member_ids.discard(user_id)
+    return channel, member_ids
+
+
 @router.websocket("/gateway")
 async def gateway_socket(websocket: WebSocket, token: str = Query(...)):
     db = SessionLocal()
@@ -279,6 +345,7 @@ async def gateway_socket(websocket: WebSocket, token: str = Query(...)):
             await gateway_manager.send_to_user(uid, gateway_manager.presence_payload(user_id, username))
 
     try:
+        last_typing_forward: dict[int, float] = {}
         while True:
             raw = await websocket.receive_text()
             try:
@@ -317,6 +384,32 @@ async def gateway_socket(websocket: WebSocket, token: str = Query(...)):
                         "server_id": channel.server_id,
                     },
                 )
+            elif msg_type == "typing":
+                typing = data.get("typing")
+                if not isinstance(channel_id, int) or not isinstance(typing, bool):
+                    continue
+                now = time.monotonic()
+                if typing and now - last_typing_forward.get(channel_id, 0.0) < 0.75:
+                    continue
+                last_typing_forward[channel_id] = now
+                db = SessionLocal()
+                try:
+                    typing_target = _typing_recipients(db, user_id, channel_id)
+                finally:
+                    db.close()
+                if typing_target is None:
+                    continue
+                channel, recipients = typing_target
+                payload = {
+                    "type": "channel-typing",
+                    "channel_id": channel.id,
+                    "server_id": channel.server_id,
+                    "user_id": user_id,
+                    "username": username,
+                    "typing": typing,
+                }
+                for recipient_id in recipients:
+                    await gateway_manager.send_to_user(recipient_id, payload)
             elif msg_type == "ping":
                 # Uygulama katmanı heartbeat'i Cloudflare/NAT üzerindeki yarı-açık
                 # bağlantıları hızlıca fark eder ve istemcinin yeniden bağlanmasını sağlar.

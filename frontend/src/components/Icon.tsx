@@ -4,7 +4,7 @@ export type IconName =
   | "settings" | "user" | "logout" | "mic" | "micOff" | "headphones" | "headphonesOff"
   | "camera" | "screen" | "phone" | "users" | "edit" | "trash" | "paperclip"
   | "send" | "file" | "close" | "bot" | "hash" | "volume" | "chevron" | "inbox"
-  | "reply";
+  | "reply" | "search" | "pin" | "smile";
 
 const paths: Record<IconName, React.ReactNode> = {
   settings: <><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.08.37.29.72.6 1 .3.27.68.4 1.1.4h.09v4h-.09c-.42 0-.8.13-1.1.4-.31.28-.52.63-.6 1Z"/></>,
@@ -30,6 +30,9 @@ const paths: Record<IconName, React.ReactNode> = {
   chevron: <path d="m6 9 6 6 6-6"/>,
   inbox: <><path d="M4 4h16v16H4Z"/><path d="M4 14h4l2 3h4l2-3h4"/></>,
   reply: <><path d="m9 17-5-5 5-5"/><path d="M4 12h9a7 7 0 0 1 7 7v1"/></>,
+  search: <><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></>,
+  pin: <><path d="m12 17v5M7 3h10M8 3l1 8-3 3h12l-3-3 1-8"/></>,
+  smile: <><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></>,
 };
 
 export function Icon({ name, ...props }: { name: IconName } & SVGProps<SVGSVGElement>) {

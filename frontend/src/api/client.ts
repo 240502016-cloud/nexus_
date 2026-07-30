@@ -2,6 +2,8 @@
 // Geliştirmede /api -> vite.config.ts proxy'si üzerinden http://localhost:8000'e yönlenir.
 
 import type {
+  AiConversation,
+  AiJob,
   Bot,
   Attachment,
   Channel,
@@ -14,6 +16,8 @@ import type {
   Member,
   Message,
   MessagePage,
+  MessageReactionUpdate,
+  PinnedMessages,
   PluginManifest,
   PublicUser,
   Server,
@@ -331,6 +335,53 @@ export const coreApi = {
     request<Message>(`/channels/${channelId}/messages/${encodeURIComponent(eventId)}`, {
       method: "PATCH",
       body: JSON.stringify({ content }),
+    }),
+  toggleReaction: (channelId: number, eventId: string, emoji: string) =>
+    request<MessageReactionUpdate>(
+      `/channels/${channelId}/messages/${encodeURIComponent(eventId)}/reactions`,
+      { method: "PUT", body: JSON.stringify({ emoji }) },
+    ),
+  searchMessages: (channelId: number, query: string, userId?: number | null) => {
+    const params = new URLSearchParams({ q: query });
+    if (userId) params.set("user_id", String(userId));
+    return request<Message[]>(
+      `/channels/${channelId}/messages/search?${params.toString()}`,
+    );
+  },
+  listPinnedMessages: (channelId: number) =>
+    request<PinnedMessages>(`/channels/${channelId}/messages/pins`),
+  pinMessage: (channelId: number, eventId: string) =>
+    request<void>(
+      `/channels/${channelId}/messages/${encodeURIComponent(eventId)}/pin`,
+      { method: "PUT" },
+    ),
+  unpinMessage: (channelId: number, eventId: string) =>
+    request<void>(
+      `/channels/${channelId}/messages/${encodeURIComponent(eventId)}/pin`,
+      { method: "DELETE" },
+    ),
+  createAiConversation: (title: string) =>
+    request<AiConversation>("/ai/conversations", {
+      method: "POST",
+      body: JSON.stringify({ title }),
+      timeoutMs: 8_000,
+    }),
+  sendAiMessage: (conversationId: number, content: string, idempotencyKey: string) =>
+    request<AiJob>(`/ai/conversations/${conversationId}/messages`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify({ content }),
+      timeoutMs: 8_000,
+    }),
+  getAiJob: (jobId: number) =>
+    request<AiJob>(`/ai/jobs/${jobId}`, {
+      retry: false,
+      timeoutMs: 5_000,
+    }),
+  cancelAiJob: (jobId: number) =>
+    request<AiJob>(`/ai/jobs/${jobId}/cancel`, {
+      method: "POST",
+      timeoutMs: 5_000,
     }),
   uploadAttachment: (file: File) => {
     const form = new FormData();
