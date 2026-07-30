@@ -854,6 +854,13 @@ Durum ve özel durum ana araç çubuğundan kaldırılmış, Ayarlar'a taşınm�
   engeline takılırsa hata sessizce yutulmaz; kullanıcıya sayfaya tıklama yönlendirmesi gösterilir.
 - Reconnect sırasında mevcut işlenmiş mikrofon track'i kullanılmadan önce giden mikser yeniden
   çalıştırılır. Audio/camera/screen transceiver sırası ve m-line sayısı değiştirilmez.
+- 30 Temmuz 2026 iki istemcili smoke testinde WebRTC bağlantısı, RTT ve gelen ses paketleri sağlıklı
+  olmasına rağmen iki tarafın da sessiz kalmasının kök nedeni uzak sesi her zaman ikinci bir
+  `AudioContext -> MediaStreamDestination -> HTMLAudioElement` zincirinden geçiren alıcı hattıydı.
+  Varsayılan `%0-%100` dinleme artık uzak WebRTC stream'ini doğrudan `HTMLAudioElement` üzerinden
+  oynatır; `%100` üzeri kullanıcıya özel yükseltme gerektiğinde Web Audio gain hattı devreye girer.
+  Audio/camera/screen transceiver sırası, SDP m-line sayısı ve giden mikrofon/soundboard miksi
+  değiştirilmemiştir.
 
 ### Push-to-talk
 

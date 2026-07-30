@@ -303,6 +303,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
   const peersRef = useRef<Map<number, PeerState>>(new Map());
   const pendingIceRef = useRef<Map<number, RTCIceCandidateInit[]>>(new Map());
   const audioElsRef = useRef<Map<number, HTMLAudioElement>>(new Map());
+  const remoteAudioStreamsRef = useRef<Map<number, MediaStream>>(new Map());
   const remoteAudioContextRef = useRef<AudioContext | null>(null);
   const remoteAudioGraphsRef = useRef<Map<number, RemoteAudioGraph>>(new Map());
   const remoteVolumesRef = useRef(remoteVolumes);
@@ -330,6 +331,68 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
   remoteVolumesRef.current = remoteVolumes;
   soundboardVolumeRef.current = soundboardVolume;
   soundboardMutedRef.current = soundboardMuted;
+
+  function disconnectRemoteAudioGraph(peerId: number) {
+    const graph = remoteAudioGraphsRef.current.get(peerId);
+    if (!graph) return;
+    graph.source.disconnect();
+    graph.gain.disconnect();
+    graph.destination.stream.getTracks().forEach((track) => track.stop());
+    remoteAudioGraphsRef.current.delete(peerId);
+  }
+
+  function attachRemoteAudio(peerId: number, stream: MediaStream) {
+    remoteAudioStreamsRef.current.set(peerId, stream);
+    disconnectRemoteAudioGraph(peerId);
+
+    let audioEl = audioElsRef.current.get(peerId);
+    if (!audioEl) {
+      audioEl = new Audio();
+      audioEl.autoplay = true;
+      audioElsRef.current.set(peerId, audioEl);
+    }
+
+    const remoteVolume = remoteVolumesRef.current.get(peerId) ?? 100;
+    const outputVolume = Math.max(
+      0,
+      Math.min(1, voiceSettingsRef.current.outputVolume / 100),
+    );
+    let playbackContext: AudioContext | null = null;
+
+    if (remoteVolume <= 100) {
+      // Normal dinleme yolunda uzak WebRTC stream'ini doğrudan media elementine ver.
+      // Stream -> AudioContext -> MediaStreamDestination -> Audio zinciri Chromium'da
+      // autoplay/context durumu "running" görünse bile sessiz kalabiliyor. Doğrudan yol,
+      // WebRTC'nin tarayıcı tarafından desteklenen doğal oynatma hattıdır.
+      audioEl.srcObject = stream;
+      audioEl.volume = outputVolume * (remoteVolume / 100);
+    } else {
+      // HTMLMediaElement volume 1 ile sınırlı olduğu için yalnız %100 üzeri istekte
+      // yazılımsal gain kullan. Slider etkileşimi AudioContext'i de kullanıcı hareketiyle
+      // uyandırır; normal %0-%100 dinleme bu ek zincire bağımlı değildir.
+      let audioContext = remoteAudioContextRef.current;
+      if (!audioContext || audioContext.state === "closed") {
+        audioContext = new AudioContext();
+        remoteAudioContextRef.current = audioContext;
+      }
+      const source = audioContext.createMediaStreamSource(stream);
+      const gain = audioContext.createGain();
+      const destination = audioContext.createMediaStreamDestination();
+      gain.gain.value = remoteVolume / 100;
+      source.connect(gain);
+      gain.connect(destination);
+      remoteAudioGraphsRef.current.set(peerId, { source, gain, destination });
+      audioEl.srcObject = destination.stream;
+      audioEl.volume = outputVolume;
+      playbackContext = audioContext;
+    }
+
+    audioEl.muted = deafenedRef.current;
+    void applySinkId(audioEl, voiceSettingsRef.current.outputDeviceId);
+    void startAudioPlayback(playbackContext, audioEl).catch(() => {
+      setError("Uzak sesi başlatmak için Nexus sayfasına bir kez tıklayın.");
+    });
+  }
 
   function placeholderVideoTrack(kind: "camera" | "screen"): MediaStreamTrack {
     const existing = placeholderVideoRef.current[kind];
@@ -604,7 +667,12 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     setRemoteVolumes(next);
     saveRemoteVolumes(next);
     const graph = remoteAudioGraphsRef.current.get(peerId);
-    if (graph) graph.gain.gain.value = normalized / 100;
+    if (graph && normalized > 100) {
+      graph.gain.gain.value = normalized / 100;
+      return;
+    }
+    const stream = remoteAudioStreamsRef.current.get(peerId);
+    if (stream) attachRemoteAudio(peerId, stream);
   }, []);
 
   const setRemoteVideoEnabled = useCallback((peerId: number, enabled: boolean) => {
@@ -661,6 +729,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       graph.destination.stream.getTracks().forEach((track) => track.stop());
     });
     remoteAudioGraphsRef.current.clear();
+    remoteAudioStreamsRef.current.clear();
     void remoteAudioContextRef.current?.close();
     remoteAudioContextRef.current = null;
     remoteMediaRef.current.clear();
@@ -754,6 +823,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         audioGraph.destination.stream.getTracks().forEach((track) => track.stop());
       }
       remoteAudioGraphsRef.current.delete(peerId);
+      remoteAudioStreamsRef.current.delete(peerId);
       for (const key of [...remoteMediaRef.current.keys()]) {
         if (key.startsWith(`${peerId}:`)) remoteMediaRef.current.delete(key);
       }
@@ -780,6 +850,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         graph.destination.stream.getTracks().forEach((track) => track.stop());
       });
       remoteAudioGraphsRef.current.clear();
+      remoteAudioStreamsRef.current.clear();
       remoteMediaRef.current.clear();
       remoteVideoStateRef.current.clear();
       setParticipants([]);
@@ -933,37 +1004,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
             event.transceiver.mid === peer.remoteMediaMids.screen);
         if (event.track.kind === "audio") {
           const stream = event.streams[0] ?? new MediaStream([event.track]);
-          let audioContext = remoteAudioContextRef.current;
-          if (!audioContext || audioContext.state === "closed") {
-            audioContext = new AudioContext();
-            remoteAudioContextRef.current = audioContext;
-          }
-          const previousGraph = remoteAudioGraphsRef.current.get(peerId);
-          if (previousGraph) {
-            previousGraph.source.disconnect();
-            previousGraph.gain.disconnect();
-            previousGraph.destination.stream.getTracks().forEach((track) => track.stop());
-          }
-          const source = audioContext.createMediaStreamSource(stream);
-          const gain = audioContext.createGain();
-          const destination = audioContext.createMediaStreamDestination();
-          gain.gain.value = (remoteVolumesRef.current.get(peerId) ?? 100) / 100;
-          source.connect(gain);
-          gain.connect(destination);
-          remoteAudioGraphsRef.current.set(peerId, { source, gain, destination });
-          let audioEl = audioElsRef.current.get(peerId);
-          if (!audioEl) {
-            audioEl = new Audio();
-            audioEl.autoplay = true;
-            audioElsRef.current.set(peerId, audioEl);
-          }
-          audioEl.srcObject = destination.stream;
-          audioEl.muted = deafenedRef.current;
-          audioEl.volume = Math.max(0, Math.min(1, voiceSettingsRef.current.outputVolume / 100));
-          void applySinkId(audioEl, voiceSettingsRef.current.outputDeviceId);
-          void startAudioPlayback(audioContext, audioEl).catch(() => {
-            setError("Uzak sesi başlatmak için Nexus sayfasına bir kez tıklayın.");
-          });
+          attachRemoteAudio(peerId, stream);
           return;
         }
         if (!isCamera && !isScreen) return;
@@ -1805,8 +1846,12 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
 
   // Çıkış cihazı (hoparlör) değişince mevcut uzak ses elemanlarına uygula.
   useEffect(() => {
-    audioElsRef.current.forEach((el) => {
-      el.volume = Math.max(0, Math.min(1, voiceSettings.outputVolume / 100));
+    audioElsRef.current.forEach((el, peerId) => {
+      const remoteVolume = remoteVolumesRef.current.get(peerId) ?? 100;
+      const combinedVolume = remoteAudioGraphsRef.current.has(peerId)
+        ? voiceSettings.outputVolume / 100
+        : (voiceSettings.outputVolume / 100) * (remoteVolume / 100);
+      el.volume = Math.max(0, Math.min(1, combinedVolume));
       void applySinkId(el, voiceSettings.outputDeviceId);
     });
     const localSoundboardElement = microphoneGraphRef.current?.localSoundboardElement;
