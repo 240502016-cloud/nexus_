@@ -92,6 +92,47 @@ def _bot_can_run(db: Session, bot: Bot, entry: RegisteredCommand) -> bool:
     )
 
 
+def _send_bot_message_with_room_repair(bot: Bot, event: MessageEvent, output: str) -> str | None:
+    if not bot.matrix_access_token or not bot.matrix_user_id or not event.channel.matrix_room_id:
+        return None
+    try:
+        return matrix_client.send_message(
+            bot.matrix_access_token,
+            event.channel.matrix_room_id,
+            output,
+        )
+    except MatrixError:
+        # Bot sunucuya eklendikten sonra açılan metin kanallarında eski bot hesabı Matrix
+        # odasına davet edilmemiş olabilir. Komutu görünmez biçimde yutmak yerine üyeliği
+        # bir kez onarıp aynı cevabı yeniden gönder.
+        owner = event.channel.server.owner
+        if not owner.matrix_access_token:
+            return None
+        try:
+            matrix_client.invite_user(
+                owner.matrix_access_token,
+                event.channel.matrix_room_id,
+                bot.matrix_user_id,
+            )
+        except MatrixError as exc:
+            detail = str(exc).casefold()
+            if "already" not in detail and "invite" not in detail:
+                return None
+        try:
+            matrix_client.join_room(bot.matrix_access_token, event.channel.matrix_room_id)
+        except MatrixError as exc:
+            if "already" not in str(exc).casefold():
+                return None
+        try:
+            return matrix_client.send_message(
+                bot.matrix_access_token,
+                event.channel.matrix_room_id,
+                output,
+            )
+        except MatrixError:
+            return None
+
+
 def _run_command(
     db: Session, bot: Bot, event: MessageEvent, command: str, args: str
 ) -> BotReply:
@@ -131,11 +172,8 @@ def _run_command(
             output = f"({bot.name} hata: {exc})"
 
     event_id: str | None = None
-    if bot.matrix_access_token and event.channel.matrix_room_id and not isinstance(output, QueuedAiResponse):
-        try:
-            event_id = matrix_client.send_message(bot.matrix_access_token, event.channel.matrix_room_id, output)
-        except MatrixError:
-            pass  # Matrix'e yazılamadı; yine de replies listesinde görünür
+    if not isinstance(output, QueuedAiResponse):
+        event_id = _send_bot_message_with_room_repair(bot, event, output)
 
     return BotReply(
         bot_name=bot.name,

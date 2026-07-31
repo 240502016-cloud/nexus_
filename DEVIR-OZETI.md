@@ -1134,8 +1134,18 @@ Dayanıklılık:
   - `/muzik-sonraki`
   - `/muzik-ayril`
   - `/muzik-listele`
+- Doğrudan, genel internetteki ses/radyo akışları `/muzik-url <url>` ve `/radyo <url>` ile
+  mevcut WebRTC botundan çalınabilir. URL'lerde özel/yerel IP, kimlik bilgisi, doğrulanmamış
+  içerik tipi ve aşırı yönlendirme reddedilir.
+- YouTube için ses ayıklama yapılmaz. `/youtube <url>` resmi iframe oynatıcısını açan,
+  `/youtube-duraklat`, `/youtube-devam`, `/youtube-durdur` ve `/youtube-durum` komutlarıyla
+  aynı metin kanalındaki istemcileri zaman damgası üzerinden senkronize eden kart üretir.
 - Plugin açıkça bir bota bağlanmalıdır.
-- Eski voice manager çağrı sözleşmesi ve double-offer glare hatası düzeltilmiştir.
+- Bot yeni katılan taraf olduğunda mevcut ses katılımcılarına offer göndermesi sağlanmıştır;
+  botun kullanıcılar kanaldan çıkıp yeniden girmeden duyulamaması giderilmiştir.
+- Bot eklendikten sonra açılan metin kanallarında bot Matrix üyeliği otomatik oluşturulur;
+  eski kanallarda eksik üyelik ilk bot cevabında bir kez onarılır.
+- Eski voice manager çağrı sözleşmesi ve double-offer glare korumaları sürdürülmüştür.
 - Production ortamında gerçek kullanıcıyla tekrar smoke test yapılması yine yararlıdır.
 
 #### `moderation`
@@ -1501,7 +1511,7 @@ Bu belge hazırlanırken yerelde yeniden çalıştırılan kontroller:
 ### Backend
 
 ```text
-46 passed
+53 passed
 ```
 
 ### AI Gateway
@@ -1532,7 +1542,7 @@ başarılı
 ```text
 npm.cmd run build
 Vite production build başarılı
-60 module transformed
+63 module transformed
 ```
 
 Bu doğrulamalar live server deploy'u değildir; Mert'in production Docker stack'i ayrıca
@@ -1914,8 +1924,8 @@ AI kapalıysa mesajlaşma/ses/web uygulaması yine çalışmalıdır.
   olarak gruplanmış, zengin mesajlar ve ayrı Matrix event aksiyonları korunmuştur.
 - Soundboard artık hem yerel seçili çıkışa hem mevcut WebRTC miksine bağlanır. Askıya alınan Web
   Audio ve engellenen uzak autoplay akışları kullanıcı etkileşiminde güvenle yeniden başlatılır.
-- Yerel testler güncel HEAD'de başarılıdır:
-  - backend 46/46,
+- Yerel testler güncel çalışma ağacında başarılıdır:
+  - backend 53/53,
   - AI Gateway 9/9,
   - frontend type-check başarılı,
   - frontend production build başarılı.
@@ -1925,6 +1935,12 @@ AI kapalıysa mesajlaşma/ses/web uygulaması yine çalışmalıdır.
   - web production build,
   - desktop production build,
   - yerel Vite açılış ve tarayıcı konsol smoke testi başarılıdır.
+- 31 Temmuz müzik kaynakları paketinde ayrıca:
+  - resmi YouTube iframe kartı ve zaman damgalı komut senkronizasyonu,
+  - public doğrudan ses/radyo URL'leri için SSRF korumalı ön kontrol,
+  - müzik botunun mevcut ses kanalı üyelerine offer göndermesi,
+  - sonradan oluşturulan Matrix metin odalarında bot üyeliğini onarma,
+  - ilgili müzik ve oda onarım testleri dahil backend 53/53 doğrulaması tamamlanmıştır.
 - Şu anki en önemli engel uygulama kodu değil, Mert'in production Cloudflare Tunnel origin
   bağlantısındaki sürekli `502 Host Error` durumudur.
 - DNS ve TLS artık doğrudur; düzeltilmesi gereken bağlantı:

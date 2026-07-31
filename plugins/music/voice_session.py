@@ -14,10 +14,14 @@ yüzden botun ayrı bir User/JWT hesabına ihtiyacı yok.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
+import socket
 from pathlib import Path
+from urllib.parse import unquote, urljoin, urlparse
 
 import av
+import requests
 from aiortc import RTCPeerConnection, RTCSessionDescription
 from aiortc.contrib.media import MediaPlayer, MediaRelay
 from aiortc.sdp import candidate_from_sdp
@@ -29,6 +33,32 @@ from app.database import SessionLocal
 logger = logging.getLogger(__name__)
 
 LIBRARY_DIR = Path(__file__).resolve().parent / "library"
+_AUDIO_CONTENT_TYPES = {
+    "application/octet-stream",
+    "application/ogg",
+    "application/vnd.apple.mpegurl",
+    "application/x-mpegurl",
+    "audio/aac",
+    "audio/aacp",
+    "audio/flac",
+    "audio/mpeg",
+    "audio/mp4",
+    "audio/ogg",
+    "audio/wav",
+    "audio/webm",
+    "audio/x-flac",
+    "audio/x-mpegurl",
+    "audio/x-wav",
+}
+
+
+class RemoteTrack:
+    def __init__(self, url: str, label: str) -> None:
+        self.url = url
+        self.label = label
+
+
+TrackSource = Path | RemoteTrack
 
 
 def list_tracks() -> list[str]:
@@ -55,6 +85,78 @@ def _track_duration_seconds(path: Path) -> float:
         container.close()
 
 
+def _validate_public_host(hostname: str, port: int) -> None:
+    normalized = hostname.rstrip(".").casefold()
+    if normalized == "localhost" or normalized.endswith(".localhost") or normalized.endswith(".local"):
+        raise ValueError("Yerel ağ adresleri müzik kaynağı olarak kullanılamaz.")
+    try:
+        addresses = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise ValueError("Ses adresinin sunucu adı çözümlenemedi.") from exc
+    if not addresses:
+        raise ValueError("Ses adresi herhangi bir IP adresine çözümlenemedi.")
+    for address in addresses:
+        ip = ipaddress.ip_address(address[4][0].split("%", 1)[0])
+        if not ip.is_global:
+            raise ValueError("Yerel, özel veya ayrılmış ağ adresleri müzik kaynağı olarak kullanılamaz.")
+
+
+def resolve_remote_track(raw_url: str) -> RemoteTrack:
+    """Genel internetteki doğrudan ses/radyo URL'sini SSRF'e karşı doğrula."""
+    current = raw_url.strip()
+    for _redirect in range(4):
+        parsed = urlparse(current)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("Yalnızca geçerli http:// veya https:// ses adresleri kullanılabilir.")
+        if parsed.username or parsed.password:
+            raise ValueError("Kullanıcı adı veya parola içeren ses adresleri kabul edilmez.")
+        try:
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        except ValueError as exc:
+            raise ValueError("Ses adresindeki port geçerli değil.") from exc
+        _validate_public_host(parsed.hostname, port)
+        try:
+            response = requests.get(
+                current,
+                allow_redirects=False,
+                headers={"User-Agent": "NexusMusicBot/0.2"},
+                stream=True,
+                timeout=(4, 8),
+            )
+        except requests.RequestException as exc:
+            raise ValueError("Ses adresine ulaşılamadı.") from exc
+        try:
+            if response.is_redirect or response.is_permanent_redirect:
+                location = response.headers.get("location")
+                if not location:
+                    raise ValueError("Ses adresi geçersiz bir yönlendirme döndürdü.")
+                current = urljoin(current, location)
+                continue
+            response.raise_for_status()
+            content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+            if content_type not in _AUDIO_CONTENT_TYPES and not content_type.startswith("audio/"):
+                raise ValueError(
+                    "Adres doğrudan bir ses veya internet radyo akışı döndürmüyor. "
+                    "YouTube bağlantıları için /youtube kullanın."
+                )
+            path_name = Path(unquote(parsed.path)).stem.strip()
+            label = path_name or parsed.hostname
+            return RemoteTrack(url=current, label=label[:120])
+        except requests.HTTPError as exc:
+            raise ValueError(f"Ses adresi HTTP {response.status_code} döndürdü.") from exc
+        finally:
+            response.close()
+    raise ValueError("Ses adresi çok fazla yönlendirme yaptı.")
+
+
+def _source_label(source: TrackSource) -> str:
+    return source.stem if isinstance(source, Path) else source.label
+
+
+def _source_location(source: TrackSource) -> str:
+    return str(source) if isinstance(source, Path) else source.url
+
+
 class BotVoiceClient:
     """`voice_manager`'ın 'ws' parametresi için duck-typed sahte istemci."""
 
@@ -72,8 +174,8 @@ class MusicSession:
         self.virtual_id = -bot_id
         self.bot_name = bot_name
 
-        self.queue: list[Path] = []
-        self.current: Path | None = None
+        self.queue: list[TrackSource] = []
+        self.current: TrackSource | None = None
 
         self._peers: dict[int, RTCPeerConnection] = {}
         self._relay = MediaRelay()
@@ -93,7 +195,7 @@ class MusicSession:
             recipients.add(server.owner_id)
         finally:
             db.close()
-        await voice_manager.join(
+        existing_peers = await voice_manager.join(
             self.channel_id,
             self.server_id,
             recipients,
@@ -115,6 +217,12 @@ class MusicSession:
             exclude_user_id=self.virtual_id,
         )
         await notify_voice_state(self.channel_id)
+        # Mesh sözleşmesinde yeni katılan taraf offer üretir. Bot yeni katılımcı olduğundan,
+        # kanalda zaten bulunan her gerçek kullanıcıya kendisi teklif göndermelidir.
+        for peer in existing_peers:
+            peer_id = peer.get("user_id")
+            if isinstance(peer_id, int) and peer_id > 0:
+                await self._offer_to(peer_id)
 
     async def leave(self) -> None:
         if self._advance_task:
@@ -196,11 +304,11 @@ class MusicSession:
 
     # ---- Kuyruk / oynatma ----
 
-    async def enqueue(self, path: Path) -> str:
-        self.queue.append(path)
+    async def enqueue(self, source: TrackSource) -> str:
+        self.queue.append(source)
         if self.current is None:
             return await self._advance()
-        return f"'{path.stem}' kuyruğa eklendi (sırada {len(self.queue)}. parça)."
+        return f"'{_source_label(source)}' kuyruğa eklendi (sırada {len(self.queue)}. parça)."
 
     async def skip(self) -> str:
         if self.current is None and not self.queue:
@@ -219,13 +327,13 @@ class MusicSession:
             return "Kuyrukta başka parça yok."
 
         self.current = self.queue.pop(0)
-        self._player = MediaPlayer(str(self.current))
+        self._player = MediaPlayer(_source_location(self.current))
         self._switch_all_tracks(self._relay.subscribe(self._player.audio))
 
-        duration = _track_duration_seconds(self.current)
+        duration = _track_duration_seconds(self.current) if isinstance(self.current, Path) else 0
         if duration > 0:
             self._advance_task = asyncio.ensure_future(self._auto_advance_after(duration))
-        return f"Şimdi çalıyor: {self.current.stem}"
+        return f"Şimdi çalıyor: {_source_label(self.current)}"
 
     async def _auto_advance_after(self, duration_seconds: float) -> None:
         try:
@@ -240,8 +348,16 @@ class MusicSession:
                 sender.replaceTrack(track)
 
     def status_text(self) -> str:
-        lines = [f"Şimdi çalıyor: {self.current.stem}" if self.current else "Şu an bir şey çalmıyor."]
-        lines.append("Kuyruk: " + ", ".join(p.stem for p in self.queue) if self.queue else "Kuyruk boş.")
+        lines = [
+            f"Şimdi çalıyor: {_source_label(self.current)}"
+            if self.current
+            else "Şu an bir şey çalmıyor."
+        ]
+        lines.append(
+            "Kuyruk: " + ", ".join(_source_label(source) for source in self.queue)
+            if self.queue
+            else "Kuyruk boş."
+        )
         return "\n".join(lines)
 
 
