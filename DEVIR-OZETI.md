@@ -6,7 +6,7 @@
 > içerebilir; güncel gerçeklik için öncelik sırası **kaynak kod → bu dosya → güncel deployment
 > belgeleri → eski yol haritaları** olmalıdır.
 
-Son güncelleme: **30 Temmuz 2026**
+Son güncelleme: **31 Temmuz 2026**
 
 ---
 
@@ -1568,7 +1568,12 @@ health ve iki gerçek kullanıcıyla smoke test edilmelidir.
 - Konuşma algılama yaklaşık 60 Hz yerine yaklaşık 13 Hz çalışır.
 - Arka plan sekmesinde analyser durur.
 - Arka plan video render'ı duraklatılır.
-- İzlenmeyen uzak video track'i receiver yönünden kapatılır.
+- Kamera ve ekran yayını izleme tercihleri ayrı tutulur. İzleyici `Yayını izleme` dediğinde ekran
+  receiver yönü kapatılır ve yayıncıdaki mevcut audio sender yalnız o kullanıcı için ekran sesi
+  içermeyen `mikrofon + soundboard` miksine geçirilir. Yeni transceiver veya SDP m-line eklenmez.
+- Ekran paylaşımında `Oyun · Akıcılığı koru` modu `motion`/`maintain-framerate`, `Metin · Netliği
+  koru` modu `detail`/`maintain-resolution` kullanır. Oyun modunda 60 FPS için kodlayıcı bitrate
+  tavanı yükseltilir; codec zorlanmaz.
 - Matrix HTTP client keep-alive session ve connect/read timeout kullanır.
 - Mesaj geçmişi sayfalıdır; bütün tarih tek seferde DOM'a basılmaz.
 - `content-visibility` uzun sohbetlerin render maliyetini azaltır.
@@ -1893,6 +1898,11 @@ AI kapalıysa mesajlaşma/ses/web uygulaması yine çalışmalıdır.
 - Ses geliştirmeleri ekran/sekme sesini mevcut audio hattında
   paylaşır; kullanıcı başına %0–200 dinleme seviyesi, soundboard, bağlantı kalitesi ve
   geliştirilmiş mikrofon işleme sunar.
+- Ekran yayınını almak istemeyen izleyici için hem ekran videosu hem ekran/sekme sesi gönderici
+  tarafında durdurulur; normal mikrofon ve soundboard sesi devam eder. Bu seçim kamera izleme
+  tercihinden bağımsızdır ve mevcut audio/camera/screen transceiver sırasını değiştirmez.
+- Yayın kalite ayarına oyun odaklı akıcılık ve metin odaklı netlik modları eklenmiştir. Varsayılan
+  oyun modu, ağ/kodlayıcı zorlandığında kare hızını korumayı çözünürlüğe tercih eder.
 - Mesaj geliştirmeleri Matrix kalıcılığını koruyarak reaksiyon, mention, unread sayaçları,
   typing, arama ve pin ekler. Kanal AI özeti/akıllı arama mevcut AI worker kuyruğunu kullanır.
 - Salt okunur SetupCheck kurulum öncesi port, DB, migration, tunnel/DNS ve AI durumunu raporlar.
@@ -1909,6 +1919,12 @@ AI kapalıysa mesajlaşma/ses/web uygulaması yine çalışmalıdır.
   - AI Gateway 9/9,
   - frontend type-check başarılı,
   - frontend production build başarılı.
+- 31 Temmuz yayın aboneliği/kalite paketinde ayrıca:
+  - voice signaling birim testleri 5/5,
+  - frontend TypeScript kontrolü,
+  - web production build,
+  - desktop production build,
+  - yerel Vite açılış ve tarayıcı konsol smoke testi başarılıdır.
 - Şu anki en önemli engel uygulama kodu değil, Mert'in production Cloudflare Tunnel origin
   bağlantısındaki sürekli `502 Host Error` durumudur.
 - DNS ve TLS artık doğrudur; düzeltilmesi gereken bağlantı:

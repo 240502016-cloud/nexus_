@@ -47,6 +47,7 @@ interface PeerState {
   cameraTransceiver: RTCRtpTransceiver | null;
   screenTransceiver: RTCRtpTransceiver | null;
   remoteMediaMids: MediaMids;
+  remoteWantsScreen: boolean;
 }
 
 export interface RemoteVideoStream {
@@ -66,6 +67,7 @@ interface OutgoingAudioGraph {
   gain: GainNode;
   soundboardGain: GainNode;
   destination: MediaStreamAudioDestinationNode;
+  voiceDestination: MediaStreamAudioDestinationNode;
   localSoundboardDestination: MediaStreamAudioDestinationNode;
   localSoundboardElement: HTMLAudioElement;
 }
@@ -205,10 +207,13 @@ async function optimizeVideoSender(
   try {
     const preset = VIDEO_QUALITY_PRESETS[vs.videoQuality];
     const baseBitrate = kind === "screen" ? preset.screenBitrate : preset.cameraBitrate;
-    const frameRateMultiplier = vs.videoFrameRate === 60 ? 1.25 : 1;
+    const frameRateMultiplier = vs.videoFrameRate === 60 ? 1.5 : 1;
+    const motionMultiplier = kind === "screen" && vs.screenShareMode === "motion" ? 1.15 : 1;
     const parameters = sender.getParameters();
     if (!parameters.encodings?.length) parameters.encodings = [{}];
-    parameters.encodings[0].maxBitrate = Math.round(baseBitrate * frameRateMultiplier);
+    parameters.encodings[0].maxBitrate = Math.round(
+      baseBitrate * frameRateMultiplier * motionMultiplier,
+    );
     parameters.encodings[0].maxFramerate = vs.videoFrameRate;
     if (kind === "screen") {
       const source = sender.track?.getSettings();
@@ -222,7 +227,10 @@ async function optimizeVideoSender(
       parameters.encodings[0].scaleResolutionDownBy =
         Math.round(proportionalScale * 100) / 100;
     }
-    parameters.degradationPreference = "maintain-resolution";
+    parameters.degradationPreference =
+      kind === "screen" && vs.screenShareMode === "motion"
+        ? "maintain-framerate"
+        : "maintain-resolution";
     await sender.setParameters(parameters);
   } catch {
     // Bazı tarayıcılar kodlayıcı parametrelerinin bir kısmını desteklemez; varsayılan uyarlama sürer.
@@ -277,6 +285,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
   const [screenAudioEnabled, setScreenAudioEnabled] = useState(false);
   const [remoteStreams, setRemoteStreams] = useState<Map<string, RemoteVideoStream>>(new Map());
   const [ignoredRemoteVideoIds, setIgnoredRemoteVideoIds] = useState<Set<number>>(new Set());
+  const [ignoredRemoteScreenIds, setIgnoredRemoteScreenIds] = useState<Set<number>>(new Set());
   const [remoteVolumes, setRemoteVolumes] = useState<Map<number, number>>(loadRemoteVolumes);
   const [soundboardVolume, setSoundboardVolumeState] = useState(100);
   const [soundboardMuted, setSoundboardMuted] = useState(false);
@@ -312,6 +321,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
   const remoteMediaRef = useRef<Map<string, MediaStream>>(new Map());
   const remoteVideoStateRef = useRef<Map<string, boolean>>(new Map());
   const ignoredRemoteVideoIdsRef = useRef<Set<number>>(new Set());
+  const ignoredRemoteScreenIdsRef = useRef<Set<number>>(new Set());
   const mutedRef = useRef(false);
   const deafenedRef = useRef(false);
   const preDeafenMutedRef = useRef(false); // deafen açılmadan önceki mute durumu
@@ -418,6 +428,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       previousGraph.localSoundboardDestination.stream
         .getTracks()
         .forEach((track) => track.stop());
+      previousGraph.voiceDestination.stream.getTracks().forEach((track) => track.stop());
       void previousGraph.context.close();
     }
     microphoneGraphRef.current = null;
@@ -433,6 +444,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     const gain = context.createGain();
     const soundboardGain = context.createGain();
     const destination = context.createMediaStreamDestination();
+    const voiceDestination = context.createMediaStreamDestination();
     const localSoundboardDestination = context.createMediaStreamDestination();
     const localSoundboardElement = new Audio();
     localSoundboardElement.autoplay = true;
@@ -467,10 +479,12 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       }
     }
     gain.connect(destination);
+    gain.connect(voiceDestination);
     soundboardGain.gain.value = soundboardMutedRef.current || deafenedRef.current
       ? 0
       : Math.max(0, Math.min(2, soundboardVolumeRef.current / 100));
     soundboardGain.connect(destination);
+    soundboardGain.connect(voiceDestination);
     // Soundboard tek kaynak düğümünden iki ayrı hedefe gider: mevcut WebRTC audio
     // m-line'ı ve yalnızca yerel hoparlör. Böylece yeni transceiver oluşmaz ve kullanıcı
     // kendi efektini seçili çıkış cihazından duyarken karşı tarafa da aynı miks ulaşır.
@@ -489,6 +503,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       gain,
       soundboardGain,
       destination,
+      voiceDestination,
       localSoundboardDestination,
       localSoundboardElement,
     };
@@ -675,40 +690,56 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     if (stream) attachRemoteAudio(peerId, stream);
   }, []);
 
-  const setRemoteVideoEnabled = useCallback((peerId: number, enabled: boolean) => {
-    const next = new Set(ignoredRemoteVideoIdsRef.current);
+  const setRemoteVideoEnabled = useCallback((
+    peerId: number,
+    kind: "camera" | "screen",
+    enabled: boolean,
+  ) => {
+    const ignoredRef =
+      kind === "screen" ? ignoredRemoteScreenIdsRef : ignoredRemoteVideoIdsRef;
+    const next = new Set(ignoredRef.current);
     if (enabled) next.delete(peerId);
     else next.add(peerId);
-    ignoredRemoteVideoIdsRef.current = next;
-    setIgnoredRemoteVideoIds(next);
+    ignoredRef.current = next;
+    if (kind === "screen") setIgnoredRemoteScreenIds(next);
+    else setIgnoredRemoteVideoIds(next);
 
-    for (const [key, stream] of remoteMediaRef.current) {
-      if (key.startsWith(`${peerId}:`)) stream.getVideoTracks().forEach((track) => { track.enabled = enabled; });
+    const stream = remoteMediaRef.current.get(`${peerId}:${kind}`);
+    stream?.getVideoTracks().forEach((track) => {
+      track.enabled = enabled;
+    });
+
+    // DOM'da gizlemek trafik tasarrufu sağlamaz. İlgili receiver yönünü kapatıp yeniden
+    // pazarlık yapınca yayıncı bu kullanıcı için video encode/gönderimini durdurur.
+    const peer = peersRef.current.get(peerId);
+    const transceiver =
+      kind === "screen" ? peer?.screenTransceiver : peer?.cameraTransceiver;
+    const localTrack = kind === "screen" ? screenTrackRef.current : cameraTrackRef.current;
+    if (peer && transceiver) {
+      const nextDirection = videoDirection(Boolean(localTrack), enabled);
+      if (transceiver.direction !== nextDirection) {
+        transceiver.direction = nextDirection;
+        peer.requestNegotiation();
+      }
     }
 
-    // Yalnızca videoyu DOM'dan gizlemek veri akışını durdurmaz. Alıcı yönünü kapatarak
-    // WebRTC yeniden pazarlığında karşı tarafın bu kullanıcıya video göndermesini keseriz.
-    const peer = peersRef.current.get(peerId);
-    if (peer) {
-      const videoTransceivers = [
-        [peer.cameraTransceiver, cameraTrackRef.current],
-        [peer.screenTransceiver, screenTrackRef.current],
-      ] as const;
-      let directionChanged = false;
-      for (const [transceiver, localTrack] of videoTransceivers) {
-        if (!transceiver) continue;
-        const nextDirection = videoDirection(Boolean(localTrack), enabled);
-        if (transceiver.direction === nextDirection) continue;
-        transceiver.direction = nextDirection;
-        directionChanged = true;
-      }
-      if (directionChanged) peer.requestNegotiation();
+    if (kind === "screen") {
+      // Yayın sesi mikrofon/soundboard ile aynı audio m-line'ında kalır. Yayıncı bu tercih
+      // sinyalini alınca yalnız bu peer'in sender'ını yayın sesi içermeyen mikse geçirir.
+      sendWebSocketJson(wsRef.current, {
+        type: "media-subscription",
+        to: peerId,
+        kind: "screen",
+        enabled,
+      });
     }
   }, []);
 
   const toggleRemoteVideo = useCallback(
-    (peerId: number) => {
-      setRemoteVideoEnabled(peerId, ignoredRemoteVideoIdsRef.current.has(peerId));
+    (peerId: number, kind: "camera" | "screen") => {
+      const ignored =
+        kind === "screen" ? ignoredRemoteScreenIdsRef.current : ignoredRemoteVideoIdsRef.current;
+      setRemoteVideoEnabled(peerId, kind, ignored.has(peerId));
     },
     [setRemoteVideoEnabled],
   );
@@ -745,6 +776,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       outgoingGraph.localSoundboardDestination.stream
         .getTracks()
         .forEach((track) => track.stop());
+      outgoingGraph.voiceDestination.stream.getTracks().forEach((track) => track.stop());
       void outgoingGraph.context.close();
     }
     microphoneGraphRef.current = null;
@@ -766,6 +798,8 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     setRemoteStreams(new Map());
     ignoredRemoteVideoIdsRef.current = new Set();
     setIgnoredRemoteVideoIds(new Set());
+    ignoredRemoteScreenIdsRef.current = new Set();
+    setIgnoredRemoteScreenIds(new Set());
     mutedRef.current = false;
     deafenedRef.current = false;
   }, []);
@@ -904,14 +938,15 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         audioTransceiver = pc.addTransceiver(audioTrack ?? "audio", {
           direction: audioTrack ? "sendrecv" : "recvonly",
         });
-        const receivingVideo = !ignoredRemoteVideoIdsRef.current.has(peerId);
+        const receivingCamera = !ignoredRemoteVideoIdsRef.current.has(peerId);
+        const receivingScreen = !ignoredRemoteScreenIdsRef.current.has(peerId);
         cameraTransceiver = pc.addTransceiver(
           cameraTrackRef.current ?? placeholderVideoTrack("camera"),
-          { direction: videoDirection(Boolean(cameraTrackRef.current), receivingVideo) },
+          { direction: videoDirection(Boolean(cameraTrackRef.current), receivingCamera) },
         );
         screenTransceiver = pc.addTransceiver(
           screenTrackRef.current ?? placeholderVideoTrack("screen"),
-          { direction: videoDirection(Boolean(screenTrackRef.current), receivingVideo) },
+          { direction: videoDirection(Boolean(screenTrackRef.current), receivingScreen) },
         );
       }
       const peer: PeerState = {
@@ -926,6 +961,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         cameraTransceiver,
         screenTransceiver,
         remoteMediaMids: { audio: null, camera: null, screen: null },
+        remoteWantsScreen: true,
       };
       peersRef.current.set(peerId, peer);
 
@@ -1012,7 +1048,11 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         const key = `${peerId}:${kind}`;
         const stream = new MediaStream([event.track]);
         remoteMediaRef.current.set(key, stream);
-        event.track.enabled = !ignoredRemoteVideoIdsRef.current.has(peerId);
+        const ignored =
+          kind === "screen"
+            ? ignoredRemoteScreenIdsRef.current.has(peerId)
+            : ignoredRemoteVideoIdsRef.current.has(peerId);
+        event.track.enabled = !ignored;
         // Güncellenmemiş bir istemci video-state göndermese de önceki WebRTC davranışı çalışsın.
         // Güncel istemcilerde explicit false bu geçici akışı hemen kaldırır.
         if (remoteVideoStateRef.current.get(key) !== false) {
@@ -1083,6 +1123,16 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       }
     }
 
+    function outgoingAudioTrackForPeer(
+      peer: PeerState,
+      fullStream = localStreamRef.current,
+    ): MediaStreamTrack | null {
+      if (!peer.remoteWantsScreen) {
+        return microphoneGraphRef.current?.voiceDestination.stream.getAudioTracks()[0] ?? null;
+      }
+      return fullStream?.getAudioTracks()[0] ?? null;
+    }
+
     async function bindResponderMedia(peerId: number, peer: PeerState) {
       const transceivers = peer.pc.getTransceivers();
       const findByMid = (mid: string | null, kind: "audio" | "video") =>
@@ -1106,18 +1156,27 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         videoTransceivers[1] ??
         null;
 
-      const audioTrack = localStreamRef.current?.getAudioTracks()[0] ?? null;
+      const audioTrack = outgoingAudioTrackForPeer(peer);
       if (peer.audioTransceiver) {
         await peer.audioTransceiver.sender.replaceTrack(audioTrack);
         peer.audioTransceiver.direction = audioTrack ? "sendrecv" : "recvonly";
       }
 
-      const receivingVideo = !ignoredRemoteVideoIdsRef.current.has(peerId);
       const localVideo = [
-        ["camera", peer.cameraTransceiver, cameraTrackRef.current],
-        ["screen", peer.screenTransceiver, screenTrackRef.current],
+        [
+          "camera",
+          peer.cameraTransceiver,
+          cameraTrackRef.current,
+          !ignoredRemoteVideoIdsRef.current.has(peerId),
+        ],
+        [
+          "screen",
+          peer.screenTransceiver,
+          screenTrackRef.current,
+          !ignoredRemoteScreenIdsRef.current.has(peerId),
+        ],
       ] as const;
-      for (const [kind, transceiver, localTrack] of localVideo) {
+      for (const [kind, transceiver, localTrack, receivingVideo] of localVideo) {
         if (!transceiver) continue;
         await transceiver.sender.replaceTrack(
           localTrack ?? placeholderVideoTrack(kind),
@@ -1130,11 +1189,11 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     }
 
     async function replaceOutgoingAudioStream(nextStream: MediaStream | null) {
-      const nextTrack = nextStream?.getAudioTracks()[0] ?? null;
-      if (nextTrack) nextTrack.enabled = true;
       for (const [, peer] of peersRef.current) {
         const transceiver = peer.audioTransceiver;
         if (!transceiver) continue;
+        const nextTrack = outgoingAudioTrackForPeer(peer, nextStream);
+        if (nextTrack) nextTrack.enabled = true;
         await transceiver.sender.replaceTrack(nextTrack);
         const nextDirection: RTCRtpTransceiverDirection = nextTrack ? "sendrecv" : "recvonly";
         if (transceiver.direction !== nextDirection) {
@@ -1145,6 +1204,22 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       localStreamRef.current?.getAudioTracks().forEach((track) => track.stop());
       localStreamRef.current = nextStream;
       setMicEpoch((epoch) => epoch + 1);
+    }
+
+    async function applyPeerScreenSubscription(peerId: number, enabled: boolean) {
+      const peer = peersRef.current.get(peerId);
+      if (!peer) return;
+      peer.remoteWantsScreen = enabled;
+      const transceiver = peer.audioTransceiver;
+      if (!transceiver) return;
+      const nextTrack = outgoingAudioTrackForPeer(peer);
+      if (nextTrack) nextTrack.enabled = true;
+      await transceiver.sender.replaceTrack(nextTrack);
+      const nextDirection: RTCRtpTransceiverDirection = nextTrack ? "sendrecv" : "recvonly";
+      if (transceiver.direction !== nextDirection) {
+        transceiver.direction = nextDirection;
+        peer.requestNegotiation();
+      }
     }
     audioReplaceRef.current = replaceOutgoingAudioStream;
 
@@ -1268,6 +1343,12 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
                 kind: "screen",
                 enabled: Boolean(screenTrackRef.current),
               });
+              sendWebSocketJson(ws, {
+                type: "media-subscription",
+                to: peer.user_id,
+                kind: "screen",
+                enabled: !ignoredRemoteScreenIdsRef.current.has(peer.user_id),
+              });
             }
             break;
           }
@@ -1302,6 +1383,12 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
               to: joinedUserId,
               kind: "screen",
               enabled: Boolean(screenTrackRef.current),
+            });
+            sendWebSocketJson(ws, {
+              type: "media-subscription",
+              to: joinedUserId,
+              kind: "screen",
+              enabled: !ignoredRemoteScreenIdsRef.current.has(joinedUserId),
             });
             break;
           }
@@ -1397,6 +1484,12 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
             }
             break;
           }
+          case "media-subscription": {
+            if (data.kind === "screen" && typeof data.enabled === "boolean") {
+              await applyPeerScreenSubscription(data.from as number, data.enabled);
+            }
+            break;
+          }
           case "mute-changed":
             setParticipants((prev) =>
               prev.map((p) => (p.user_id === data.user_id ? { ...p, muted: data.muted as boolean } : p)),
@@ -1463,7 +1556,8 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         const track = stream.getVideoTracks()[0];
         if (!track) return;
 
-        track.contentHint = kind === "screen" ? "detail" : "motion";
+        track.contentHint =
+          kind === "screen" ? currentSettings.screenShareMode : "motion";
         try {
           await track.applyConstraints(
             kind === "screen"
@@ -1540,7 +1634,9 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
             await transceiver.sender.replaceTrack(track);
             const nextDirection = videoDirection(
               true,
-              !ignoredRemoteVideoIdsRef.current.has(peerId),
+              kind === "screen"
+                ? !ignoredRemoteScreenIdsRef.current.has(peerId)
+                : !ignoredRemoteVideoIdsRef.current.has(peerId),
             );
             const directionChanged = transceiver.direction !== nextDirection;
             if (directionChanged) transceiver.direction = nextDirection;
@@ -1566,6 +1662,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       for (const kind of ["camera", "screen"] as const) {
         const track = kind === "camera" ? cameraTrackRef.current : screenTrackRef.current;
         if (!track) continue;
+        track.contentHint = kind === "screen" ? currentSettings.screenShareMode : "motion";
         try {
           await track.applyConstraints(
             kind === "screen"
@@ -1615,7 +1712,9 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
           void transceiver.sender.replaceTrack(null);
           const nextDirection = videoDirection(
             false,
-            !ignoredRemoteVideoIdsRef.current.has(peerId),
+            kind === "screen"
+              ? !ignoredRemoteScreenIdsRef.current.has(peerId)
+              : !ignoredRemoteVideoIdsRef.current.has(peerId),
           );
           const directionChanged = transceiver.direction !== nextDirection;
           if (directionChanged) {
@@ -1889,7 +1988,12 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     if (connected && (cameraTrackRef.current || screenTrackRef.current)) {
       void videoControlRef.current?.applyQuality();
     }
-  }, [connected, voiceSettings.videoFrameRate, voiceSettings.videoQuality]);
+  }, [
+    connected,
+    voiceSettings.screenShareMode,
+    voiceSettings.videoFrameRate,
+    voiceSettings.videoQuality,
+  ]);
 
   const toggleMute = useCallback(() => {
     // Deafen açıkken mute'u tek başına değiştirmek Discord'da mümkün değil; önce deafen'i kapat.
@@ -1940,6 +2044,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     localScreenStream,
     remoteStreams,
     ignoredRemoteVideoIds,
+    ignoredRemoteScreenIds,
     remoteVolumes,
     soundboardVolume,
     soundboardMuted,

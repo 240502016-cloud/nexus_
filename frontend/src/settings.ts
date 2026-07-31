@@ -2,6 +2,7 @@ export type VoiceMode = "toggle" | "ptt";
 export type ThemeMode = "dark" | "light" | "system";
 export type VideoQuality = "480p" | "720p" | "1080p";
 export type VideoFrameRate = 30 | 60;
+export type ScreenShareMode = "motion" | "detail";
 export type DesktopCloseBehavior = "tray" | "quit";
 
 export interface VideoQualityPreset {
@@ -51,6 +52,7 @@ export interface VoiceSettings {
   // Kamera ve ekran paylaşımı için ücretsiz, tarayıcı tabanlı WebRTC kalite tercihleri.
   videoQuality: VideoQuality;
   videoFrameRate: VideoFrameRate;
+  screenShareMode: ScreenShareMode;
   // Ses işleme (getUserMedia MediaTrackConstraints'e uygulanır).
   noiseSuppression: boolean;
   echoCancellation: boolean;
@@ -101,6 +103,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   outputVolume: 100,
   videoQuality: "1080p",
   videoFrameRate: 60,
+  screenShareMode: "motion",
   noiseSuppression: true,
   echoCancellation: true,
   autoGainControl: true,
@@ -160,6 +163,7 @@ export function loadVoiceSettings(): VoiceSettings {
       videoQuality:
         parsed.videoQuality === "480p" || parsed.videoQuality === "720p" ? parsed.videoQuality : "1080p",
       videoFrameRate: parsed.videoFrameRate === 30 ? 30 : 60,
+      screenShareMode: parsed.screenShareMode === "detail" ? "detail" : "motion",
       noiseSuppression: boolWithDefault(parsed.noiseSuppression, true),
       echoCancellation: boolWithDefault(parsed.echoCancellation, true),
       autoGainControl: boolWithDefault(parsed.autoGainControl, true),

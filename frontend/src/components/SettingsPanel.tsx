@@ -522,10 +522,23 @@ export function SettingsPanel({
                 <option value={60}>60 FPS · Akıcı</option>
               </select>
             </label>
+            <label className="settings-panel__field">
+              <span>Yayın türü</span>
+              <select
+                value={settings.screenShareMode}
+                onChange={(event) =>
+                  update({ screenShareMode: event.target.value as VoiceSettings["screenShareMode"] })
+                }
+              >
+                <option value="motion">Oyun · Akıcılığı koru</option>
+                <option value="detail">Metin · Netliği koru</option>
+              </select>
+            </label>
           </div>
           <p className="settings-panel__hint">
-            Bu tercih hem kameraya hem ekran paylaşımına uygulanır. 1080p/60 FPS daha fazla bağlantı
-            hızı ve işlem gücü kullanır; hiçbir seçenek ücretli servis gerektirmez.
+            Çözünürlük ve FPS kameraya ve yayına uygulanır. Oyun modu zorlanınca önce çözünürlüğü,
+            Metin modu ise önce kare hızını düşürür. 1080p/60 FPS daha fazla bağlantı ve işlem gücü
+            kullanır; hiçbir seçenek ücretli servis gerektirmez.
           </p>
           <div className="settings-panel__test-row">
             <button onClick={camPreviewing ? stopCamPreview : startCamPreview}>

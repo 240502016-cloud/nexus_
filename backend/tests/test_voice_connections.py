@@ -5,7 +5,12 @@ from unittest.mock import patch
 
 from app.config import settings
 from app.core.models import User
-from app.core.routers.voice import VoiceConnectionManager, _video_state_payload, voice_ice_servers
+from app.core.routers.voice import (
+    VoiceConnectionManager,
+    _media_subscription_payload,
+    _video_state_payload,
+    voice_ice_servers,
+)
 
 
 class VoiceConnectionManagerTests(unittest.IsolatedAsyncioTestCase):
@@ -70,6 +75,35 @@ class VoiceConnectionManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(
             _video_state_payload(
                 {"type": "video-state", "to": 8, "kind": "microphone", "enabled": False},
+                3,
+            )
+        )
+
+    def test_media_subscription_signal_is_strictly_validated(self):
+        self.assertEqual(
+            _media_subscription_payload(
+                {"type": "media-subscription", "to": 8, "kind": "screen", "enabled": False},
+                3,
+            ),
+            (
+                8,
+                {
+                    "type": "media-subscription",
+                    "from": 3,
+                    "kind": "screen",
+                    "enabled": False,
+                },
+            ),
+        )
+        self.assertIsNone(
+            _media_subscription_payload(
+                {"type": "media-subscription", "to": 8, "kind": "screen", "enabled": "false"},
+                3,
+            )
+        )
+        self.assertIsNone(
+            _media_subscription_payload(
+                {"type": "media-subscription", "to": 8, "kind": "camera", "enabled": False},
                 3,
             )
         )

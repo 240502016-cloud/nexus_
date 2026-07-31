@@ -202,6 +202,25 @@ def _video_state_payload(data: dict, user_id: int) -> tuple[int, dict] | None:
     }
 
 
+def _media_subscription_payload(data: dict, user_id: int) -> tuple[int, dict] | None:
+    """Bir izleyicinin ekran yayını aboneliğini yayıncıya güvenle aktar."""
+    target = data.get("to")
+    kind = data.get("kind")
+    enabled = data.get("enabled")
+    if (
+        not isinstance(target, int)
+        or kind != "screen"
+        or not isinstance(enabled, bool)
+    ):
+        return None
+    return target, {
+        "type": "media-subscription",
+        "from": user_id,
+        "kind": "screen",
+        "enabled": enabled,
+    }
+
+
 router = APIRouter(tags=["voice"])
 
 
@@ -325,6 +344,11 @@ async def voice_socket(websocket: WebSocket, channel_id: int, token: str = Query
                     await voice_manager.send_to(channel_id, target, payload)
             elif msg_type == "video-state":
                 relay = _video_state_payload(data, user_id)
+                if relay:
+                    target, payload = relay
+                    await voice_manager.send_to(channel_id, target, payload)
+            elif msg_type == "media-subscription":
+                relay = _media_subscription_payload(data, user_id)
                 if relay:
                     target, payload = relay
                     await voice_manager.send_to(channel_id, target, payload)

@@ -104,12 +104,27 @@ function MediaTile({
         <button
           type="button"
           className="stage-person__pause"
+          title={
+            kind === "screen"
+              ? paused
+                ? "Yayın görüntüsünü ve sesini almaya başla"
+                : "Yayın görüntüsünü ve sesini almayı durdur"
+              : paused
+                ? "Kamerayı izlemeye başla"
+                : "Kamerayı izlemeyi durdur"
+          }
           onClick={(event) => {
             event.stopPropagation();
             onPause();
           }}
         >
-          {paused ? "İzlemeyi aç" : "İzlemeyi kapat"}
+          {kind === "screen"
+            ? paused
+              ? "Yayını izle"
+              : "Yayını izleme"
+            : paused
+              ? "Kamerayı aç"
+              : "Kamerayı kapat"}
         </button>
       ) : null}
     </article>
@@ -177,18 +192,18 @@ export function VideoStage({
     }] : []),
     ...remotes.filter((item) =>
       item.kind === "screen" &&
-      hasVideo(item.stream) &&
-      !voice.ignoredRemoteVideoIds.has(item.userId),
+      (hasVideo(item.stream) || voice.ignoredRemoteScreenIds.has(item.userId)),
     ).map((item) => ({
       key: `screen-${item.userId}`,
       kind: "screen" as const,
       name: `${participants.find((p) => p.user_id === item.userId)?.username ?? "Katılımcı"} ekranı`,
       avatar: null,
-      stream: item.stream,
+      stream: voice.ignoredRemoteScreenIds.has(item.userId) ? null : item.stream,
       mirror: false,
       speaking: false,
-      label: "EKRAN",
+      label: voice.ignoredRemoteScreenIds.has(item.userId) ? "YAYIN VERİSİ KAPALI" : "EKRAN",
       userId: item.userId,
+      paused: voice.ignoredRemoteScreenIds.has(item.userId),
     })),
   ];
   const focusedTile = focusedTileKey
@@ -240,7 +255,10 @@ export function VideoStage({
         focused={focused}
         onFocus={() => setFocusedTileKey((current) => current === key ? null : key)}
         onPause={"userId" in mediaTile && mediaTile.userId
-          ? () => voice.toggleRemoteVideo(mediaTile.userId!)
+          ? () => voice.toggleRemoteVideo(
+              mediaTile.userId!,
+              mediaTile.kind === "screen" ? "screen" : "camera",
+            )
           : undefined}
       />
     );
