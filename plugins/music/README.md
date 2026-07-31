@@ -14,18 +14,6 @@ sesli kanala bir katılımcı gibi bağlanır ve diğer katılımcılar sesi ger
 - `/muzik-kuyruk` — şu an çalan parçayı ve kuyruğu gösterir
 - `/muzik-sonraki` — sıradaki parçaya geçer (kuyruk boşsa sessizleşir, kanaldan ayrılmaz)
 - `/muzik-ayril` — bot sesli kanaldan ayrılır
-- `/youtube <bağlantı>` — metin kanalında resmi YouTube oynatıcısıyla senkronize izleme odası açar
-- `/youtube-duraklat`, `/youtube-devam`, `/youtube-durdur`, `/youtube-durum` — izleme odasını yönetir
-
-YouTube içeriğinin sesi ayrıştırılmaz veya müzik botunun WebRTC hattından yeniden yayınlanmaz.
-Her istemci resmi YouTube iframe oynatıcısını açar; bot mesajındaki zaman damgası ve oynatma konumu
-istemcilerin aynı noktadan başlamasını sağlar. Tarayıcı otomatik sesi engellerse kullanıcının
-oynatıcıya bir kez tıklaması gerekir.
-
-Nexus CSP'si yalnız resmi `www.youtube.com` ve `www.youtube-nocookie.com` iframe'lerine izin
-verir. Video sahibi gömülü oynatmayı kapattıysa bu kısıt teknik veya hukuki olarak uygulama
-tarafından aşılamaz; karttaki **YouTube'da aç** düğmesi videoyu resmi sayfasında açar.
-
 `/muzik-url` ve `/radyo` yalnız doğrudan ses döndüren genel HTTP(S) adreslerini kabul eder.
 Yerel/özel/ayrılmış IP adresleri, kimlik bilgisi içeren URL'ler, HTML sayfaları ve YouTube sayfa
 bağlantıları reddedilir. Her yönlendirme yeniden doğrulanır.
@@ -56,5 +44,3 @@ modül docstring'ine bakın.
   her zaman güvenilir manuel yol.
 - Doğrudan internet radyo akışlarının doğal bir bitiş süresi yoktur; `/muzik-sonraki` veya
   `/muzik-ayril` ile elle durdurulur.
-- YouTube izleme odası durumu backend belleğindedir. Backend yeniden başlarsa yeni bir
-  `/youtube <bağlantı>` komutuyla oda yeniden başlatılır.

@@ -1,6 +1,6 @@
 {
   "name": "music",
-  "version": "0.2.1",
+  "version": "0.2.0",
   "description": "Botu gerçekten sesli kanala katıp WebRTC üzerinden ses akıtan müzik kuyruğu",
   "entry_point": "main:handle_command",
   "permissions": ["voice.join", "voice.stream"],
@@ -13,11 +13,6 @@
     "muzik-url",
     "radyo",
     "muzik-kuyruk",
-    "muzik-sonraki",
-    "youtube",
-    "youtube-duraklat",
-    "youtube-devam",
-    "youtube-durdur",
-    "youtube-durum"
+    "muzik-sonraki"
   ]
 }

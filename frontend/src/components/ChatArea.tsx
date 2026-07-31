@@ -7,11 +7,8 @@ import type { Channel, Member, Message, PinnedMessages } from "../types";
 import { parseAttachmentMessage } from "../messageContent";
 import { AttachmentCard } from "./AttachmentCard";
 import { Icon } from "./Icon";
-import { YouTubePlayerCard } from "./YouTubePlayerCard";
-import type { YouTubeMessageEvent } from "./YouTubePlayerCard";
 
 const GAME_EVENT_PREFIX = "NEXUS_GAME_EVENT:";
-const YOUTUBE_EVENT_PREFIX = "NEXUS_YOUTUBE_EVENT:";
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "😮"];
 const MESSAGE_GROUP_WINDOW_MS = 5 * 60 * 1_000;
 
@@ -29,11 +26,6 @@ interface GameMessageEvent {
 
 interface ParsedGameMessage {
   event: GameMessageEvent;
-  body: string;
-}
-
-interface ParsedYouTubeMessage {
-  event: YouTubeMessageEvent;
   body: string;
 }
 
@@ -80,25 +72,6 @@ function parseGameMessage(content: string): ParsedGameMessage | null {
   try {
     const event = JSON.parse(header.slice(GAME_EVENT_PREFIX.length)) as GameMessageEvent;
     if (!event || typeof event.type !== "string") return null;
-    return { event, body: bodyLines.join("\n") };
-  } catch {
-    return null;
-  }
-}
-
-function parseYouTubeMessage(content: string): ParsedYouTubeMessage | null {
-  if (!content.startsWith(YOUTUBE_EVENT_PREFIX)) return null;
-  const [header, ...bodyLines] = content.split("\n");
-  try {
-    const event = JSON.parse(header.slice(YOUTUBE_EVENT_PREFIX.length)) as YouTubeMessageEvent;
-    if (
-      event?.type !== "youtube_state" ||
-      !/^[A-Za-z0-9_-]{11}$/.test(event.video_id) ||
-      typeof event.playing !== "boolean" ||
-      typeof event.stopped !== "boolean" ||
-      !Number.isFinite(event.position_seconds) ||
-      !Number.isFinite(event.issued_at_ms)
-    ) return null;
     return { event, body: bodyLines.join("\n") };
   } catch {
     return null;
@@ -333,7 +306,6 @@ export function ChatArea({
       // Yapılandırılmış kart protokolü yalnızca backend'in doğruladığı gerçek bot mesajlarında
       // yorumlanır; normal kullanıcı aynı prefix'i yazarak sahte davet kartı üretemez.
       gameMessage: message.is_bot ? parseGameMessage(message.content) : null,
-      youtubeMessage: message.is_bot ? parseYouTubeMessage(message.content) : null,
     }))
     .map((entry, index, entries) => {
       const previous = entries[index - 1];
@@ -344,8 +316,8 @@ export function ChatArea({
           canContinueVisualGroup(
             previous.message,
             entry.message,
-            Boolean(previous.gameMessage || previous.youtubeMessage || previous.attachment),
-            Boolean(entry.gameMessage || entry.youtubeMessage || entry.attachment),
+            Boolean(previous.gameMessage || previous.attachment),
+            Boolean(entry.gameMessage || entry.attachment),
           ),
         ),
       };
@@ -360,13 +332,6 @@ export function ChatArea({
       .map(({ gameMessage }) => gameMessage?.event.challenge_id)
       .filter((id): id is string => Boolean(id)),
   );
-  let activeYouTubeMessageId: string | null = null;
-  for (let index = parsedMessages.length - 1; index >= 0; index -= 1) {
-    if (parsedMessages[index].youtubeMessage) {
-      activeYouTubeMessageId = parsedMessages[index].message.event_id;
-      break;
-    }
-  }
   const currentUsername = currentMatrixUserId ? displayName(currentMatrixUserId).toLocaleLowerCase("tr") : "";
 
   function selectReply(message: Message) {
@@ -807,7 +772,7 @@ export function ChatArea({
         {!channel ? null : ordered.length === 0 ? (
           <p className="chat-area__placeholder">Henüz mesaj yok. İlk mesajı sen yaz.</p>
         ) : (
-          parsedMessages.map(({ message, gameMessage, youtubeMessage, attachment, groupedWithPrevious }) => {
+          parsedMessages.map(({ message, gameMessage, attachment, groupedWithPrevious }) => {
             const own = message.sender === currentMatrixUserId || Boolean(message.delivery_status);
             const className = [
               "chat-message",
@@ -940,12 +905,6 @@ export function ChatArea({
                       )
                     ) : null}
                   </div>
-                ) : youtubeMessage ? (
-                  <YouTubePlayerCard
-                    event={youtubeMessage.event}
-                    body={youtubeMessage.body}
-                    active={message.event_id === activeYouTubeMessageId}
-                  />
                 ) : attachment ? (
                   <AttachmentCard {...attachment} />
                 ) : (

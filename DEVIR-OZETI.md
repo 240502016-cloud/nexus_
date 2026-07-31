@@ -1142,12 +1142,6 @@ Dayanıklılık:
 - Doğrudan, genel internetteki ses/radyo akışları `/muzik-url <url>` ve `/radyo <url>` ile
   mevcut WebRTC botundan çalınabilir. URL'lerde özel/yerel IP, kimlik bilgisi, doğrulanmamış
   içerik tipi ve aşırı yönlendirme reddedilir.
-- YouTube için ses ayıklama yapılmaz. `/youtube <url>` resmi iframe oynatıcısını açan,
-  `/youtube-duraklat`, `/youtube-devam`, `/youtube-durdur` ve `/youtube-durum` komutlarıyla
-  aynı metin kanalındaki istemcileri zaman damgası üzerinden senkronize eden kart üretir.
-- Frontend CSP'sindeki eksik `frame-src` nedeniyle resmi YouTube iframe'lerinin Nexus tarafından
-  engellenmesi giderilmiştir. Yalnız `www.youtube.com` ve `www.youtube-nocookie.com` çerçevelerine
-  izin verilir; video sahibinin gömmeyi kapattığı içerikler için resmi sayfaya açma düğmesi korunur.
 - Plugin açıkça bir bota bağlanmalıdır.
 - Bot yeni katılan taraf olduğunda mevcut ses katılımcılarına offer göndermesi sağlanmıştır;
   botun kullanıcılar kanaldan çıkıp yeniden girmeden duyulamaması giderilmiştir.
@@ -1519,7 +1513,7 @@ Bu belge hazırlanırken yerelde yeniden çalıştırılan kontroller:
 ### Backend
 
 ```text
-53 passed
+51 passed
 ```
 
 ### AI Gateway
@@ -1933,7 +1927,7 @@ AI kapalıysa mesajlaşma/ses/web uygulaması yine çalışmalıdır.
 - Soundboard artık hem yerel seçili çıkışa hem mevcut WebRTC miksine bağlanır. Askıya alınan Web
   Audio ve engellenen uzak autoplay akışları kullanıcı etkileşiminde güvenle yeniden başlatılır.
 - Yerel testler güncel çalışma ağacında başarılıdır:
-  - backend 53/53,
+  - backend 51/51,
   - AI Gateway 9/9,
   - frontend type-check başarılı,
   - frontend production build başarılı.
@@ -1944,11 +1938,10 @@ AI kapalıysa mesajlaşma/ses/web uygulaması yine çalışmalıdır.
   - desktop production build,
   - yerel Vite açılış ve tarayıcı konsol smoke testi başarılıdır.
 - 31 Temmuz müzik kaynakları paketinde ayrıca:
-  - resmi YouTube iframe kartı ve zaman damgalı komut senkronizasyonu,
   - public doğrudan ses/radyo URL'leri için SSRF korumalı ön kontrol,
   - müzik botunun mevcut ses kanalı üyelerine offer göndermesi,
   - sonradan oluşturulan Matrix metin odalarında bot üyeliğini onarma,
-  - ilgili müzik ve oda onarım testleri dahil backend 53/53 doğrulaması tamamlanmıştır.
+  - ilgili müzik ve oda onarım testleri dahil backend 51/51 doğrulaması tamamlanmıştır.
 - Şu anki en önemli engel uygulama kodu değil, Mert'in production Cloudflare Tunnel origin
   bağlantısındaki sürekli `502 Host Error` durumudur.
 - DNS ve TLS artık doğrudur; düzeltilmesi gereken bağlantı:

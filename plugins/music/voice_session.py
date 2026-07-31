@@ -137,7 +137,7 @@ def resolve_remote_track(raw_url: str) -> RemoteTrack:
             if content_type not in _AUDIO_CONTENT_TYPES and not content_type.startswith("audio/"):
                 raise ValueError(
                     "Adres doğrudan bir ses veya internet radyo akışı döndürmüyor. "
-                    "YouTube bağlantıları için /youtube kullanın."
+                    "YouTube gibi HTML sayfa bağlantıları doğrudan ses kaynağı değildir."
                 )
             path_name = Path(unquote(parsed.path)).stem.strip()
             label = path_name or parsed.hostname
