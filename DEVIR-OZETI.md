@@ -861,6 +861,11 @@ Durum ve özel durum ana araç çubuğundan kaldırılmış, Ayarlar'a taşınm�
   oynatır; `%100` üzeri kullanıcıya özel yükseltme gerektiğinde Web Audio gain hattı devreye girer.
   Audio/camera/screen transceiver sırası, SDP m-line sayısı ve giden mikrofon/soundboard miksi
   değiştirilmemiştir.
+- İlk SDP/ICE kurulumu sırasında Chromium'un uzak audio oynatımını muted/beklemede bırakması veya
+  sender'ın eski miks track'inde kalması tek yönlü mikrofon ve soundboard sessizliğine yol
+  açabiliyordu. Audio sender artık offer/answer ve `connected` sonrasında mevcut miks track'iyle
+  yeniden doğrulanır; uzak oynatım `track.unmute`, SDP tamamlanması ve kullanıcı etkileşiminde
+  tekrar çalıştırılır. Yeni transceiver veya m-line oluşturulmaz.
 
 ### Push-to-talk
 
@@ -1140,6 +1145,9 @@ Dayanıklılık:
 - YouTube için ses ayıklama yapılmaz. `/youtube <url>` resmi iframe oynatıcısını açan,
   `/youtube-duraklat`, `/youtube-devam`, `/youtube-durdur` ve `/youtube-durum` komutlarıyla
   aynı metin kanalındaki istemcileri zaman damgası üzerinden senkronize eden kart üretir.
+- Frontend CSP'sindeki eksik `frame-src` nedeniyle resmi YouTube iframe'lerinin Nexus tarafından
+  engellenmesi giderilmiştir. Yalnız `www.youtube.com` ve `www.youtube-nocookie.com` çerçevelerine
+  izin verilir; video sahibinin gömmeyi kapattığı içerikler için resmi sayfaya açma düğmesi korunur.
 - Plugin açıkça bir bota bağlanmalıdır.
 - Bot yeni katılan taraf olduğunda mevcut ses katılımcılarına offer göndermesi sağlanmıştır;
   botun kullanıcılar kanaldan çıkıp yeniden girmeden duyulamaması giderilmiştir.

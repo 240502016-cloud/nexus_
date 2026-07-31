@@ -2433,6 +2433,21 @@ button {
   text-decoration: none;
 }
 
+.youtube-card__external {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 7px 11px;
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, #ff4d5f 58%, var(--border));
+  border-radius: 10px;
+  background: rgba(255, 38, 61, 0.12);
+}
+
+.youtube-card__external:hover {
+  background: rgba(255, 38, 61, 0.2);
+}
+
 .youtube-card--history,
 .youtube-card--stopped {
   display: grid;

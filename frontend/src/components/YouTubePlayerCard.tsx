@@ -76,8 +76,13 @@ export function YouTubePlayerCard({
         />
       </div>
       <div className="youtube-card__footer">
-        <span>Ses gelmezse oynatıcıya bir kez tıklayın; tarayıcı otomatik sesi engellemiş olabilir.</span>
-        <a href={watchUrl} target="_blank" rel="noreferrer">YouTube’da aç</a>
+        <span>
+          Ses gelmezse oynatıcıya tıklayın. Video sahibi gömmeyi kapattıysa içerik yalnız
+          YouTube’da açılabilir.
+        </span>
+        <a className="youtube-card__external" href={watchUrl} target="_blank" rel="noreferrer">
+          YouTube’da aç
+        </a>
       </div>
     </div>
   );

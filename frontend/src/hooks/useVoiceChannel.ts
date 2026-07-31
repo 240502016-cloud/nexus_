@@ -404,6 +404,21 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     });
   }
 
+  async function resumeRemoteAudioPlayback(peerId: number): Promise<void> {
+    const audioElement = audioElsRef.current.get(peerId);
+    if (!audioElement) return;
+    const playbackContext = remoteAudioGraphsRef.current.has(peerId)
+      ? remoteAudioContextRef.current
+      : null;
+    await startAudioPlayback(playbackContext, audioElement);
+  }
+
+  function resumeAllRemoteAudioPlayback(): void {
+    for (const peerId of audioElsRef.current.keys()) {
+      void resumeRemoteAudioPlayback(peerId).catch(() => {});
+    }
+  }
+
   function placeholderVideoTrack(kind: "camera" | "screen"): MediaStreamTrack {
     const existing = placeholderVideoRef.current[kind];
     if (existing?.track.readyState === "live") return existing.track;
@@ -1041,6 +1056,12 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         if (event.track.kind === "audio") {
           const stream = event.streams[0] ?? new MediaStream([event.track]);
           attachRemoteAudio(peerId, stream);
+          // Bazı Chromium sürümlerinde track ilk geldiğinde muted olur ve ilk play() denemesi
+          // kalıcı biçimde beklemede kalabilir. Gerçek RTP akışı başladığı anda mevcut audio
+          // elemanını tekrar çalıştır; yeni bir katılımcının gelmesine bağımlı kalma.
+          event.track.addEventListener("unmute", () => {
+            void resumeRemoteAudioPlayback(peerId).catch(() => {});
+          });
           return;
         }
         if (!isCamera && !isScreen) return;
@@ -1083,6 +1104,11 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
           peerRecoveryTimers.delete(peerId);
         }
         if (pc.connectionState === "connected") {
+          // SDP kurulurken AudioContext askıya alınmış veya sender eski miks track'inde kalmış
+          // olabilir. Bağlantı tamamlanınca aynı m-line üzerindeki güncel miksle eşitle.
+          void resumeAudioContext(microphoneGraphRef.current?.context).catch(() => {});
+          void syncOutgoingAudioSender(peerId, peer).catch(() => {});
+          void resumeRemoteAudioPlayback(peerId).catch(() => {});
           setError((current) =>
             current === "Medya bağlantısı yeniden kuruluyor…" ? microphoneError : current,
           );
@@ -1131,6 +1157,23 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         return microphoneGraphRef.current?.voiceDestination.stream.getAudioTracks()[0] ?? null;
       }
       return fullStream?.getAudioTracks()[0] ?? null;
+    }
+
+    async function syncOutgoingAudioSender(peerId: number, peer: PeerState): Promise<void> {
+      if (peersRef.current.get(peerId) !== peer) return;
+      const transceiver = peer.audioTransceiver;
+      if (!transceiver) return;
+      await resumeAudioContext(microphoneGraphRef.current?.context).catch(() => {});
+      const nextTrack = outgoingAudioTrackForPeer(peer);
+      if (nextTrack) nextTrack.enabled = true;
+      if (transceiver.sender.track !== nextTrack) {
+        await transceiver.sender.replaceTrack(nextTrack);
+      }
+      const nextDirection: RTCRtpTransceiverDirection = nextTrack ? "sendrecv" : "recvonly";
+      if (transceiver.direction !== nextDirection) {
+        transceiver.direction = nextDirection;
+        peer.requestNegotiation();
+      }
     }
 
     async function bindResponderMedia(peerId: number, peer: PeerState) {
@@ -1390,6 +1433,9 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
               kind: "screen",
               enabled: !ignoredRemoteScreenIdsRef.current.has(joinedUserId),
             });
+            // Oda değişimi mevcut Chromium medya oynatımını hareketlendirebiliyor. Bunu tesadüfi
+            // tarayıcı davranışına bırakma; mevcut tüm uzak audio elemanlarını açıkça doğrula.
+            resumeAllRemoteAudioPlayback();
             break;
           }
           case "peer-left": {
@@ -1435,6 +1481,8 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
             });
             peer.negotiationEnabled = true;
             peer.negotiationPending = false;
+            await syncOutgoingAudioSender(fromId, peer);
+            void resumeRemoteAudioPlayback(fromId).catch(() => {});
             break;
           }
           case "answer": {
@@ -1447,6 +1495,8 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
               await peer.pc.setRemoteDescription({ type: "answer", sdp: data.sdp as string });
               await flushPendingIce(data.from as number, peer.pc);
               peer.negotiationEnabled = true;
+              await syncOutgoingAudioSender(data.from as number, peer);
+              void resumeRemoteAudioPlayback(data.from as number).catch(() => {});
               if (peer.negotiationPending) peer.requestNegotiation();
             }
             break;
@@ -1917,9 +1967,8 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
           ),
         );
       }
-      const remoteContext = remoteAudioContextRef.current;
-      for (const audioElement of audioElsRef.current.values()) {
-        tasks.push(startAudioPlayback(remoteContext, audioElement));
+      for (const [peerId] of audioElsRef.current) {
+        tasks.push(resumeRemoteAudioPlayback(peerId));
       }
       if (tasks.length === 0) return;
       void Promise.all(tasks)
