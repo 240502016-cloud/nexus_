@@ -82,7 +82,7 @@ function VoiceRoster({
                 <input
                   type="range"
                   min={0}
-                  max={200}
+                  max={100}
                   step={5}
                   value={volume}
                   aria-label={`${m.username} ses seviyesi`}

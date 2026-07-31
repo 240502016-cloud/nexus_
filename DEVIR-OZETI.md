@@ -844,12 +844,12 @@ Durum ve özel durum ana araç çubuğundan kaldırılmış, Ayarlar'a taşınm�
 - Gürültü engelleme açıkken mikrofonda 80 Hz high-pass filtre ve yumuşak compressor da uygulanır;
   masa/klavye kaynaklı düşük frekanslar ile ani seviye sıçramaları azaltılır.
 - Mikrofon giriş seviyesi %0–200 aralığındadır; %100 üzeri yazılımsal yükseltmedir.
-- Her uzak katılımcı için yalnız yerel tarayıcıda geçerli %0–200 ses seviyesi ayarlanabilir;
+- Her uzak katılımcı için yalnız yerel tarayıcıda geçerli %0–100 ses seviyesi ayarlanabilir;
   tercihler kullanıcı kimliğine göre localStorage'da korunur.
 - Görüşme sırasında mikrofon değişimi `replaceTrack` ile bağlantı kesmeden yapılır.
 - Mikrofon seviye testi seçili cihazı, giriş seviyesini ve tarayıcı ses işleme tercihlerini
   dikkate alır; kamera önizleme ve hoparlör test sesi de vardır.
-- Giden ve uzak Web Audio context'leri tarayıcı tarafından suspend edilirse görünürlük veya bir
+- Giden Web Audio context'i tarayıcı tarafından suspend edilirse görünürlük veya bir
   sonraki gerçek kullanıcı etkileşiminde yeniden çalıştırılır. Uzak `audio.play()` autoplay
   engeline takılırsa hata sessizce yutulmaz; kullanıcıya sayfaya tıklama yönlendirmesi gösterilir.
 - Reconnect sırasında mevcut işlenmiş mikrofon track'i kullanılmadan önce giden mikser yeniden
@@ -857,8 +857,9 @@ Durum ve özel durum ana araç çubuğundan kaldırılmış, Ayarlar'a taşınm�
 - 30 Temmuz 2026 iki istemcili smoke testinde WebRTC bağlantısı, RTT ve gelen ses paketleri sağlıklı
   olmasına rağmen iki tarafın da sessiz kalmasının kök nedeni uzak sesi her zaman ikinci bir
   `AudioContext -> MediaStreamDestination -> HTMLAudioElement` zincirinden geçiren alıcı hattıydı.
-  Varsayılan `%0-%100` dinleme artık uzak WebRTC stream'ini doğrudan `HTMLAudioElement` üzerinden
-  oynatır; `%100` üzeri kullanıcıya özel yükseltme gerektiğinde Web Audio gain hattı devreye girer.
+  Uzak dinleme `%0-%100` aralığında WebRTC stream'ini doğrudan `HTMLAudioElement` üzerinden
+  oynatır. Sessizliğe yol açan `%101-%200` Web Audio gain hattı ve aralığı kaldırılmış,
+  önceden kaydedilmiş yüksek değerler otomatik olarak `%100` varsayılanına taşınmıştır.
   Audio/camera/screen transceiver sırası, SDP m-line sayısı ve giden mikrofon/soundboard miksi
   değiştirilmemiştir.
 - İlk SDP/ICE kurulumu sırasında Chromium'un uzak audio oynatımını muted/beklemede bırakması veya
@@ -1909,7 +1910,7 @@ AI kapalıysa mesajlaşma/ses/web uygulaması yine çalışmalıdır.
 - Mesaj, sosyal sistem, DM, attachment, bot/plugin, ses, kamera, ekran paylaşımı, kalite ayarı,
   dinamik sahne ve Electron istemcisi uygulanmıştır.
 - Ses geliştirmeleri ekran/sekme sesini mevcut audio hattında
-  paylaşır; kullanıcı başına %0–200 dinleme seviyesi, soundboard, bağlantı kalitesi ve
+  paylaşır; kullanıcı başına %0–100 dinleme seviyesi, soundboard, bağlantı kalitesi ve
   geliştirilmiş mikrofon işleme sunar.
 - Ekran yayınını almak istemeyen izleyici için hem ekran videosu hem ekran/sekme sesi gönderici
   tarafında durdurulur; normal mikrofon ve soundboard sesi devam eder. Bu seçim kamera izleme
