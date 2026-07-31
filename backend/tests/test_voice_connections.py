@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from app.config import settings
 from app.core.models import User
@@ -16,19 +16,22 @@ from app.core.routers.voice import (
 class VoiceConnectionManagerTests(unittest.IsolatedAsyncioTestCase):
     async def test_reconnect_does_not_add_user_as_their_own_peer(self):
         manager = VoiceConnectionManager()
-        first_socket = object()
-        second_socket = object()
+        first_socket = AsyncMock()
+        second_socket = AsyncMock()
 
         await manager.join(10, 20, {1, 2}, 1, "alice", None, first_socket)
         peers = await manager.join(10, 20, {1, 2}, 1, "alice", None, second_socket)
 
         self.assertEqual(peers, [])
         self.assertEqual([participant["user_id"] for participant in manager.roster(10)], [1])
+        first_socket.close.assert_awaited_once_with(code=4409)
+        self.assertFalse(manager.is_current(10, 1, first_socket))
+        self.assertTrue(manager.is_current(10, 1, second_socket))
 
     async def test_stale_socket_cannot_remove_replacement_connection(self):
         manager = VoiceConnectionManager()
-        first_socket = object()
-        second_socket = object()
+        first_socket = AsyncMock()
+        second_socket = AsyncMock()
 
         await manager.join(10, 20, {1, 2}, 1, "alice", None, first_socket)
         await manager.join(10, 20, {1, 2}, 1, "alice", None, second_socket)

@@ -357,8 +357,15 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
 
     let audioEl = audioElsRef.current.get(peerId);
     if (!audioEl) {
-      audioEl = new Audio();
+      // Chromium/Electron bazı sürümlerde DOM'a bağlı olmayan `new Audio()` WebRTC
+      // stream'ini oynuyor görünüp sessiz kalabiliyor. Görünmez fakat gerçek bir medya
+      // elemanı kullan; böylece autoplay ve seçili sink yaşam döngüsü kararlı olsun.
+      audioEl = document.createElement("audio");
       audioEl.autoplay = true;
+      audioEl.setAttribute("playsinline", "");
+      audioEl.setAttribute("aria-hidden", "true");
+      audioEl.style.display = "none";
+      document.body.appendChild(audioEl);
       audioElsRef.current.set(peerId, audioEl);
     }
 
@@ -766,7 +773,9 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     peersRef.current.clear();
     pendingIceRef.current.clear();
     audioElsRef.current.forEach((el) => {
+      el.pause();
       el.srcObject = null;
+      el.remove();
     });
     audioElsRef.current.clear();
     remoteAudioGraphsRef.current.forEach((graph) => {
@@ -863,7 +872,11 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       peersRef.current.get(peerId)?.pc.close();
       peersRef.current.delete(peerId);
       const audioElement = audioElsRef.current.get(peerId);
-      if (audioElement) audioElement.srcObject = null;
+      if (audioElement) {
+        audioElement.pause();
+        audioElement.srcObject = null;
+        audioElement.remove();
+      }
       audioElsRef.current.delete(peerId);
       const audioGraph = remoteAudioGraphsRef.current.get(peerId);
       if (audioGraph) {
@@ -890,7 +903,9 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       peersRef.current.clear();
       pendingIceRef.current.clear();
       audioElsRef.current.forEach((element) => {
+        element.pause();
         element.srcObject = null;
+        element.remove();
       });
       audioElsRef.current.clear();
       remoteAudioGraphsRef.current.forEach((graph) => {
@@ -1581,6 +1596,12 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         setConnected(false);
         if (cancelled) return;
         resetPeersForReconnect();
+        if (event.code === 4409) {
+          // Eski sekmenin otomatik reconnect ile yeni cihazı tekrar devirmesini önle. Aynı hesap
+          // için en son katılan ses oturumu tek yetkili signaling bağlantısıdır.
+          setError("Bu hesap başka bir sekme veya cihazda ses kanalına katıldı; bu oturum kapatıldı.");
+          return;
+        }
         if (event.code === 4401 || event.code === 4403 || event.code === 4404) {
           setError("Ses kanalına yeniden bağlanılamadı; oturum veya kanal yetkisini kontrol edin.");
           return;
@@ -1998,6 +2019,21 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       document.removeEventListener("visibilitychange", resumeActiveAudio);
     };
   }, []);
+
+  // Uzak track, connectionState=connected ve ilk `play()` denemesi farklı sıralarda
+  // tamamlanabiliyor. Üçüncü bir katılımcının `peer-joined` olayı gelmeden de aynı
+  // yeniden-doğrulamayı yap; zaten çalan elemana play() çağrısı zararsızdır.
+  useEffect(() => {
+    if (!connected) return;
+    function keepAudioPathsAlive() {
+      if (document.hidden) return;
+      void resumeAudioContext(microphoneGraphRef.current?.context).catch(() => {});
+      resumeAllRemoteAudioPlayback();
+    }
+    keepAudioPathsAlive();
+    const timer = window.setInterval(keepAudioPathsAlive, 3_000);
+    return () => window.clearInterval(timer);
+  }, [connected]);
 
   // Çıkış cihazı (hoparlör) değişince mevcut uzak ses elemanlarına uygula.
   useEffect(() => {

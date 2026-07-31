@@ -77,6 +77,7 @@ class VoiceConnectionManager:
             for uid, info in users.items()
             if uid != user_id
         ]
+        previous_ws = users.get(user_id, {}).get("ws")
         users[user_id] = {
             "ws": ws,
             "username": username,
@@ -85,7 +86,23 @@ class VoiceConnectionManager:
             "deafened": False,
             "speaking": False,
         }
+        # Bir hesap için odada yalnızca en yeni WebSocket sinyalleşme yapabilir. Eski sekme
+        # açık kalırsa answer/ICE mesajlarını yanlış RTCPeerConnection'a taşıyıp iki kişilik
+        # görüşmeyi tek yönlü bırakabiliyordu. Kaydı önce değiştir; eski handler'ın
+        # finally bloğu yeni oturumu odadan silemesin.
+        if previous_ws is not None and previous_ws is not ws:
+            try:
+                await previous_ws.close(code=4409)
+            except Exception:
+                # Socket zaten kopmuş olabilir; aktif kayıt yine de yeni bağlantıdır.
+                pass
         return existing
+
+    def is_current(self, channel_id: int, user_id: int, ws: WebSocket) -> bool:
+        """Socket'in kullanıcı için halen etkin ses oturumu olup olmadığını döndür."""
+        room = self._rooms.get(channel_id)
+        info = room["users"].get(user_id) if room else None
+        return bool(info and info.get("ws") is ws)
 
     def leave(self, channel_id: int, user_id: int, ws: WebSocket | None = None) -> bool:
         """Aktif bağlantıyı kaldır.
@@ -330,6 +347,14 @@ async def voice_socket(websocket: WebSocket, channel_id: int, token: str = Query
     try:
         while True:
             raw = await websocket.receive_text()
+            # Aynı hesabın yeni oturumu bunun yerini aldıysa eski socket'ten gelen gecikmiş
+            # offer/answer/ICE veya durum mesajlarını kesinlikle odaya aktarma.
+            if not voice_manager.is_current(channel_id, user_id, websocket):
+                try:
+                    await websocket.close(code=4409)
+                except Exception:
+                    pass
+                return
             try:
                 data = json.loads(raw)
             except json.JSONDecodeError:

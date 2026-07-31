@@ -1927,6 +1927,10 @@ AI kapalıysa mesajlaşma/ses/web uygulaması yine çalışmalıdır.
   olarak gruplanmış, zengin mesajlar ve ayrı Matrix event aksiyonları korunmuştur.
 - Soundboard artık hem yerel seçili çıkışa hem mevcut WebRTC miksine bağlanır. Askıya alınan Web
   Audio ve engellenen uzak autoplay akışları kullanıcı etkileşiminde güvenle yeniden başlatılır.
+- Aynı hesabın birden fazla sekme/cihaz ses oturumu artık signaling sahipliği için yarışmaz:
+  en yeni oturum etkin kalır, eski WebSocket `4409` ile kapatılır ve eski istemci otomatik
+  yeniden bağlanmaz. Uzak WebRTC sesleri DOM'a bağlı medya elemanlarında oynatılır ve ses
+  yolu üçüncü katılımcı olayına bağlı kalmadan periyodik olarak yeniden doğrulanır.
 - Yerel testler güncel çalışma ağacında başarılıdır:
   - backend 51/51,
   - AI Gateway 9/9,
@@ -1943,14 +1947,6 @@ AI kapalıysa mesajlaşma/ses/web uygulaması yine çalışmalıdır.
   - müzik botunun mevcut ses kanalı üyelerine offer göndermesi,
   - sonradan oluşturulan Matrix metin odalarında bot üyeliğini onarma,
   - ilgili müzik ve oda onarım testleri dahil backend 51/51 doğrulaması tamamlanmıştır.
-- Şu anki en önemli engel uygulama kodu değil, Mert'in production Cloudflare Tunnel origin
-  bağlantısındaki sürekli `502 Host Error` durumudur.
-- DNS ve TLS artık doğrudur; düzeltilmesi gereken bağlantı:
-
-```text
-public-tunnel → http://reverse-proxy:8081
-```
-
-- Furkan'ın istemci tarafında yapacağı ayar yoktur.
-- Yeni geliştirme başlamadan önce production erişimi ve iki kullanıcılı gerçek smoke test
-  tamamlanmalıdır.
+- Son ses oturumu sahipliği ve oynatma bekçisi düzeltmesi backend 51/51, frontend type-check,
+  web production build ve desktop production build ile doğrulanmıştır. Gerçek mikrofon/RTP
+  sonucu için Mert production güncellemesini yaptıktan sonra iki kullanıcılı smoke test gerekir.
