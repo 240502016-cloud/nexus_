@@ -1580,9 +1580,10 @@ health ve iki gerçek kullanıcıyla smoke test edilmelidir.
 - Konuşma algılama yaklaşık 60 Hz yerine yaklaşık 13 Hz çalışır.
 - Arka plan sekmesinde analyser durur.
 - Arka plan video render'ı duraklatılır.
-- Kamera ve ekran yayını izleme tercihleri ayrı tutulur. İzleyici `Yayını izleme` dediğinde ekran
-  receiver yönü kapatılır ve yayıncıdaki mevcut audio sender yalnız o kullanıcı için ekran sesi
-  içermeyen `mikrofon + soundboard` miksine geçirilir. Yeni transceiver veya SDP m-line eklenmez.
+- Kamera ve ekran yayını izleme tercihleri ayrı tutulur. `Mikrofon + soundboard` daha önce çalışan
+  ana audio track'inde kalır; ekran/sekme sesi yalnız yayını izleyen kullanıcılar için ikincil tam
+  miksten gönderilir. İzleyici `Yayını izleme` dediğinde ekran receiver yönü ve bu ikincil ekran
+  sesi kesilir. Yeni transceiver veya SDP m-line eklenmez.
 - Ekran paylaşımında `Oyun · Akıcılığı koru` modu `motion`/`maintain-framerate`, `Metin · Netliği
   koru` modu `detail`/`maintain-resolution` kullanır. Oyun modunda 60 FPS için kodlayıcı bitrate
   tavanı yükseltilir; codec zorlanmaz.

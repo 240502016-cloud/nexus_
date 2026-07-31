@@ -67,7 +67,7 @@ interface OutgoingAudioGraph {
   gain: GainNode;
   soundboardGain: GainNode;
   destination: MediaStreamAudioDestinationNode;
-  voiceDestination: MediaStreamAudioDestinationNode;
+  screenDestination: MediaStreamAudioDestinationNode;
   localSoundboardDestination: MediaStreamAudioDestinationNode;
   localSoundboardElement: HTMLAudioElement;
 }
@@ -443,7 +443,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       previousGraph.localSoundboardDestination.stream
         .getTracks()
         .forEach((track) => track.stop());
-      previousGraph.voiceDestination.stream.getTracks().forEach((track) => track.stop());
+      previousGraph.screenDestination.stream.getTracks().forEach((track) => track.stop());
       void previousGraph.context.close();
     }
     microphoneGraphRef.current = null;
@@ -459,7 +459,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     const gain = context.createGain();
     const soundboardGain = context.createGain();
     const destination = context.createMediaStreamDestination();
-    const voiceDestination = context.createMediaStreamDestination();
+    const screenDestination = context.createMediaStreamDestination();
     const localSoundboardDestination = context.createMediaStreamDestination();
     const localSoundboardElement = new Audio();
     localSoundboardElement.autoplay = true;
@@ -494,15 +494,15 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       }
     }
     gain.connect(destination);
-    gain.connect(voiceDestination);
+    gain.connect(screenDestination);
     soundboardGain.gain.value = soundboardMutedRef.current || deafenedRef.current
       ? 0
       : Math.max(0, Math.min(2, soundboardVolumeRef.current / 100));
     soundboardGain.connect(destination);
-    soundboardGain.connect(voiceDestination);
-    // Soundboard tek kaynak düğümünden iki ayrı hedefe gider: mevcut WebRTC audio
-    // m-line'ı ve yalnızca yerel hoparlör. Böylece yeni transceiver oluşmaz ve kullanıcı
-    // kendi efektini seçili çıkış cihazından duyarken karşı tarafa da aynı miks ulaşır.
+    soundboardGain.connect(screenDestination);
+    // Soundboard tek kaynak düğümünden ana konuşma miksine, ekran sesli tam mikse ve yerel
+    // hoparlöre gider. Böylece yeni transceiver oluşmaz; ekran aboneliği değişse bile temel
+    // soundboard sesi ana WebRTC audio m-line'ında kalır.
     soundboardGain.connect(localSoundboardDestination);
 
     if (hasScreenAudio && screenStream) {
@@ -510,7 +510,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       const screenGain = context.createGain();
       screenGain.gain.value = 1;
       screenSource.connect(screenGain);
-      screenGain.connect(destination);
+      screenGain.connect(screenDestination);
     }
     void resumeAudioContext(context).catch(() => {});
     microphoneGraphRef.current = {
@@ -518,7 +518,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       gain,
       soundboardGain,
       destination,
-      voiceDestination,
+      screenDestination,
       localSoundboardDestination,
       localSoundboardElement,
     };
@@ -791,7 +791,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       outgoingGraph.localSoundboardDestination.stream
         .getTracks()
         .forEach((track) => track.stop());
-      outgoingGraph.voiceDestination.stream.getTracks().forEach((track) => track.stop());
+      outgoingGraph.screenDestination.stream.getTracks().forEach((track) => track.stop());
       void outgoingGraph.context.close();
     }
     microphoneGraphRef.current = null;
@@ -1151,12 +1151,19 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
 
     function outgoingAudioTrackForPeer(
       peer: PeerState,
-      fullStream = localStreamRef.current,
+      voiceStream = localStreamRef.current,
     ): MediaStreamTrack | null {
-      if (!peer.remoteWantsScreen) {
-        return microphoneGraphRef.current?.voiceDestination.stream.getAudioTracks()[0] ?? null;
+      const hasScreenAudio = Boolean(
+        screenAudioStreamRef.current
+          ?.getAudioTracks()
+          .some((track) => track.readyState === "live"),
+      );
+      if (peer.remoteWantsScreen && hasScreenAudio) {
+        return microphoneGraphRef.current?.screenDestination.stream.getAudioTracks()[0] ?? null;
       }
-      return fullStream?.getAudioTracks()[0] ?? null;
+      // Mikrofon + soundboard her zaman ana, daha önce çalışan track'te kalır. Yayını
+      // izlemeyen kullanıcı temel konuşma için ikincil bir MediaStreamDestination'a bağımlı olmaz.
+      return voiceStream?.getAudioTracks()[0] ?? null;
     }
 
     async function syncOutgoingAudioSender(peerId: number, peer: PeerState): Promise<void> {
