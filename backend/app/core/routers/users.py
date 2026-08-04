@@ -4,10 +4,12 @@ import secrets
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core import schemas
-from app.core.auth import get_current_user
+from app.core.auth import create_access_token, get_current_user
 from app.core.matrix_client import MatrixError, matrix_client
 from app.core.models import User
 from app.core.rate_limit import RateLimiter
@@ -67,7 +69,8 @@ def create_user(payload: schemas.UserCreate, db: Session = Depends(get_db)):
         return existing
     if existing:
         raise HTTPException(status_code=409, detail="Bu kullanıcı adı zaten alınmış")
-    if db.query(User).filter(User.email == payload.email).first():
+    normalized_email = str(payload.email).strip().casefold()
+    if db.query(User.id).filter(func.lower(User.email) == normalized_email).first():
         raise HTTPException(status_code=409, detail="Bu e-posta adresi zaten kullanılıyor")
 
     try:
@@ -77,7 +80,7 @@ def create_user(payload: schemas.UserCreate, db: Session = Depends(get_db)):
 
     user = User(
         username=payload.username,
-        email=payload.email,
+        email=normalized_email,
         hashed_password=hash_password(payload.password),
         display_name=payload.display_name,
         avatar_url=payload.avatar_url,
@@ -101,31 +104,68 @@ def update_me(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Kullanıcının kendi profilini günceller (şu an: görünen ad)."""
-    user = db.get(User, current_user.id)
-    if not user:
-        raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")
-    # UserUpdate yalnızca display_name içerir; boş/null gönderilirse görünen ad temizlenir.
-    user.display_name = (payload.display_name or "").strip() or None
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return user
+    """Görünen adı ve e-postayı tek, atomik bir işlemle günceller.
+
+    E-posta hesabın giriş/kurtarma kimliği olduğundan yalnızca mevcut parola yeniden
+    doğrulandıktan sonra değiştirilebilir. ``model_fields_set`` kullanımı, yalnızca e-posta
+    gönderen eski/yeni istemcilerin görünen adı yanlışlıkla temizlemesini önler.
+    """
+    new_display_name = current_user.display_name
+    new_email = current_user.email
+
+    if "display_name" in payload.model_fields_set:
+        new_display_name = (payload.display_name or "").strip() or None
+
+    if "email" in payload.model_fields_set:
+        if payload.email is None:
+            raise HTTPException(status_code=422, detail="E-posta adresi boş olamaz")
+        email = str(payload.email).strip().casefold()
+        if email != current_user.email.casefold():
+            if not payload.current_password or not verify_password(
+                payload.current_password, current_user.hashed_password
+            ):
+                raise HTTPException(status_code=403, detail="Mevcut parola yanlış")
+            existing_email = (
+                db.query(User.id)
+                .filter(User.id != current_user.id, func.lower(User.email) == email)
+                .first()
+            )
+            if existing_email is not None:
+                raise HTTPException(status_code=409, detail="Bu e-posta adresi zaten kullanılıyor")
+            new_email = email
+
+    if new_display_name == current_user.display_name and new_email == current_user.email:
+        return current_user
+
+    current_user.display_name = new_display_name
+    current_user.email = new_email
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Bu e-posta adresi zaten kullanılıyor") from exc
+    db.refresh(current_user)
+    return current_user
 
 
-@router.post("/me/password", status_code=204)
+@router.post("/me/password")
 def change_password(
     payload: schemas.PasswordChange,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Mevcut parolayı doğrulayıp yeni parolayı ayarlar."""
-    user = db.get(User, current_user.id)
-    if not user or not verify_password(payload.current_password, user.hashed_password):
+    if not verify_password(payload.current_password, current_user.hashed_password):
         raise HTTPException(status_code=403, detail="Mevcut parola yanlış")
-    user.hashed_password = hash_password(payload.new_password)
-    db.add(user)
+    if payload.new_password == payload.current_password:
+        raise HTTPException(status_code=400, detail="Yeni parola mevcut paroladan farklı olmalı")
+    current_user.hashed_password = hash_password(payload.new_password)
+    current_user.auth_version += 1
     db.commit()
+    return {
+        "access_token": create_access_token(current_user.id, current_user.auth_version),
+        "token_type": "bearer",
+    }
 
 
 @router.post("/me/avatar", response_model=schemas.UserRead)
@@ -172,7 +212,9 @@ def get_avatar(filename: str):
     path = os.path.join(AVATAR_DIR, filename)
     if not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="Bulunamadı")
-    return FileResponse(path, headers={"Cache-Control": "public, max-age=86400"})
+    # Dosya adı her yüklemede rastgele değiştiği için içerik değişmez; uzun immutable cache
+    # avatarların her ekran açılışında yeniden indirilmesini güvenle önler.
+    return FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
 @router.get("/search", response_model=list[schemas.PublicUserRead])

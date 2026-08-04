@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 
-import { ApiError, coreApi } from "../api/client";
+import { ApiError, coreApi, setToken } from "../api/client";
 import type { User } from "../types";
 
 interface AccountSettingsProps {
@@ -9,7 +9,8 @@ interface AccountSettingsProps {
   onUserUpdated: (user: User) => void;
 }
 
-// Seçilen görseli merkezden kare kırpıp 256px'e küçültür ve JPEG blob döndürür (optimizasyon).
+// Seçilen görseli merkezden kare kırpıp 256px'e küçültür. WebP aynı görünür kaliteyi
+// genellikle JPEG'den daha az veriyle taşır; sunucu gerçek türü dosya imzasından doğrular.
 function cropToSquare(file: File, size = 256): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -30,8 +31,8 @@ function cropToSquare(file: File, size = 256): Promise<Blob> {
       ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
       canvas.toBlob(
         (blob) => (blob ? resolve(blob) : reject(new Error("Görsel dönüştürülemedi"))),
-        "image/jpeg",
-        0.9,
+        "image/webp",
+        0.82,
       );
     };
     img.onerror = () => {
@@ -48,6 +49,8 @@ function avatarInitial(user: User): string {
 
 export function AccountSettings({ currentUser, onUserUpdated }: AccountSettingsProps) {
   const [displayName, setDisplayName] = useState(currentUser.display_name ?? "");
+  const [email, setEmail] = useState(currentUser.email);
+  const [profilePassword, setProfilePassword] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileMsg, setProfileMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -88,12 +91,30 @@ export function AccountSettings({ currentUser, onUserUpdated }: AccountSettingsP
   async function handleProfileSave(event: FormEvent) {
     event.preventDefault();
     setProfileMsg(null);
+    const trimmedName = displayName.trim();
+    const trimmedEmail = email.trim();
+    const nextDisplayName = trimmedName.length > 0 ? trimmedName : null;
+    const emailChanged = trimmedEmail.toLowerCase() !== currentUser.email.toLowerCase();
+    const nameChanged = nextDisplayName !== currentUser.display_name;
+    if (!nameChanged && !emailChanged) {
+      setProfileMsg({ ok: true, text: "Değişiklik yok." });
+      return;
+    }
+    if (emailChanged && !profilePassword) {
+      setProfileMsg({ ok: false, text: "E-posta değişikliği için mevcut parolanızı girin." });
+      return;
+    }
     setSavingProfile(true);
     try {
-      const trimmed = displayName.trim();
-      const updated = await coreApi.updateProfile(trimmed.length > 0 ? trimmed : null);
+      const updated = await coreApi.updateProfile({
+        ...(nameChanged ? { display_name: nextDisplayName } : {}),
+        ...(emailChanged ? { email: trimmedEmail, current_password: profilePassword } : {}),
+      });
       onUserUpdated(updated);
-      setProfileMsg({ ok: true, text: "Profil güncellendi." });
+      setDisplayName(updated.display_name ?? "");
+      setEmail(updated.email);
+      setProfilePassword("");
+      setProfileMsg({ ok: true, text: "Hesap bilgileri güncellendi." });
     } catch (err) {
       setProfileMsg({ ok: false, text: err instanceof ApiError ? err.message : "Güncellenemedi" });
     } finally {
@@ -108,13 +129,18 @@ export function AccountSettings({ currentUser, onUserUpdated }: AccountSettingsP
       setPasswordMsg({ ok: false, text: "Yeni parola en az 8 karakter olmalı." });
       return;
     }
+    if (newPassword === currentPassword) {
+      setPasswordMsg({ ok: false, text: "Yeni parola mevcut paroladan farklı olmalı." });
+      return;
+    }
     if (newPassword !== confirmPassword) {
       setPasswordMsg({ ok: false, text: "Yeni parolalar eşleşmiyor." });
       return;
     }
     setSavingPassword(true);
     try {
-      await coreApi.changePassword(currentPassword, newPassword);
+      const credentials = await coreApi.changePassword(currentPassword, newPassword);
+      setToken(credentials.access_token);
       setPasswordMsg({ ok: true, text: "Parola değiştirildi." });
       setCurrentPassword("");
       setNewPassword("");
@@ -159,14 +185,10 @@ export function AccountSettings({ currentUser, onUserUpdated }: AccountSettingsP
           <span>Kullanıcı adı</span>
           <input value={currentUser.username} disabled />
         </label>
-        <label className="settings-panel__field">
-          <span>E-posta</span>
-          <input value={currentUser.email} disabled />
-        </label>
       </div>
 
       <form className="settings-panel__section" onSubmit={handleProfileSave}>
-        <h3 className="settings-panel__section-title">Profil</h3>
+        <h3 className="settings-panel__section-title">Ad ve e-posta</h3>
         <label className="settings-panel__field">
           <span>Görünen ad</span>
           <input
@@ -176,6 +198,30 @@ export function AccountSettings({ currentUser, onUserUpdated }: AccountSettingsP
             onChange={(e) => setDisplayName(e.target.value)}
           />
         </label>
+        <label className="settings-panel__field">
+          <span>E-posta</span>
+          <input
+            type="email"
+            value={email}
+            maxLength={255}
+            autoComplete="email"
+            required
+            onChange={(event) => setEmail(event.target.value)}
+          />
+        </label>
+        {email.trim().toLowerCase() !== currentUser.email.toLowerCase() ? (
+          <label className="settings-panel__field">
+            <span>E-posta değişikliği için mevcut parola</span>
+            <input
+              type="password"
+              value={profilePassword}
+              maxLength={200}
+              autoComplete="current-password"
+              required
+              onChange={(event) => setProfilePassword(event.target.value)}
+            />
+          </label>
+        ) : null}
         {profileMsg ? (
           <p className={profileMsg.ok ? "settings-panel__ok-text" : "settings-panel__error-text"}>
             {profileMsg.text}
@@ -183,7 +229,7 @@ export function AccountSettings({ currentUser, onUserUpdated }: AccountSettingsP
         ) : null}
         <div className="settings-panel__test-row">
           <button className="settings-panel__save" type="submit" disabled={savingProfile}>
-            {savingProfile ? "Kaydediliyor..." : "Profili kaydet"}
+            {savingProfile ? "Kaydediliyor..." : "Bilgileri kaydet"}
           </button>
         </div>
       </form>

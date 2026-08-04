@@ -210,3 +210,176 @@ export interface LoginResponse {
   access_token: string;
   token_type: string;
 }
+
+export type CommentaryIntensity = "LOW" | "NORMAL" | "HIGH";
+export type CommentarySessionTone = "CALM" | "FOCUSED" | "PLAYFUL" | "TENSE" | "UPSET" | "UNKNOWN";
+
+export interface CommentatorProfile {
+  key: string;
+  name: string;
+  description: string;
+  max_chars: number;
+  harshness: number;
+  lore_probability: number;
+  tones: string[];
+}
+
+export interface CommentarySession {
+  id: string;
+  server_id: number;
+  game_key: string;
+  player_ids: number[];
+  profile_key: string;
+  intensity: CommentaryIntensity;
+  silent_mode: boolean;
+  text_to_speech_enabled: boolean;
+  current_tone: CommentarySessionTone;
+  status: string;
+  revision: number;
+  output_channel_id: number | null;
+  started_at: string;
+  ended_at: string | null;
+}
+
+export interface CommentatorEvent {
+  id: string;
+  event_id: string;
+  category: string;
+  summary: string;
+  occurred_at: string;
+  trigger_score: number;
+  trigger_decision: string;
+  processing_state: string;
+}
+
+export interface GeneratedCommentary {
+  id: string;
+  session_id: string;
+  source_event_ids: string[];
+  should_comment: boolean;
+  commentary: string | null;
+  target_player_id: number | null;
+  tone: string | null;
+  lore_references: string[];
+  confidence: number;
+  reason_code: string;
+  dispatch_state: string;
+  created_at: string;
+  delivered_at: string | null;
+}
+
+export interface CommentaryHistory {
+  session: CommentarySession;
+  events: CommentatorEvent[];
+  commentary: GeneratedCommentary[];
+}
+
+export type MemeMomentType =
+  | "FAILURE"
+  | "SUCCESS"
+  | "BETRAYAL"
+  | "TEAM_EVENT"
+  | "MILESTONE"
+  | "PREPARATION"
+  | "NAVIGATION"
+  | "PANIC"
+  | "SILENCE"
+  | "MANUAL_NOTE";
+
+export interface MemeJob {
+  job_id: string;
+  event_id: string;
+  status: string;
+  meme_worthy: boolean;
+  meme_worthiness_score: number;
+  reasoning_code: string;
+}
+
+export interface MemeCaptionCandidate {
+  id: string;
+  rank: number;
+  template_key: string;
+  template_version: number;
+  template_name: string;
+  category: string;
+  captions: Record<string, string>;
+  target_player_id: number | null;
+  lore_references: string[];
+  harshness: number;
+  quality_score: number;
+}
+
+export interface MemeCandidateResponse {
+  job_id: string;
+  status: string;
+  meme_worthy: boolean;
+  meme_worthiness_score: number;
+  reasoning_code: string;
+  error_code: string | null;
+  candidates: MemeCaptionCandidate[];
+}
+
+export interface GeneratedMeme {
+  id: string;
+  job_id: string;
+  template_key: string;
+  template_name: string;
+  category: string;
+  captions: Record<string, string>;
+  target_player_id: number | null;
+  asset_url: string;
+  width: number;
+  height: number;
+  mime_type: string;
+  byte_size: number;
+  created_at: string;
+}
+
+export interface HighlightRecording {
+  id: string;
+  server_id: number;
+  session_id: string | null;
+  source_type: string;
+  original_filename: string;
+  status: string;
+  upload_url: string | null;
+  byte_size: number | null;
+  duration_ms: number | null;
+  width: number | null;
+  height: number | null;
+  has_audio: boolean | null;
+  error_code: string | null;
+  created_at: string;
+}
+
+export interface HighlightCandidate {
+  id: string;
+  recording_id: string;
+  marker_id: string;
+  start_ms: number;
+  end_ms: number;
+  anchor_ms: number;
+  score: number;
+  primary_category: string;
+  title: string;
+  description: string;
+  participant_player_ids: number[];
+  status: string;
+}
+
+export interface RenderedHighlight {
+  id: string;
+  candidate_id: string;
+  status: string;
+  category: string;
+  variant: string;
+  title: string;
+  description: string;
+  video_url: string | null;
+  thumbnail_url: string | null;
+  duration_ms: number;
+  width: number | null;
+  height: number | null;
+  error_code: string | null;
+  created_at: string;
+}

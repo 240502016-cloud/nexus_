@@ -172,10 +172,48 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=128m,mode=1777
+    volumes:
+      - meme_media_data:/srv/generated-media
     security_opt:
       - no-new-privileges:true
     cpus: 1.0
     mem_limit: 512m
+
+  media-worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.media
+    image: nexus-media-worker:0.1.0
+    restart: unless-stopped
+    stop_grace_period: 30s
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      HIGHLIGHT_MEDIA_DIR: /srv/highlight-media
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      media-storage-init:
+        condition: service_completed_successfully
+    networks:
+      - data
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+      - /srv/highlight-work:size=512m,mode=1777
+    volumes:
+      - highlight_media_data:/srv/highlight-media
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    cpus: 2.0
+    mem_limit: 2g
 
   matrix:
     build:
@@ -229,11 +267,13 @@ services:
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - "chown nexus:nexus /srv/avatars /srv/attachments"
+      - "chown nexus:nexus /srv/avatars /srv/attachments /srv/generated-media /srv/highlight-media"
     network_mode: none
     volumes:
       - avatar_data:/srv/avatars
       - attachment_data:/srv/attachments
+      - meme_media_data:/srv/generated-media
+      - highlight_media_data:/srv/highlight-media
     read_only: true
     security_opt:
       - no-new-privileges:true
@@ -258,6 +298,7 @@ services:
       PLUGIN_EXECUTION_MODE: sandbox
       PLUGIN_SANDBOX_URL: http://plugin-sandbox:8091
       ATTACHMENT_DIR: /srv/attachments
+      HIGHLIGHT_MEDIA_DIR: /srv/highlight-media
     depends_on:
       postgres:
         condition: service_healthy
@@ -290,6 +331,8 @@ services:
       # Profil fotoğrafları burada kalıcı saklanır (read-only kök fs'te yazılabilir tek yer).
       - avatar_data:/srv/avatars
       - attachment_data:/srv/attachments
+      - meme_media_data:/srv/generated-media
+      - highlight_media_data:/srv/highlight-media
     security_opt:
       - no-new-privileges:true
     cpus: 2.0
@@ -401,3 +444,5 @@ volumes:
   caddy_config:
   avatar_data:
   attachment_data:
+  meme_media_data:
+  highlight_media_data:

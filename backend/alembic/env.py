@@ -7,6 +7,9 @@ from app.config import settings
 from app.database import Base
 from app.core import models as core_models  # noqa: F401
 from app.services.ollama import models as ollama_models  # noqa: F401
+from app.platform import models as platform_models  # noqa: F401
+from app.modules.party_lore import models as party_lore_models  # noqa: F401
+from app.modules.ai_commentator import models as ai_commentator_models  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:

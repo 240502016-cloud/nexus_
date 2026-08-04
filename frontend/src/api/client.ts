@@ -8,6 +8,10 @@ import type {
   Attachment,
   Channel,
   ChannelType,
+  CommentaryHistory,
+  CommentaryIntensity,
+  CommentarySession,
+  CommentatorProfile,
   DirectConversation,
   Friend,
   FriendRequest,
@@ -17,6 +21,13 @@ import type {
   Message,
   MessagePage,
   MessageReactionUpdate,
+  MemeCandidateResponse,
+  MemeJob,
+  MemeMomentType,
+  GeneratedMeme,
+  HighlightCandidate,
+  HighlightRecording,
+  RenderedHighlight,
   PinnedMessages,
   PluginManifest,
   PublicUser,
@@ -146,6 +157,23 @@ async function request<T>(path: string, init?: RequestOptions): Promise<T> {
   throw new ApiError(0, "İstek tamamlanamadı.");
 }
 
+async function requestBlob(path: string): Promise<Blob> {
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(apiUrl(path), { headers });
+  if (!response.ok) {
+    let detail = response.statusText || "Dosya alınamadı";
+    try {
+      const body = await response.json();
+      detail = body.detail ?? detail;
+    } catch {
+      // Binary olmayan hata gövdesi JSON değilse statusText yeterlidir.
+    }
+    throw new ApiError(response.status, detail);
+  }
+  return response.blob();
+}
+
 export const coreApi = {
   health: () => request<{ status: string }>("/health"),
 
@@ -178,10 +206,14 @@ export const coreApi = {
     }),
 
   me: () => request<User>("/users/me"),
-  updateProfile: (displayName: string | null) =>
-    request<User>("/users/me", { method: "PATCH", body: JSON.stringify({ display_name: displayName }) }),
+  updateProfile: (patch: {
+    display_name?: string | null;
+    email?: string;
+    current_password?: string;
+  }) =>
+    request<User>("/users/me", { method: "PATCH", body: JSON.stringify(patch) }),
   changePassword: (currentPassword: string, newPassword: string) =>
-    request<void>("/users/me/password", {
+    request<LoginResponse>("/users/me/password", {
       method: "POST",
       body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
     }),
@@ -383,6 +415,195 @@ export const coreApi = {
       method: "POST",
       timeoutMs: 5_000,
     }),
+  listCommentatorProfiles: (serverId: number) =>
+    request<CommentatorProfile[]>(`/servers/${serverId}/commentary/profiles`),
+  getActiveCommentarySession: (serverId: number) =>
+    request<CommentarySession | null>(`/servers/${serverId}/commentary/sessions/active`),
+  createCommentarySession: (
+    serverId: number,
+    payload: {
+      game_key: string;
+      player_ids: number[];
+      profile_key: string;
+      intensity: CommentaryIntensity;
+      text_to_speech_enabled: boolean;
+      output_channel_id: number | null;
+    },
+    idempotencyKey: string,
+  ) =>
+    request<CommentarySession>(`/servers/${serverId}/commentary/sessions`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify(payload),
+    }),
+  updateCommentarySession: (
+    sessionId: string,
+    patch: {
+      expected_revision: number;
+      profile_key?: string;
+      intensity?: CommentaryIntensity;
+      silent_mode?: boolean;
+      current_tone?: string;
+    },
+  ) =>
+    request<CommentarySession>(`/commentary/sessions/${sessionId}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  postCommentatorEvent: (
+    sessionId: string,
+    payload: {
+      schema_version: "1.0";
+      event_id: string;
+      source: "MANUAL";
+      occurred_at: string;
+      category: string;
+      actor_player_ids: number[];
+      target_player_ids: number[];
+      game: { game_key: string };
+      importance: number;
+      confidence: number;
+      summary: string;
+      emotional_tone: string;
+      attributes: Record<string, unknown>;
+    },
+  ) =>
+    request<{ event_id: string; accepted: true; state: "PENDING" | "DEDUPLICATED" | "FILTERED" }>(
+      `/commentary/sessions/${sessionId}/events`,
+      { method: "POST", body: JSON.stringify(payload) },
+    ),
+  getCommentaryHistory: (sessionId: string) =>
+    request<CommentaryHistory>(`/commentary/sessions/${sessionId}/history`),
+  submitCommentaryFeedback: (
+    commentaryId: string,
+    feedbackType: "FUNNY" | "NOT_FUNNY" | "TOO_HARSH" | "REPETITIVE" | "WRONG_CONTEXT",
+  ) =>
+    request<void>(`/commentary/commentary/${commentaryId}/feedback`, {
+      method: "POST",
+      body: JSON.stringify({ feedback_type: feedbackType }),
+    }),
+  endCommentarySession: (sessionId: string, expectedRevision: number) =>
+    request<CommentarySession>(`/commentary/sessions/${sessionId}/end`, {
+      method: "POST",
+      body: JSON.stringify({ expected_revision: expectedRevision }),
+    }),
+  createMemeJob: (
+    serverId: number,
+    payload: {
+      event: {
+        schema_version: "1.0";
+        event_id: string;
+        server_id: number;
+        source: "MANUAL";
+        occurred_at: string;
+        moment_type: MemeMomentType;
+        actor_player_ids: number[];
+        target_player_ids: number[];
+        game: { game_key: string };
+        summary: string;
+        setup?: string;
+        payoff?: string;
+        importance: number;
+        confidence: number;
+        facts: Array<{ key: "durationSeconds" | "attemptCount" | "itemsLost" | "healthRemaining" | "teamSize"; value: string | number | boolean }>;
+      };
+      preferred_formats: string[];
+      desired_harshness: number;
+    },
+    idempotencyKey: string,
+  ) =>
+    request<MemeJob>(`/servers/${serverId}/memes/jobs`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify(payload),
+    }),
+  getMemeCandidates: (jobId: string) =>
+    request<MemeCandidateResponse>(`/memes/jobs/${jobId}/candidates`),
+  renderMeme: (
+    jobId: string,
+    candidateId: string,
+    captionOverrides: Record<string, string> = {},
+  ) =>
+    request<GeneratedMeme>(`/memes/jobs/${jobId}/render`, {
+      method: "POST",
+      body: JSON.stringify({
+        candidate_id: candidateId,
+        caption_overrides: captionOverrides,
+        output_format: "PNG",
+      }),
+    }),
+  getMemeAsset: (assetUrl: string) => requestBlob(assetUrl),
+  submitMemeFeedback: (
+    memeId: string,
+    feedbackType: "FUNNY" | "FORCED" | "TOO_HARSH" | "REPETITIVE" | "WRONG_CONTEXT" | "SAVE",
+  ) =>
+    request<void>(`/memes/${memeId}/feedback`, {
+      method: "POST",
+      body: JSON.stringify({ feedback_type: feedbackType }),
+    }),
+  deleteMeme: (memeId: string) =>
+    request<void>(`/memes/${memeId}`, { method: "DELETE" }),
+  createHighlightRecording: (
+    serverId: number,
+    payload: {
+      source_type: "MANUAL_UPLOAD" | "OBS_REPLAY_BUFFER";
+      original_filename: string;
+      byte_size: number;
+      content_type: "video/mp4" | "video/x-matroska";
+    },
+    idempotencyKey: string,
+  ) =>
+    request<HighlightRecording>(`/servers/${serverId}/highlight/recordings`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify(payload),
+    }),
+  uploadHighlightContent: async (uploadUrl: string, file: File) => {
+    const headers: Record<string, string> = { "Content-Type": file.type || "application/octet-stream" };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const response = await fetch(apiUrl(uploadUrl), { method: "PUT", headers, body: file });
+    if (!response.ok) {
+      let detail = response.statusText || "Video yüklenemedi";
+      try {
+        const body = await response.json();
+        detail = body.detail ?? detail;
+      } catch {
+        // JSON olmayan hata gövdesinde statusText kullanılır.
+      }
+      throw new ApiError(response.status, detail);
+    }
+    return response.json() as Promise<HighlightRecording>;
+  },
+  getHighlightRecording: (recordingId: string) =>
+    request<HighlightRecording>(`/highlight/recordings/${recordingId}`),
+  createHighlightMarker: (
+    recordingId: string,
+    payload: {
+      schema_version: "1.0";
+      marker_id: string;
+      source: "MANUAL";
+      offset_ms: number;
+      category_hint: "SKILL" | "COMEDY" | "FAILURE" | "CHAOS" | "LORE_WORTHY";
+      participant_player_ids: number[];
+      summary: string;
+      manual_priority: 1;
+    },
+  ) =>
+    request<HighlightCandidate>(`/highlight/recordings/${recordingId}/markers`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  renderHighlight: (
+    candidateId: string,
+    payload: { start_ms: number; end_ms: number; title_override: string; variant: "LANDSCAPE" },
+  ) =>
+    request<RenderedHighlight>(`/highlight/candidates/${candidateId}/render`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  getRenderedHighlight: (highlightId: string) =>
+    request<RenderedHighlight>(`/highlight/renders/${highlightId}`),
+  getHighlightAsset: (assetUrl: string) => requestBlob(assetUrl),
   uploadAttachment: (file: File) => {
     const form = new FormData();
     form.append("file", file);

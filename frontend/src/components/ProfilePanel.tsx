@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { FormEvent, KeyboardEvent } from "react";
+import type { ClipboardEvent, FormEvent, KeyboardEvent } from "react";
 
 import { ApiError, coreApi } from "../api/client";
+import { clipboardImageFile } from "../clipboardImage";
 import { composeAttachmentMessage, parseAttachmentMessage } from "../messageContent";
 import type { DirectMessageEvent, PresenceInfo } from "../hooks/useGateway";
 import type {
@@ -333,6 +334,13 @@ export function ProfilePanel({
     }
   }
 
+  function handleDirectPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const image = clipboardImageFile(event.clipboardData);
+    if (!image) return;
+    event.preventDefault();
+    setSelectedFile(image);
+  }
+
   return (
     <div className="profile-overlay" onClick={onClose}>
       <section className="profile-panel" onClick={(event) => event.stopPropagation()}>
@@ -590,7 +598,8 @@ export function ProfilePanel({
                         value={draft}
                         onChange={(event) => { setDraft(event.target.value); resizeComposer(event.target); }}
                         onKeyDown={handleDirectKeyDown}
-                        placeholder="Mesaj yaz · Shift+Enter yeni satır"
+                        onPaste={handleDirectPaste}
+                        placeholder="Mesaj yaz · Ctrl+V görsel · Shift+Enter satır"
                       />
                       <button type="submit" disabled={!draft.trim() && !selectedFile}><Icon name="send" /><span>Gönder</span></button>
                     </form>

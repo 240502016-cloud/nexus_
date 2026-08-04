@@ -26,7 +26,7 @@ from typing import Awaitable, Callable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from app.config import settings
-from app.core.auth import decode_user_id, get_current_user
+from app.core.auth import claims_match_user, decode_user_claims, get_current_user
 from app.core.models import Channel, ChannelType, ServerMember, User
 from app.database import SessionLocal
 
@@ -299,9 +299,10 @@ def voice_ice_servers(current_user: User = Depends(get_current_user)) -> dict:
 async def voice_socket(websocket: WebSocket, channel_id: int, token: str = Query(...)):
     db = SessionLocal()
     try:
-        user_id = decode_user_id(token)
+        claims = decode_user_claims(token)
+        user_id = claims[0] if claims else None
         user = db.get(User, user_id) if user_id is not None else None
-        if not user:
+        if not claims_match_user(claims, user):
             await websocket.close(code=4401)
             return
 

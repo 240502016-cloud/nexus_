@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import type { FormEvent, KeyboardEvent, ReactNode } from "react";
+import type { ClipboardEvent, FormEvent, KeyboardEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import { ApiError, coreApi } from "../api/client";
+import { clipboardImageFile } from "../clipboardImage";
 import type { Channel, Member, Message, PinnedMessages } from "../types";
 import { parseAttachmentMessage } from "../messageContent";
 import { AttachmentCard } from "./AttachmentCard";
@@ -295,6 +296,13 @@ export function ChatArea({
       event.preventDefault();
       event.currentTarget.form?.requestSubmit();
     }
+  }
+
+  function handleComposerPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const image = clipboardImageFile(event.clipboardData);
+    if (!image) return;
+    event.preventDefault();
+    setSelectedFile(image);
   }
 
   // API mesajları yeniden eskiye döner; sohbet için eskiden yeniye çeviriyoruz.
@@ -1090,8 +1098,9 @@ export function ChatArea({
               resizeComposer(event.target);
             }}
             onKeyDown={handleComposerKeyDown}
+            onPaste={handleComposerPaste}
             maxLength={20000}
-            placeholder={`#${channel.name} kanalına mesaj yaz · Shift+Enter yeni satır`}
+            placeholder={`#${channel.name} kanalına mesaj yaz · Ctrl+V görsel · Shift+Enter satır`}
           />
           <button type="submit" disabled={!draft.trim() && !selectedFile}>
             <Icon name="send" />

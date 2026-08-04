@@ -15,7 +15,7 @@ COPY backend/alembic ./alembic
 COPY plugins /srv/plugins
 
 RUN addgroup --system nexus && adduser --system --ingroup nexus nexus \
-    && mkdir -p /srv/avatars /srv/attachments \
+    && mkdir -p /srv/avatars /srv/attachments /srv/generated-media /srv/highlight-media \
     && chown -R nexus:nexus /srv
 
 USER nexus

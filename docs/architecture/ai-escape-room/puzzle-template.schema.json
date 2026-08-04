@@ -1,0 +1,212 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nexus.local/schemas/escape-room-puzzle-template-v1.json",
+  "title": "Escape Room Puzzle Template v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "templateId",
+    "templateVersion",
+    "category",
+    "answerType",
+    "solutionRule",
+    "difficulty",
+    "variableDefinitions",
+    "generationConstraints",
+    "cooperationPlan",
+    "hintPlan",
+    "renderSlots",
+    "accessibility"
+  ],
+  "properties": {
+    "templateId": { "type": "string", "pattern": "^[a-z0-9_]{3,64}$" },
+    "templateVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "category": {
+      "enum": [
+        "CODE",
+        "NORMALIZED_WORD",
+        "ORDERING",
+        "SET_SELECTION",
+        "NUMERIC",
+        "ITEM_COMBINATION",
+        "STATE_ROUTING",
+        "LOGIC_GRID",
+        "OBSERVATION",
+        "DOCUMENT",
+        "WORD_TRANSFORM",
+        "MAP_OVERLAY",
+        "NETWORK_PATH",
+        "SIMULTANEOUS_INPUT",
+        "AUDIO_PATTERN",
+        "MULTI_STEP"
+      ]
+    },
+    "answerType": {
+      "enum": [
+        "EXACT_CODE",
+        "NORMALIZED_TEXT",
+        "ORDERED_SEQUENCE",
+        "SET_EQUALITY",
+        "NUMERIC_TOLERANCE",
+        "ITEM_COMBINATION",
+        "STATE_CONDITION",
+        "MULTI_STEP"
+      ]
+    },
+    "solutionRule": {
+      "enum": [
+        "CONCATENATE_FIELDS",
+        "ORDER_BY_TIMESTAMP",
+        "ORDER_BY_RANK",
+        "SELECT_ALL_MATCHING_TAGS",
+        "SOLVE_LINEAR_CONSTRAINTS",
+        "MATCH_ITEM_MULTISET",
+        "EVALUATE_PREDICATE_AST",
+        "SHORTEST_VALID_PATH",
+        "OVERLAY_INTERSECTION",
+        "APPLY_SUBSTITUTION_TABLE",
+        "MATCH_PATTERN_SEQUENCE",
+        "FINITE_STATE_MACHINE"
+      ]
+    },
+    "difficulty": { "type": "integer", "minimum": 1, "maximum": 5 },
+    "variableDefinitions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 24,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "valueType", "source", "visibility"],
+        "properties": {
+          "key": { "type": "string", "pattern": "^[a-z][a-z0-9_]{1,48}$" },
+          "valueType": { "enum": ["STRING", "INTEGER", "STRING_ARRAY", "INTEGER_ARRAY", "TAG_SET", "MATRIX"] },
+          "source": { "enum": ["SEEDED_GENERATOR", "CURATED_POOL", "DERIVED"] },
+          "visibility": { "enum": ["PUBLIC", "PLAYER_0", "PLAYER_1", "PLAYER_2", "ENGINE_ONLY"] },
+          "minimum": { "type": "integer" },
+          "maximum": { "type": "integer" },
+          "minItems": { "type": "integer", "minimum": 1, "maximum": 20 },
+          "maxItems": { "type": "integer", "minimum": 1, "maximum": 20 },
+          "curatedPoolKey": { "type": "string", "pattern": "^[A-Z0-9_]{3,64}$" },
+          "derivedFrom": {
+            "type": "array",
+            "maxItems": 8,
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]{1,48}$" }
+          }
+        }
+      }
+    },
+    "generationConstraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uniqueSolution", "maximumSearchSpace", "minimumInformationSources", "maximumAttemptsExpected"],
+      "properties": {
+        "uniqueSolution": { "const": true },
+        "maximumSearchSpace": { "type": "integer", "minimum": 2, "maximum": 1000000 },
+        "minimumInformationSources": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "maximumAttemptsExpected": { "type": "integer", "minimum": 1, "maximum": 12 },
+        "forbidAccidentalAlternateSolutions": { "const": true },
+        "requiredObjectStateTags": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Z0-9_]{1,40}$" }
+        }
+      }
+    },
+    "cooperationPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimumActivePlayers", "informationDistribution", "takeoverAllowed"],
+      "properties": {
+        "minimumActivePlayers": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "informationDistribution": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["playerSeat", "variableKeys"],
+            "properties": {
+              "playerSeat": { "type": "integer", "minimum": 0, "maximum": 2 },
+              "variableKeys": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 12,
+                "uniqueItems": true,
+                "items": { "type": "string" }
+              }
+            }
+          }
+        },
+        "simultaneousWindowSeconds": { "type": "integer", "minimum": 5, "maximum": 30 },
+        "takeoverAllowed": { "type": "boolean" }
+      }
+    },
+    "hintPlan": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "prefixItems": [
+        { "$ref": "#/$defs/hintDirection" },
+        { "$ref": "#/$defs/hintStronger" },
+        { "$ref": "#/$defs/hintNear" },
+        { "$ref": "#/$defs/hintFinal" }
+      ]
+    },
+    "renderSlots": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "slotType", "maxLength", "allowedVariableKeys", "audience"],
+        "properties": {
+          "key": { "type": "string", "pattern": "^[a-z][a-z0-9_]{1,48}$" },
+          "slotType": { "enum": ["TITLE", "ROOM_FLAVOR", "DOCUMENT_WRAPPER", "ITEM_LABEL", "NPC_LINE"] },
+          "maxLength": { "type": "integer", "minimum": 8, "maximum": 500 },
+          "allowedVariableKeys": {
+            "type": "array",
+            "maxItems": 8,
+            "uniqueItems": true,
+            "items": { "type": "string" }
+          },
+          "audience": { "enum": ["PUBLIC", "PLAYER_0", "PLAYER_1", "PLAYER_2"] },
+          "loreAllowed": { "type": "boolean", "default": false }
+        }
+      }
+    },
+    "accessibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["colorIndependent", "audioAlternative", "screenReaderLabels", "motorPrecisionRequired"],
+      "properties": {
+        "colorIndependent": { "const": true },
+        "audioAlternative": { "type": "string", "maxLength": 120 },
+        "screenReaderLabels": { "const": true },
+        "motorPrecisionRequired": { "const": false },
+        "maximumReadingGrade": { "type": "integer", "minimum": 4, "maximum": 12 }
+      }
+    }
+  },
+  "$defs": {
+    "baseHint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tier", "canonicalHintCode", "allowedVariableKeys", "minimumSeconds", "minimumFailedAttempts"],
+      "properties": {
+        "tier": { "type": "string" },
+        "canonicalHintCode": { "type": "string", "pattern": "^[A-Z0-9_]{3,64}$" },
+        "allowedVariableKeys": { "type": "array", "maxItems": 8, "uniqueItems": true, "items": { "type": "string" } },
+        "minimumSeconds": { "type": "integer", "minimum": 0, "maximum": 3600 },
+        "minimumFailedAttempts": { "type": "integer", "minimum": 0, "maximum": 20 }
+      }
+    },
+    "hintDirection": { "allOf": [{ "$ref": "#/$defs/baseHint" }, { "properties": { "tier": { "const": "DIRECTION" } } }] },
+    "hintStronger": { "allOf": [{ "$ref": "#/$defs/baseHint" }, { "properties": { "tier": { "const": "STRONGER_CLUE" } } }] },
+    "hintNear": { "allOf": [{ "$ref": "#/$defs/baseHint" }, { "properties": { "tier": { "const": "NEAR_SOLUTION" } } }] },
+    "hintFinal": { "allOf": [{ "$ref": "#/$defs/baseHint" }, { "properties": { "tier": { "const": "FINAL_ASSIST" } } }] }
+  }
+}

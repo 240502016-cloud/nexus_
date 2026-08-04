@@ -48,6 +48,8 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255))
+    # Parola değişince artırılır; JWT içindeki sürüm eşleşmezse eski oturum reddedilir.
+    auth_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     display_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     matrix_user_id: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)

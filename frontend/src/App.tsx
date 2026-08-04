@@ -4,6 +4,9 @@ import "./App.css";
 import { coreApi, getToken, setToken } from "./api/client";
 import { ChannelSidebar } from "./components/ChannelSidebar";
 import { ChatArea } from "./components/ChatArea";
+import { CommentatorPanel } from "./components/CommentatorPanel";
+import { MemeGeneratorPanel } from "./components/MemeGeneratorPanel";
+import { HighlightGeneratorPanel } from "./components/HighlightGeneratorPanel";
 import { Icon } from "./components/Icon";
 import { IncomingCallModal, OutgoingCallToast, CallNoticeToast } from "./components/IncomingCallModal";
 import { JoinServerPanel } from "./components/JoinServerPanel";
@@ -145,6 +148,9 @@ export default function App() {
   const [callError, setCallError] = useState<string | null>(null);
   const [voiceStageVisible, setVoiceStageVisible] = useState(true);
   const [membersVisible, setMembersVisible] = useState(false);
+  const [commentatorOpen, setCommentatorOpen] = useState(false);
+  const [memeGeneratorOpen, setMemeGeneratorOpen] = useState(false);
+  const [highlightGeneratorOpen, setHighlightGeneratorOpen] = useState(false);
   const [serverInvitesOpen, setServerInvitesOpen] = useState(false);
   const [joinServerOpen, setJoinServerOpen] = useState(() => Boolean(inviteCodeFromLocation()));
   const [joinServerInitialCode, setJoinServerInitialCode] = useState(inviteCodeFromLocation);
@@ -1121,6 +1127,39 @@ export default function App() {
             {activeServer ? (
               <button
                 type="button"
+                className={highlightGeneratorOpen ? "toolbar-action toolbar-action--active" : "toolbar-action"}
+                onClick={() => setHighlightGeneratorOpen(true)}
+                title="Highlight Generator panelini aç"
+              >
+                <Icon name="screen" />
+                <span>Highlight</span>
+              </button>
+            ) : null}
+            {activeServer ? (
+              <button
+                type="button"
+                className={memeGeneratorOpen ? "toolbar-action toolbar-action--active" : "toolbar-action"}
+                onClick={() => setMemeGeneratorOpen(true)}
+                title="Meme Generator panelini aç"
+              >
+                <Icon name="smile" />
+                <span>Memeler</span>
+              </button>
+            ) : null}
+            {activeServer ? (
+              <button
+                type="button"
+                className={commentatorOpen ? "toolbar-action toolbar-action--active" : "toolbar-action"}
+                onClick={() => setCommentatorOpen(true)}
+                title="AI Commentator panelini aç"
+              >
+                <Icon name="bot" />
+                <span>Yorumcu</span>
+              </button>
+            ) : null}
+            {activeServer ? (
+              <button
+                type="button"
                 className={membersVisible ? "toolbar-action toolbar-action--active" : "toolbar-action"}
                 onClick={() => setMembersVisible((visible) => !visible)}
                 title={membersVisible ? "Üyeler panelini kapat" : "Üyeler panelini aç"}
@@ -1242,6 +1281,31 @@ export default function App() {
           onChange={setVoiceSettings}
           selfStatus={gateway.selfStatus}
           onStatusChange={gateway.setStatus}
+        />
+      ) : null}
+      {activeServer && commentatorOpen ? (
+        <CommentatorPanel
+          server={activeServer}
+          members={serverMembers}
+          currentUser={user}
+          activeChannelId={activeChannelId}
+          onClose={() => setCommentatorOpen(false)}
+        />
+      ) : null}
+      {activeServer && memeGeneratorOpen ? (
+        <MemeGeneratorPanel
+          server={activeServer}
+          members={serverMembers}
+          currentUser={user}
+          onClose={() => setMemeGeneratorOpen(false)}
+        />
+      ) : null}
+      {activeServer && highlightGeneratorOpen ? (
+        <HighlightGeneratorPanel
+          server={activeServer}
+          members={serverMembers}
+          currentUser={user}
+          onClose={() => setHighlightGeneratorOpen(false)}
         />
       ) : null}
 

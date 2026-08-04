@@ -116,7 +116,7 @@ def _load_job(job_id: int) -> tuple[int, str, list[dict], bool, str] | None:
         if conversation is None:
             return None
         history = (
-            db.query(AiMessage)
+            db.query(AiMessage.role, AiMessage.content)
             .filter(
                 AiMessage.conversation_id == job.conversation_id,
                 AiMessage.id <= job.user_message_id,
@@ -126,7 +126,9 @@ def _load_job(job_id: int) -> tuple[int, str, list[dict], bool, str] | None:
             .all()
         )
         history.reverse()
-        raw_messages = [{"role": item.role.value, "content": item.content} for item in history]
+        # Context oluşturmak için ORM nesnesinin tamamına gerek yok. Yalnız iki sütunu
+        # okumak worker'ın uzun sohbetlerdeki SQLAlchemy nesne/RAM yükünü azaltır.
+        raw_messages = [{"role": role.value, "content": content} for role, content in history]
         messages = build_token_limited_context(
             raw_messages,
             system_prompt=DEFAULT_SYSTEM_PROMPT,
@@ -391,6 +393,11 @@ def process_bot_one() -> bool:
 
 
 def process_one() -> bool:
+    # Live experience jobs have a much smaller freshness window than ordinary chat.
+    from app.platform.worker import process_one as process_platform_one
+
+    if process_platform_one():
+        return True
     claimed = _claim_next_job()
     if claimed is None:
         return process_bot_one()

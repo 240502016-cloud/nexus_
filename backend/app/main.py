@@ -24,7 +24,19 @@ from app.core.routers import (
     voice,
 )
 from app.database import SessionLocal
+from app.modules.party_lore import models as party_lore_models  # noqa: F401
+from app.modules.party_lore.router import router as party_lore_router
+from app.modules.ai_commentator import models as ai_commentator_models  # noqa: F401
+from app.modules.ai_commentator.router import router as ai_commentator_router
+from app.modules.meme_generator import models as meme_generator_models  # noqa: F401
+from app.modules.meme_generator.router import router as meme_generator_router
+from app.modules.highlight_generator import models as highlight_generator_models  # noqa: F401
+from app.modules.highlight_generator.router import router as highlight_generator_router
+from app.modules.ai_roast_battle import models as ai_roast_battle_models  # noqa: F401
+from app.modules.ai_roast_battle.router import router as ai_roast_battle_router
 from app.plugins_engine.loader import PluginLoadError, discover_manifests, plugin_registry
+from app.platform import models as platform_models  # noqa: F401
+from app.platform.router import router as experiences_router
 from app.services.ollama import models as ollama_models  # noqa: F401  (Base.metadata'ya kaydedilir)
 from app.services.ollama.requests import router as ai_router
 
@@ -37,7 +49,7 @@ app.add_middleware(
     allow_origins=["nexus://app"],
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
 )
 
 app.include_router(auth.router)
@@ -57,6 +69,12 @@ app.include_router(ai_router)
 app.include_router(voice.router)
 app.include_router(gateway.router)
 app.include_router(join_codes.router)
+app.include_router(experiences_router)
+app.include_router(party_lore_router)
+app.include_router(ai_commentator_router)
+app.include_router(meme_generator_router)
+app.include_router(highlight_generator_router)
+app.include_router(ai_roast_battle_router)
 
 
 def _reload_enabled_plugins() -> None:

@@ -18,7 +18,7 @@ import time
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 
-from app.core.auth import decode_user_id
+from app.core.auth import claims_match_user, decode_user_claims
 from app.core.event_loop import get_main_loop
 from app.core.models import Channel, ChannelType, Friendship, Server, ServerMember, User
 from app.core.routers.voice import set_voice_state_listener, voice_manager
@@ -310,9 +310,10 @@ def _typing_recipients(
 async def gateway_socket(websocket: WebSocket, token: str = Query(...)):
     db = SessionLocal()
     try:
-        user_id = decode_user_id(token)
+        claims = decode_user_claims(token)
+        user_id = claims[0] if claims else None
         user = db.get(User, user_id) if user_id is not None else None
-        if not user:
+        if not claims_match_user(claims, user):
             await websocket.close(code=4401)
             return
         username = user.username

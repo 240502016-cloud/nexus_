@@ -45,10 +45,14 @@ class UserUpdate(BaseModel):
     """Kullanıcının kendi profilinde düzenleyebileceği alanlar."""
 
     display_name: str | None = Field(default=None, max_length=64)
+    email: EmailStr | None = Field(default=None, max_length=255)
+    # Yalnızca e-posta değiştiriliyorsa zorunludur. Profil adı değişikliklerinde parola
+    # taşımamak hem daha güvenli hem de mevcut PATCH sözleşmesiyle geriye uyumludur.
+    current_password: str | None = Field(default=None, max_length=200)
 
 
 class PasswordChange(BaseModel):
-    current_password: str
+    current_password: str = Field(min_length=1, max_length=200)
     new_password: str = Field(min_length=8, max_length=200)
 
 

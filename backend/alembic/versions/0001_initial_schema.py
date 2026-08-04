@@ -18,15 +18,22 @@ down_revision = None
 branch_labels = None
 depends_on = None
 
-_LATER_REVISION_TABLES = {
-    "ai_jobs",
-    "ai_bot_jobs",
-    "bot_plugin_links",
-    "chance_game_sessions",
-    "chance_wheels",
-    "friendships",
-    "server_invites",
-    "server_join_codes",
+# Freeze the historical baseline to an allow-list. An exclude-list makes revision 0001
+# depend on today's metadata and causes new module tables to collide with their own
+# migrations during a fresh installation.
+_BASELINE_TABLES = {
+    "ai_conversations",
+    "ai_messages",
+    "ai_token_usage",
+    "bot_server_links",
+    "bots",
+    "channels",
+    "plugins",
+    "roles",
+    "server_members",
+    "servers",
+    "user_roles",
+    "users",
 }
 
 
@@ -35,13 +42,13 @@ def upgrade() -> None:
     # tablolar burada açıkça dışarıda tutulmalıdır. Aksi halde temiz kurulumda aynı tabloyu
     # ilgili revision ikinci kez oluşturmaya çalışır.
     tables = [
-        table for table in Base.metadata.sorted_tables if table.name not in _LATER_REVISION_TABLES
+        table for table in Base.metadata.sorted_tables if table.name in _BASELINE_TABLES
     ]
     Base.metadata.create_all(bind=op.get_bind(), tables=tables)
 
 
 def downgrade() -> None:
     tables = [
-        table for table in Base.metadata.sorted_tables if table.name not in _LATER_REVISION_TABLES
+        table for table in Base.metadata.sorted_tables if table.name in _BASELINE_TABLES
     ]
     Base.metadata.drop_all(bind=op.get_bind(), tables=tables)

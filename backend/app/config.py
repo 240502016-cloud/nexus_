@@ -38,6 +38,30 @@ class Settings(BaseSettings):
     ai_max_output_tokens: int = 1024
     ai_stream_poll_seconds: float = 0.15
 
+    # AI Commentator uses a logical role in module code. Until the Gateway supports
+    # server-side logical profiles, this setting maps that role to an installed model.
+    commentator_live_model: str = "qwen2.5:7b"
+    commentator_timeout_seconds: float = 3.0
+    commentator_stale_seconds: float = 4.0
+
+    meme_text_model: str = "qwen2.5:7b"
+    meme_timeout_seconds: float = 8.0
+    generated_media_dir: str = "/srv/generated-media"
+
+    highlight_media_dir: str = "/srv/highlight-media"
+    highlight_max_upload_bytes: int = 1024 * 1024 * 1024
+    ffmpeg_binary: str = "ffmpeg"
+    ffprobe_binary: str = "ffprobe"
+    highlight_probe_timeout_seconds: float = 30.0
+    highlight_render_timeout_seconds: float = 600.0
+    media_worker_poll_seconds: float = 0.5
+    highlight_metadata_model: str = "qwen2.5:7b"
+    highlight_metadata_timeout_seconds: float = 4.0
+    roast_generate_model: str = "qwen2.5:7b"
+    roast_review_model: str = "qwen2.5:7b"
+    roast_generate_timeout_seconds: float = 6.0
+    roast_review_timeout_seconds: float = 4.0
+
     # TASK-010: untrusted plugin code is executed by the dedicated sandbox sidecar.
     # ``local`` exists only for controlled development and must not be used in production.
     plugin_execution_mode: Literal["sandbox", "local"] = "sandbox"

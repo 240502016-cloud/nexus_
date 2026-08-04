@@ -32,24 +32,49 @@ def estimate_message_tokens(message: dict) -> int:
     return 4 + estimate_tokens(str(message.get("content", "")))
 
 
+_TRUNCATION_MARKER = "\n…[önceki bağlam kısaltıldı]…\n"
+
+
+def _truncate_message(message: dict, max_content_chars: int) -> dict:
+    """Return a bounded copy while preserving instructions at the head and recency at the tail."""
+    content = str(message.get("content", ""))
+    if len(content) <= max_content_chars:
+        return message
+    if max_content_chars <= len(_TRUNCATION_MARKER):
+        shortened = content[-max_content_chars:]
+    else:
+        usable = max_content_chars - len(_TRUNCATION_MARKER)
+        head_size = usable // 3
+        tail_size = usable - head_size
+        shortened = f"{content[:head_size]}{_TRUNCATION_MARKER}{content[-tail_size:]}"
+    return {**message, "content": shortened}
+
+
 def build_token_limited_context(
     history: list[dict], *, system_prompt: str, token_budget: int
 ) -> list[dict]:
     """Keep the newest complete messages that fit the prompt token budget."""
-    budget = max(128, token_budget)
     system = {"role": "system", "content": system_prompt}
     used = estimate_message_tokens(system)
+    # Güvenlik/davranış talimatı hiçbir koşulda budanmaz; en az bir kısa kullanıcı mesajı
+    # için de yer ayrılır. Normal yapılandırmada bu yalnızca verilen token bütçesidir.
+    budget = max(128, token_budget, used + 5)
     selected: list[dict] = []
     for message in reversed(history):
         cost = estimate_message_tokens(message)
-        if selected and used + cost > budget:
-            break
-        if not selected and used + cost > budget:
-            # Always retain the latest user message, even when it alone exceeds the budget.
+        remaining = budget - used
+        if cost <= remaining:
             selected.append(message)
+            used += cost
+            continue
+        if selected:
             break
-        selected.append(message)
-        used += cost
+        # En yeni mesaj tek başına bütçeyi aşıyorsa eski davranış tüm içeriği göndererek
+        # limiti fiilen devre dışı bırakıyordu. Baş ve sonu korumak, talimatı ve en güncel
+        # dökümü kaybetmeden ağ/token/RAM kullanımını gerçekten sınırlar.
+        content_token_budget = max(1, remaining - 4)
+        selected.append(_truncate_message(message, content_token_budget * 4))
+        break
     selected.reverse()
     return [system, *selected]
 

@@ -529,20 +529,49 @@ function publishUpdateStatus(status) {
   mainWindow?.webContents.send("updates:status", status);
 }
 
+async function forwardApiRequest(request, url) {
+  const target = `${SERVER_URL}${url.pathname}${url.search}`;
+  const headers = new Headers(request.headers);
+  // Gövde yeniden oluşturulduğu için uzunluğu Chromium'un tekrar hesaplaması gerekir.
+  headers.delete("content-length");
+  headers.delete("host");
+
+  const init = {
+    method: request.method,
+    headers,
+  };
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    // Custom protocol Request gövdesi bir ReadableStream'dir. Bu stream'i doğrudan ikinci bir
+    // net.fetch çağrısına vermek Electron'da gövdeli istekleri "Failed to fetch" ile düşürür.
+    init.body = await request.arrayBuffer();
+  }
+
+  try {
+    return await net.fetch(target, init);
+  } catch {
+    return new Response(
+      JSON.stringify({
+        detail: "Sunucuya ulaşılamadı. Nexus sunucusunun açık ve internet bağlantısının kullanılabilir olduğunu kontrol edin.",
+      }),
+      {
+        status: 503,
+        headers: {
+          "Cache-Control": "no-store",
+          "Content-Type": "application/json; charset=utf-8",
+        },
+      },
+    );
+  }
+}
+
 function installProtocolHandlers() {
   const frontendRoot = DEV_URL ? null : join(process.resourcesPath, "frontend");
   const desktopRoot = join(CURRENT_DIR, "..", "assets");
 
-  const serve = (root, request, fallbackToIndex) => {
+  const serve = async (root, request, fallbackToIndex) => {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/")) {
-      const target = `${SERVER_URL}${url.pathname}${url.search}`;
-      const init = {
-        method: request.method,
-        headers: request.headers,
-      };
-      if (request.method !== "GET" && request.method !== "HEAD") init.body = request.body;
-      return net.fetch(target, init);
+      return forwardApiRequest(request, url);
     }
     const requested = decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname);
     const resolved = normalize(join(root, requested));
