@@ -178,9 +178,13 @@ branch  cekingen
 ### Sunucuda çalışan sürüm
 
 ```text
-2aa6ce3  Add AI experiences and improve account messaging flows
-DB revizyonu: 0015_user_auth_version
+0034708  Add per-listener audio mixing, higher media quality and Nexus Lab
+DB revizyonu: 0015_user_auth_version   (değişmedi — bu commit şemaya dokunmaz)
 ```
+
+Bu commit **yalnız** kaynak bazlı ses miksi, kalite presetleri, Nexus Lab ve görsel cilayı
+içerir. Dört AI oyun modülü, `0016`–`0019` migration'ları ve yerel test ortamı bilinçli olarak
+dışarıda bırakıldı (bkz. aşağıdaki bölüm). Geri alma noktası: `2aa6ce3`.
 
 ### ⚠️ Yerelde commit'lenmemiş, DAĞITILMAMIŞ çalışma
 
@@ -208,23 +212,32 @@ Değişmiş (modified) dosyalar arasında: `backend/app/main.py`, `backend/app/c
 `backend/app/platform/worker.py`, `backend/app/modules/ai_roast_battle/{router,service}.py`,
 `backend/app/modules/party_lore/service.py`, `frontend/src/{App.tsx,App.css,types.ts,api/client.ts}`.
 
-Ayrıca **5 Ağustos 2026 çalışmasından** (kaynak bazlı ses miksi, kalite presetleri, Nexus Lab,
-görsel cila) gelen ve henüz dağıtılmamış değişiklikler:
-
-```text
-yeni      frontend/lab.html
-yeni      frontend/src/lab/{main.tsx,LabApp.tsx,lab.css}
-değişmiş  frontend/{vite.config.ts,nginx.conf}
-değişmiş  frontend/src/{App.tsx,App.css,settings.ts,desktopBridge.ts}
-değişmiş  frontend/src/hooks/useVoiceChannel.ts
-değişmiş  frontend/src/components/{ChannelSidebar,VoicePanel,SettingsPanel,Icon}.tsx
-değişmiş  backend/app/core/routers/voice.py
-değişmiş  backend/tests/test_voice_connections.py
-```
+> **5 Ağustos 2026 çalışması dağıtıldı** (`0034708`): kaynak bazlı ses miksi, kalite presetleri,
+> Nexus Lab ve görsel cila. Şemaya dokunmadığı için migration çalıştırılmadı.
 
 **Sonuç:** Yerelde migration zinciri `0019`'a kadar gider, sunucuda `0015`'te durur. Bu bir hata
-değil, bilinçli durumdur. Yukarıdaki 5 Ağustos çalışması **veritabanı şemasına dokunmaz**;
-yeni migration gerektirmez.
+değil, bilinçli durumdur.
+
+### Nexus Lab'in dağıtılmamış modüllerle ilişkisi
+
+Lab dokuz modülü de **kod olarak** içerir, ancak `LabApp.tsx` içindeki `released` bayrağı
+backend'i sunucuda çalışmayanları production build'de gizler:
+
+| Modül | `released` | Neden |
+|---|---|---|
+| Highlight, Meme, AI Yorumcu | `true` | Backend'leri `0015`'te mevcut ve değişmedi |
+| Party Lore, Roast Battle | `false` | Backend modülü sunucuda var ama servisi **ve** paneli yerelde birlikte değişti; ikisi birden dağıtılmalı |
+| Son Portal, Üç Mühür, Ortak Hikâye, Escape Room | `false` | Backend modülü ve `0016`–`0019` migration'ları hiç dağıtılmadı |
+
+Geliştirmede (`import.meta.env.DEV`) hepsi görünür — `docs/LOCAL_HUMAN_TEST.md` ortamı tam da
+bunun için var. Production'da geçici olarak açmak gerekirse `VITE_LAB_UNRELEASED=1` ile build alınır.
+
+**Bir modülün backend'i dağıtıldığında yapılacak tek şey:** `LabApp.tsx` içinde o modülün
+`released` değerini `true` yapmak. Başka değişiklik gerekmez.
+
+> ⚠️ `backend/app/main.py` yereldeki dört modülün router'ını **koşulsuz** import eder. Yani
+> backend'i olduğu gibi dağıtmak dört modülü ve `0016`–`0019` migration'larını da zorunlu olarak
+> canlıya taşır. Kısmi dağıtım isteniyorsa `main.py` staged edilmemelidir.
 
 ---
 
@@ -974,9 +987,15 @@ Yerel değişiklik varsa doğrudan merge yapma; önce `git status` incele.
 ### Yalnız backend/frontend değişikliği
 
 ```bash
-docker compose build backend frontend
+docker compose build backend frontend media-worker
 docker compose up -d backend ai-worker media-worker plugin-sandbox frontend reverse-proxy
 ```
+
+> ⚠️ **`media-worker` ayrı bir image'dır** (`nexus-media-worker:0.1.0`, `backend/Dockerfile.media`
+> — ffmpeg içerir). `docker compose build backend` onu **kapsamaz**; build listesine ayrıca
+> yazılmazsa `up -d` sonrası eski backend kodunu çalıştırmaya devam eder ve bunu yalnız
+> `docker inspect nexus-media-worker-1 --format "{{.Image}}"` karşılaştırması ortaya çıkarır.
+> `ai-worker` ve `plugin-sandbox` ise backend image'ını paylaşır, ayrı build gerektirmez.
 
 ### Sağlık kontrolleri
 
@@ -1109,6 +1128,14 @@ WebRTC/TURN matrisi otomatik değil · Electron installer'ın imzalı production
 ### ⚠️ Yeni sunucuda henüz yapılmamış doğrulama
 Taşıma sonrası **iki gerçek kullanıcıyla ses/kamera/ekran paylaşımı smoke testi yapılmamıştır.**
 Endpoint'ler ve TLS doğrulandı, ancak gerçek mikrofon/RTP akışı ve TURN relay yolu canlı test edilmedi.
+
+`0034708` dağıtımında doğrulananlar: `/healthz`, `/api/health`, `/_matrix/client/versions`,
+`/lab` (200 + doğru başlık), canlı bundle hash'lerinin yerel build ile birebir eşleşmesi,
+çalışan konteynerde `_audio_mix_payload`'ın varlığı, dört park edilmiş modülün konteynerde
+**bulunmadığı**, alembic'in `0015`'te kaldığı ve logların temiz olduğu.
+
+**Doğrulanmayan:** kaynak bazlı ses miksinin gerçek iki kullanıcıyla çalıştığı. Bu, yukarıdaki
+smoke testinin parçasıdır ve hâlâ açıktır.
 
 ---
 
