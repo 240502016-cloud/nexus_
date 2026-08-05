@@ -7,6 +7,7 @@ import type { DesktopUpdateStatus } from "../desktopBridge";
 import type { KeyCombo, VoiceSettings } from "../settings";
 import {
   DEFAULT_VOICE_SETTINGS,
+  VIDEO_QUALITY_ORDER,
   VIDEO_QUALITY_PRESETS,
   buildAudioConstraints,
   comboIsEmpty,
@@ -505,9 +506,11 @@ export function SettingsPanel({
                   update({ videoQuality: event.target.value as VoiceSettings["videoQuality"] })
                 }
               >
-                <option value="480p">480p · Veri tasarrufu</option>
-                <option value="720p">720p · Dengeli</option>
-                <option value="1080p">1080p · Yüksek kalite</option>
+                {VIDEO_QUALITY_ORDER.map((quality) => (
+                  <option key={quality} value={quality}>
+                    {VIDEO_QUALITY_PRESETS[quality].label}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="settings-panel__field">
@@ -535,10 +538,28 @@ export function SettingsPanel({
               </select>
             </label>
           </div>
+          <label className="settings-panel__radio">
+            <input
+              type="checkbox"
+              checked={settings.highFidelityStreamAudio}
+              onChange={(e) => update({ highFidelityStreamAudio: e.target.checked })}
+            />
+            Yüksek kaliteli yayın sesi (ekran/sekme sesi paylaşırken)
+          </label>
           <p className="settings-panel__hint">
             Çözünürlük ve FPS kameraya ve yayına uygulanır. Oyun modu zorlanınca önce çözünürlüğü,
-            Metin modu ise önce kare hızını düşürür. 1080p/60 FPS daha fazla bağlantı ve işlem gücü
-            kullanır; hiçbir seçenek ücretli servis gerektirmez.
+            Metin modu ise önce kare hızını düşürür. Bu değerler bir <b>tavan</b>dır: bağlantı
+            yetmezse görüntü otomatik olarak aşağı iner, donmaz.
+            {VIDEO_QUALITY_PRESETS[settings.videoQuality].demanding ? (
+              <>
+                {" "}
+                <b>1440p ve 4K</b> yüksek yükleme hızı ister. Görüntü herkese ayrı ayrı
+                kodlandığı için kalabalık odalarda 1080p daha akıcı olur.
+              </>
+            ) : null}
+            {" "}Yüksek kaliteli yayın sesi müzik ve oyun sesini belirgin biçimde netleştirir,
+            karşılığında ses için biraz daha bant genişliği kullanır. Hiçbir seçenek ücretli
+            servis gerektirmez.
           </p>
           <div className="settings-panel__test-row">
             <button onClick={camPreviewing ? stopCamPreview : startCamPreview}>

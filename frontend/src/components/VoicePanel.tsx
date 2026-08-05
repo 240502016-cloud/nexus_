@@ -96,8 +96,38 @@ export function VoicePanel({ voice, currentUser, voiceSettings, onLeave }: Voice
       </div>
       {screenShareEnabled && screenAudioEnabled ? (
         <div className="voice-panel__screen-audio">
-          <Icon name="volume" />
-          Yayın sesi açık
+          <div className="voice-panel__screen-audio-head">
+            <Icon name="volume" />
+            <span>Yayın sesi</span>
+            <button
+              type="button"
+              className={voice.streamAudioMuted
+                ? "voice-panel__screen-audio-toggle voice-panel__screen-audio-toggle--off"
+                : "voice-panel__screen-audio-toggle"}
+              onClick={voice.toggleStreamAudioMute}
+              title={voice.streamAudioMuted
+                ? "Yayın sesini tekrar gönder"
+                : "Yayın sesini gönderme (mikrofon ve soundboard açık kalır)"}
+            >
+              {voice.streamAudioMuted ? "Kapalı" : "Açık"}
+            </button>
+          </div>
+          <label className="voice-panel__screen-audio-level">
+            <input
+              type="range"
+              min={0}
+              max={200}
+              step={10}
+              value={voice.streamAudioVolume}
+              disabled={voice.streamAudioMuted}
+              aria-label="Yayın sesi seviyesi"
+              onChange={(event) => voice.setStreamAudioVolume(Number(event.target.value))}
+            />
+            <span>%{voice.streamAudioVolume}</span>
+          </label>
+          <p className="voice-panel__screen-audio-note">
+            Yalnız paylaştığın ekranın sesini etkiler; mikrofonun ve soundboard'ın ayrıdır.
+          </p>
         </div>
       ) : null}
       <div className={`voice-panel__quality voice-panel__quality--${voice.connectionQuality.level}`}>

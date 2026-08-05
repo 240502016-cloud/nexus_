@@ -97,6 +97,43 @@ export interface Member {
   joined_at: string;
 }
 
+export interface LoreParticipantDecision {
+  user_id: number;
+  decision: "pending" | "approved" | "rejected";
+  decided_at: string | null;
+}
+
+export interface LoreCandidate {
+  id: string;
+  server_id: number;
+  submitted_by_id: number;
+  title: string;
+  summary: string;
+  category: string;
+  sensitivity: "low" | "medium" | "high";
+  allowed_modules: string[];
+  status: "pending" | "confirmed" | "rejected";
+  participants: LoreParticipantDecision[];
+  lore_id: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+}
+
+export interface LoreEntry {
+  id: string;
+  server_id: number;
+  title: string;
+  summary: string;
+  category: string;
+  sensitivity: "low" | "medium" | "high";
+  allowed_modules: string[];
+  participant_ids: number[];
+  status: string;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Role {
   id: number;
   server_id: number;
@@ -382,4 +419,227 @@ export interface RenderedHighlight {
   height: number | null;
   error_code: string | null;
   created_at: string;
+}
+
+export type RoastTopic =
+  | "GAMING_MISTAKES"
+  | "FAILED_STRATEGIES"
+  | "MATCH_STATISTICS"
+  | "FUNNY_HIGHLIGHTS"
+  | "CONFIRMED_PARTY_LORE"
+  | "NAVIGATION"
+  | "TEAMWORK"
+  | "INVENTORY"
+  | "TIMING"
+  | "REACTIONS";
+
+export interface RoastProfile {
+  server_id: number;
+  user_id: number;
+  roast_enabled: boolean;
+  maximum_intensity: number;
+  allowed_topics: RoastTopic[];
+  allow_party_lore: boolean;
+  allow_highlights: boolean;
+  allow_recent_failures: boolean;
+  blocked_terms: string[];
+  consent_version: number;
+  updated_at: string;
+}
+
+export interface RoastSession {
+  id: string;
+  server_id: number;
+  player_ids: number[];
+  consent: Record<number, "PENDING" | "READY" | "DECLINED" | "REVOKED">;
+  requested_intensity: number;
+  status: "CONSENT_PENDING" | "ACTIVE" | "CANCELLED" | "ENDED";
+  current_round: number;
+  revision: number;
+}
+
+export interface RoastRound {
+  id: string;
+  session_id: string;
+  round_number: number;
+  target_player_id: number;
+  effective_intensity: number;
+  status: "GENERATING" | "VOTING" | "COMPLETED" | "SKIPPED";
+  candidate_id: string | null;
+  roast_text: string | null;
+  angle: string | null;
+}
+
+export interface BoardGameAction {
+  id: string;
+  kind: string;
+  label: string;
+  cost: string;
+  token: string;
+}
+
+export interface BoardGamePlayer {
+  user_id: number;
+  display_name: string;
+  seat: number;
+  tile_id: string;
+  energy: number;
+  scrap: number;
+  fame: number;
+  shield: number;
+  momentum: number;
+  sigils: string[];
+  contribution: number;
+}
+
+export interface BoardGameEvent {
+  id: number;
+  type: string;
+  sequence: number;
+  revision: number;
+  occurred_at: string;
+  payload: Record<string, unknown>;
+}
+
+export interface BoardGameView {
+  session_id: string;
+  server_id: number;
+  status: "ACTIVE" | "COMPLETED";
+  revision: number;
+  rules_version: string;
+  theme: string;
+  round: number;
+  maximum_rounds: number;
+  active_user_id: number | null;
+  action_points: number;
+  chaos: number;
+  chaos_limit: number;
+  portal_charge: number;
+  deposited_sigils: string[];
+  players: BoardGamePlayer[];
+  tiles: Record<string, { label: string; type: string; region: string; adjacent: string[]; sigil?: string }>;
+  legal_actions: BoardGameAction[];
+  events: BoardGameEvent[];
+  group_outcome: string | null;
+  winner_user_id: number | null;
+  end_reason: string | null;
+  rng_commitment: string;
+  rng_seed_reveal: string | null;
+}
+
+export interface HiddenRoleGameView {
+  session_id: string;
+  server_id: number;
+  status: "ACTIVE" | "COMPLETED";
+  revision: number;
+  round: number;
+  phase: "CLAIM" | "VOTE" | "FINAL_DEDUCTION" | "COMPLETED";
+  stability: number;
+  crisis: {
+    key: string;
+    title: string;
+    brief: string;
+    public_clue: string;
+    options: Array<{ id: "A" | "B" | "C"; disposition: "SEAL" | "REVEAL" | "REDIRECT"; title: string }>;
+  } | null;
+  players: Array<{ user_id: number; display_name: string; seat: number; reputation: number; insight: number }>;
+  claims: Array<{ id: string; user_id: number; subject_option_id: string; proposition: string; flavor_text: string; verdict: string | null }>;
+  submitted_vote_count: number;
+  submitted_deduction_count: number;
+  round_results: Array<Record<string, unknown>>;
+  own_private: {
+    office: "SENTINEL" | "ARCHIVIST" | "ENVOY";
+    mandate: "SEAL" | "REVEAL" | "REDIRECT";
+    objective: string;
+    clue: string | null;
+    own_vote: string | null;
+    deduction_submitted: boolean;
+  };
+  legal_action: { kind: "CLAIM" | "VOTE" | "DEDUCTION"; token: string } | null;
+  result: {
+    group_outcome: string;
+    winner_user_id: number;
+    scores: Array<{ user_id: number; total: number; insight: number; mandate_points: number; objective_points: number; deduction_points: number; reputation: number }>;
+    assignments: Record<number, { office: string; mandate: string; objective: string }>;
+  } | null;
+  recap: string | null;
+  rng_commitment: string;
+}
+
+export interface StorySafetyProfile {
+  server_id: number;
+  user_id: number;
+  horror_level: number;
+  violence_level: number;
+  romance: "OFF" | "SOFT" | "FADE_TO_BLACK";
+  player_conflict: "COOPERATIVE" | "CONTROLLED";
+  betrayal: "OFF" | "NPC_ONLY";
+  personal_jokes: boolean;
+  dark_humor: boolean;
+  version: number;
+  updated_at: string;
+}
+
+export interface SharedStoryView {
+  session_id: string;
+  server_id: number;
+  status: "ACTIVE" | "COMPLETED";
+  revision: number;
+  title: string;
+  primary_goal: string;
+  theme: string;
+  chapter: number;
+  chapter_count: number;
+  phase: "SPOTLIGHT" | "JOINT_VOTE" | "COMPLETED";
+  active_user_id: number | null;
+  scene_number: number;
+  threat: number;
+  goal_progress: number;
+  mystery_progress: number;
+  bond: number;
+  characters: Array<{ user_id: number; seat: number; name: string; archetype: string; traits: string[]; location: string; inventory: string[]; actions_taken: number }>;
+  safety_envelope: Record<string, string | number | boolean>;
+  spotlight_choices: Array<{ id: "INVESTIGATE" | "PROTECT" | "PRESS_ON"; label: string; risk: string; effects: Record<string, number> }>;
+  joint_choices: Array<{ id: "STABILIZE" | "REVEAL_PATH" | "PUSH_FORWARD"; label: string; effects: Record<string, number> }>;
+  submitted_vote_count: number;
+  own_vote: string | null;
+  action_token: string | null;
+  chapter_results: Array<Record<string, unknown>>;
+  ending_vector: Record<string, string> | null;
+  prose: Array<{ source_event_id: number; content_kind: string; text: string; lore_reference_ids: string[] }>;
+  rng_commitment: string;
+}
+
+export interface EscapeRoomNode {
+  id: string;
+  title: string;
+  kind: string;
+  status: "LOCKED" | "AVAILABLE" | "SOLVED";
+  dependencies: string[];
+  answer_type: string;
+  answer_format: string;
+  owner_role: string;
+  required: boolean;
+  attempt_count: number;
+  submitted_count: number;
+  submit_token: string | null;
+  hint_token: string | null;
+}
+
+export interface EscapeRoomView {
+  session_id: string;
+  server_id: number;
+  status: "ACTIVE" | "COMPLETED";
+  revision: number;
+  timer_mode: "RELAXED" | "STANDARD_45" | "CHALLENGE_30";
+  elapsed_seconds: number;
+  overtime: boolean;
+  nodes: EscapeRoomNode[];
+  players: Array<{ user_id: number; display_name: string; seat: number; role: "ENGINEER" | "ANALYST" | "NAVIGATOR" }>;
+  shared_inventory: string[];
+  own_private: { role: "ENGINEER" | "ANALYST" | "NAVIGATOR"; clues: Record<string, string>; ability_available: boolean };
+  hints: Array<{ node_id: string; tier: number; text: string }>;
+  host_messages: Array<{ source_event_id: number; text: string; lore_reference_ids: string[] }>;
+  result: { grade: string; elapsed_seconds: number; overtime: boolean; assisted: boolean; optional_solved: boolean; max_hint_tier: number } | null;
+  rng_commitment: string;
 }

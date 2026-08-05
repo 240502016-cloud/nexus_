@@ -1,0 +1,322 @@
+/* ==========================================================================
+   Nexus Lab — ayrı pencere, ayrı kabuk
+   Modül panellerinin kendi bileşen kodu değişmez; burada yalnız ana uygulamadaki
+   "katman/modal" yerleşimleri sayfa akışına çevrilir.
+   ========================================================================== */
+
+.lab-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  background:
+    radial-gradient(120% 90% at 12% -10%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 60%),
+    radial-gradient(100% 80% at 92% 0%, color-mix(in srgb, #22d3ee 14%, transparent), transparent 62%),
+    var(--bg-content);
+  color: var(--text-primary);
+  overflow-y: auto;
+}
+
+.lab-shell--centered {
+  align-items: center;
+  justify-content: center;
+}
+
+.lab-splash {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 32px;
+  text-align: center;
+  color: var(--text-soft);
+}
+
+.lab-splash h1 {
+  margin: 0;
+  font-size: 24px;
+  color: var(--text-bright);
+}
+
+.lab-splash p {
+  margin: 0;
+  max-width: 34ch;
+  line-height: 1.55;
+}
+
+.lab-splash .icon {
+  width: 34px;
+  height: 34px;
+  color: var(--accent);
+}
+
+/* ---- Üst bar ---- */
+.lab-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px clamp(16px, 4vw, 40px);
+  border-bottom: 1px solid var(--product-border, var(--glass-border));
+  background: color-mix(in srgb, var(--bg-content) 88%, transparent);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+.lab-header__brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.lab-header__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 13px;
+  background: linear-gradient(140deg, var(--accent), #22d3ee);
+  color: #fff;
+}
+
+.lab-header__mark .icon {
+  width: 20px;
+  height: 20px;
+}
+
+.lab-header__brand h1 {
+  margin: 0;
+  font-size: 19px;
+  letter-spacing: -0.01em;
+  color: var(--text-bright);
+}
+
+.lab-header__brand p {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
+.lab-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lab-server-picker {
+  display: grid;
+  gap: 3px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.lab-server-picker select {
+  min-width: 160px;
+  padding: 7px 10px;
+  border: 1px solid var(--product-border, var(--glass-border));
+  border-radius: 10px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 13px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.lab-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 14px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: 150ms ease;
+}
+
+.lab-button:hover {
+  filter: brightness(1.08);
+}
+
+.lab-button--ghost {
+  border-color: var(--product-border, var(--glass-border));
+  background: color-mix(in srgb, var(--bg-button) 60%, transparent);
+  color: var(--text-soft);
+}
+
+.lab-button--ghost:hover {
+  background: var(--bg-button-hover);
+  color: var(--text-bright);
+}
+
+.lab-button .icon {
+  width: 15px;
+  height: 15px;
+}
+
+/* ---- Modül kataloğu ---- */
+.lab-home {
+  display: grid;
+  gap: 26px;
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: clamp(20px, 4vw, 40px);
+}
+
+.lab-empty {
+  margin: 0;
+  padding: 28px;
+  border: 1px dashed var(--product-border, var(--glass-border));
+  border-radius: 14px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  text-align: center;
+}
+
+.lab-section__title {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+}
+
+.lab-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(248px, 1fr));
+  gap: 14px;
+}
+
+.lab-card {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 18px;
+  border: 1px solid var(--product-border, var(--glass-border));
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg-panel) 78%, transparent);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.lab-card:hover,
+.lab-card:focus-visible {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-panel));
+  box-shadow: 0 14px 34px -18px rgba(0, 0, 0, 0.7);
+}
+
+.lab-card__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+
+.lab-card__icon .icon {
+  width: 17px;
+  height: 17px;
+}
+
+.lab-card__title {
+  font-size: 15px;
+  color: var(--text-bright);
+}
+
+.lab-card__tagline {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+/* ---- Modül sahnesi ---- */
+.lab-stage {
+  display: grid;
+  gap: 14px;
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: clamp(16px, 3vw, 32px);
+}
+
+.lab-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.lab-breadcrumb__back {
+  transform: rotate(90deg);
+}
+
+.lab-breadcrumb__here {
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+/*
+ * Paneller ana uygulamada sağdan açılan bir katmandır. Lab'de tek içerik olduğu için
+ * katman yerleşimi sayfa akışına çevrilir; panel bileşenlerinin kendi kodu değişmez.
+ */
+.lab-stage__surface .settings-overlay,
+.lab-stage__surface .settings-panel-backdrop {
+  position: static;
+  inset: auto;
+  display: block;
+  padding: 0;
+  background: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  z-index: auto;
+}
+
+.lab-stage__surface .settings-panel,
+.lab-stage__surface .settings-panel--wide {
+  width: 100%;
+  max-width: none;
+  height: auto;
+  max-height: none;
+  border: 1px solid var(--product-border, var(--glass-border));
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--bg-sidebar) 92%, transparent);
+  animation: none;
+  overflow: visible;
+}
+
+/* Lab'de "kapat" düğmesi modülden çıkıp katalog ekranına döner. */
+.lab-stage__surface .settings-panel__close {
+  align-self: flex-start;
+}
+
+@media (max-width: 720px) {
+  .lab-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .lab-header__actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}

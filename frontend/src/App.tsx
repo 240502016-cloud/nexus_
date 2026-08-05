@@ -4,9 +4,6 @@ import "./App.css";
 import { coreApi, getToken, setToken } from "./api/client";
 import { ChannelSidebar } from "./components/ChannelSidebar";
 import { ChatArea } from "./components/ChatArea";
-import { CommentatorPanel } from "./components/CommentatorPanel";
-import { MemeGeneratorPanel } from "./components/MemeGeneratorPanel";
-import { HighlightGeneratorPanel } from "./components/HighlightGeneratorPanel";
 import { Icon } from "./components/Icon";
 import { IncomingCallModal, OutgoingCallToast, CallNoticeToast } from "./components/IncomingCallModal";
 import { JoinServerPanel } from "./components/JoinServerPanel";
@@ -19,7 +16,7 @@ import { ServerInvitesPanel } from "./components/ServerInvitesPanel";
 import { ServerSettingsPanel } from "./components/ServerSettingsPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { VideoStage } from "./components/VideoStage";
-import { desktopBridge } from "./desktopBridge";
+import { desktopBridge, labUrl } from "./desktopBridge";
 import { useGateway } from "./hooks/useGateway";
 import { useVoiceChannel } from "./hooks/useVoiceChannel";
 import { playMessageNotification } from "./notifications";
@@ -58,6 +55,19 @@ function saveUnreadCounts(userId: number, counts: Map<number, number>): void {
   } catch {
     // Depolama kullanılamıyorsa canlı sayaç çalışmaya devam eder.
   }
+}
+
+/**
+ * Nexus Lab'i ayrı bir pencerede açar.
+ *
+ * Ayrı pencere bilinçlidir: Lab modülleri ana uygulamanın içine gömülü değildir ve
+ * açılmaları sesli görüşmeyi, sahneyi veya sohbeti etkilemez. Masaüstü istemcisinde
+ * `window.open` renderer'da engellidir; orada adres harici tarayıcıya devredilir.
+ */
+function openLab(serverId: number): void {
+  const url = labUrl(`server=${serverId}`);
+  const opened = window.open(url, "nexus-lab", "width=1200,height=880,noopener");
+  opened?.focus();
 }
 
 function createMessageClientId(): string {
@@ -148,9 +158,6 @@ export default function App() {
   const [callError, setCallError] = useState<string | null>(null);
   const [voiceStageVisible, setVoiceStageVisible] = useState(true);
   const [membersVisible, setMembersVisible] = useState(false);
-  const [commentatorOpen, setCommentatorOpen] = useState(false);
-  const [memeGeneratorOpen, setMemeGeneratorOpen] = useState(false);
-  const [highlightGeneratorOpen, setHighlightGeneratorOpen] = useState(false);
   const [serverInvitesOpen, setServerInvitesOpen] = useState(false);
   const [joinServerOpen, setJoinServerOpen] = useState(() => Boolean(inviteCodeFromLocation()));
   const [joinServerInitialCode, setJoinServerInitialCode] = useState(inviteCodeFromLocation);
@@ -1127,34 +1134,12 @@ export default function App() {
             {activeServer ? (
               <button
                 type="button"
-                className={highlightGeneratorOpen ? "toolbar-action toolbar-action--active" : "toolbar-action"}
-                onClick={() => setHighlightGeneratorOpen(true)}
-                title="Highlight Generator panelini aç"
+                className="toolbar-action toolbar-action--lab"
+                onClick={() => openLab(activeServer.id)}
+                title="Highlight, meme, roast ve oyun modüllerini ayrı bir pencerede aç"
               >
-                <Icon name="screen" />
-                <span>Highlight</span>
-              </button>
-            ) : null}
-            {activeServer ? (
-              <button
-                type="button"
-                className={memeGeneratorOpen ? "toolbar-action toolbar-action--active" : "toolbar-action"}
-                onClick={() => setMemeGeneratorOpen(true)}
-                title="Meme Generator panelini aç"
-              >
-                <Icon name="smile" />
-                <span>Memeler</span>
-              </button>
-            ) : null}
-            {activeServer ? (
-              <button
-                type="button"
-                className={commentatorOpen ? "toolbar-action toolbar-action--active" : "toolbar-action"}
-                onClick={() => setCommentatorOpen(true)}
-                title="AI Commentator panelini aç"
-              >
-                <Icon name="bot" />
-                <span>Yorumcu</span>
+                <Icon name="sparkles" />
+                <span>Lab</span>
               </button>
             ) : null}
             {activeServer ? (
@@ -1283,32 +1268,6 @@ export default function App() {
           onStatusChange={gateway.setStatus}
         />
       ) : null}
-      {activeServer && commentatorOpen ? (
-        <CommentatorPanel
-          server={activeServer}
-          members={serverMembers}
-          currentUser={user}
-          activeChannelId={activeChannelId}
-          onClose={() => setCommentatorOpen(false)}
-        />
-      ) : null}
-      {activeServer && memeGeneratorOpen ? (
-        <MemeGeneratorPanel
-          server={activeServer}
-          members={serverMembers}
-          currentUser={user}
-          onClose={() => setMemeGeneratorOpen(false)}
-        />
-      ) : null}
-      {activeServer && highlightGeneratorOpen ? (
-        <HighlightGeneratorPanel
-          server={activeServer}
-          members={serverMembers}
-          currentUser={user}
-          onClose={() => setHighlightGeneratorOpen(false)}
-        />
-      ) : null}
-
       {gateway.incomingCall && gateway.selfStatus.status !== "dnd" ? (
         <IncomingCallModal
           call={gateway.incomingCall}

@@ -1,6 +1,6 @@
 export type VoiceMode = "toggle" | "ptt";
 export type ThemeMode = "dark" | "light" | "system";
-export type VideoQuality = "480p" | "720p" | "1080p";
+export type VideoQuality = "480p" | "720p" | "1080p" | "1440p" | "2160p";
 export type VideoFrameRate = 30 | 60;
 export type ScreenShareMode = "motion" | "detail";
 export type DesktopCloseBehavior = "tray" | "quit";
@@ -10,28 +10,77 @@ export interface VideoQualityPreset {
   height: number;
   cameraBitrate: number;
   screenBitrate: number;
+  /** Ayarlar ekranında gösterilen kısa açıklama. */
+  label: string;
+  /** Yüksek yükleme bant genişliği gerektiren, mesh topolojide dikkatli kullanılacak seviye. */
+  demanding?: boolean;
 }
 
+export const VIDEO_QUALITY_ORDER: VideoQuality[] = [
+  "480p",
+  "720p",
+  "1080p",
+  "1440p",
+  "2160p",
+];
+
+/**
+ * Bitrate değerleri **tavan**dır, taban değil: WebRTC ağ koşullarına göre aşağı iner.
+ * Medya sunucudan geçmez (mesh P2P), bu yüzden sınırlayıcı olan tek şey kullanıcının
+ * yükleme hızıdır. Katılımcı başına ayrı encode olduğu için kalabalık odalarda
+ * yüksek seviyeler bilinçli seçilmelidir.
+ */
 export const VIDEO_QUALITY_PRESETS: Record<VideoQuality, VideoQualityPreset> = {
   "480p": {
     width: 854,
     height: 480,
-    cameraBitrate: 1_800_000,
-    screenBitrate: 2_500_000,
+    cameraBitrate: 2_000_000,
+    screenBitrate: 3_000_000,
+    label: "480p · en düşük veri kullanımı",
   },
   "720p": {
     width: 1280,
     height: 720,
-    cameraBitrate: 3_500_000,
-    screenBitrate: 5_000_000,
+    cameraBitrate: 4_000_000,
+    screenBitrate: 6_000_000,
+    label: "720p · dengeli",
   },
   "1080p": {
     width: 1920,
     height: 1080,
-    cameraBitrate: 6_000_000,
-    screenBitrate: 8_000_000,
+    cameraBitrate: 7_000_000,
+    screenBitrate: 10_000_000,
+    label: "1080p · önerilen",
+  },
+  "1440p": {
+    width: 2560,
+    height: 1440,
+    cameraBitrate: 12_000_000,
+    screenBitrate: 18_000_000,
+    label: "1440p · keskin metin, yüksek yükleme",
+    demanding: true,
+  },
+  "2160p": {
+    width: 3840,
+    height: 2160,
+    cameraBitrate: 20_000_000,
+    screenBitrate: 32_000_000,
+    label: "4K · çok yüksek yükleme, az kişilik odalar",
+    demanding: true,
   },
 };
+
+/**
+ * Giden ses için Opus bitrate tavanı (bit/sn).
+ *
+ * Mikrofon + soundboard + yayın sesi tek track'te karışır. Yalnız konuşma varken düşük
+ * bitrate yeterlidir; ekran/sekme sesi (müzik, oyun) devredeyken bitrate yükseltilmezse
+ * yayın sesi belirgin biçimde boğuk duyulur.
+ */
+export const AUDIO_BITRATE = {
+  voice: 64_000,
+  withStream: 160_000,
+} as const;
 
 export interface KeyCombo {
   ctrl: boolean;
@@ -53,6 +102,8 @@ export interface VoiceSettings {
   videoQuality: VideoQuality;
   videoFrameRate: VideoFrameRate;
   screenShareMode: ScreenShareMode;
+  /** Ekran/sekme sesi paylaşılırken giden ses bitrate'ini yükseltir. */
+  highFidelityStreamAudio: boolean;
   // Ses işleme (getUserMedia MediaTrackConstraints'e uygulanır).
   noiseSuppression: boolean;
   echoCancellation: boolean;
@@ -104,6 +155,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   videoQuality: "1080p",
   videoFrameRate: 60,
   screenShareMode: "motion",
+  highFidelityStreamAudio: true,
   noiseSuppression: true,
   echoCancellation: true,
   autoGainControl: true,
@@ -160,8 +212,10 @@ export function loadVoiceSettings(): VoiceSettings {
       cameraDeviceId: stringOrNull(parsed.cameraDeviceId),
       inputVolume: numberInRange(parsed.inputVolume, 100),
       outputVolume: numberInRange(parsed.outputVolume, 100),
-      videoQuality:
-        parsed.videoQuality === "480p" || parsed.videoQuality === "720p" ? parsed.videoQuality : "1080p",
+      videoQuality: VIDEO_QUALITY_ORDER.includes(parsed.videoQuality as VideoQuality)
+        ? (parsed.videoQuality as VideoQuality)
+        : "1080p",
+      highFidelityStreamAudio: boolWithDefault(parsed.highFidelityStreamAudio, true),
       videoFrameRate: parsed.videoFrameRate === 30 ? 30 : 60,
       screenShareMode: parsed.screenShareMode === "detail" ? "detail" : "motion",
       noiseSuppression: boolWithDefault(parsed.noiseSuppression, true),

@@ -7,6 +7,7 @@ from app.config import settings
 from app.core.models import User
 from app.core.routers.voice import (
     VoiceConnectionManager,
+    _audio_mix_payload,
     _media_subscription_payload,
     _video_state_payload,
     voice_ice_servers,
@@ -109,6 +110,39 @@ class VoiceConnectionManagerTests(unittest.IsolatedAsyncioTestCase):
                 {"type": "media-subscription", "to": 8, "kind": "camera", "enabled": False},
                 3,
             )
+        )
+
+    def test_audio_mix_signal_is_clamped_and_strictly_validated(self):
+        # Dinleyici üç kaynağı ayrı ayrı bildirebilir; gönderen kimliği sunucu tarafından yazılır.
+        self.assertEqual(
+            _audio_mix_payload(
+                {"type": "audio-mix", "to": 8, "voice": 100, "soundboard": 40, "stream": 0},
+                3,
+            ),
+            (8, {"type": "audio-mix", "from": 3, "voice": 100, "soundboard": 40, "stream": 0}),
+        )
+        # Aralık dışı değerler reddedilmez, 0-200 aralığına sıkıştırılır.
+        self.assertEqual(
+            _audio_mix_payload({"type": "audio-mix", "to": 8, "stream": 5000}, 3),
+            (8, {"type": "audio-mix", "from": 3, "stream": 200}),
+        )
+        self.assertEqual(
+            _audio_mix_payload({"type": "audio-mix", "to": 8, "voice": -30}, 3),
+            (8, {"type": "audio-mix", "from": 3, "voice": 0}),
+        )
+        # Sayı olmayan değerler ve bool sessizce düşer; hiç geçerli alan kalmazsa mesaj aktarılmaz.
+        self.assertIsNone(
+            _audio_mix_payload({"type": "audio-mix", "to": 8, "voice": "kapat"}, 3)
+        )
+        self.assertIsNone(_audio_mix_payload({"type": "audio-mix", "to": 8, "voice": True}, 3))
+        self.assertIsNone(_audio_mix_payload({"type": "audio-mix", "to": 8}, 3))
+        # Bilinmeyen kaynak adları aktarılmaz.
+        self.assertIsNone(
+            _audio_mix_payload({"type": "audio-mix", "to": 8, "microphone": 50}, 3)
+        )
+        # Hedef kimliği tam sayı olmalıdır.
+        self.assertIsNone(
+            _audio_mix_payload({"type": "audio-mix", "to": "8", "voice": 50}, 3)
         )
 
 

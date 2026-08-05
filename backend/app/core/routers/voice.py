@@ -238,6 +238,31 @@ def _media_subscription_payload(data: dict, user_id: int) -> tuple[int, dict] | 
     }
 
 
+AUDIO_MIX_SOURCES = ("voice", "soundboard", "stream")
+
+
+def _audio_mix_payload(data: dict, user_id: int) -> tuple[int, dict] | None:
+    """Bir dinleyicinin kaynak bazlı ses tercihini yayıncıya güvenle aktar.
+
+    Mikrofon, soundboard ve yayın sesi tek WebRTC audio m-line'ında karışır; bu yüzden
+    kaynakları ayrı ayrı kısma kararını dinleyici veremez, yalnız yayıncıya bildirir.
+    Yayıncı bu tercihe göre o dinleyiciye özel bir miks üretir. SDP değişmez.
+    """
+    target = data.get("to")
+    if not isinstance(target, int):
+        return None
+    payload: dict = {"type": "audio-mix", "from": user_id}
+    for source in AUDIO_MIX_SOURCES:
+        value = data.get(source)
+        # bool, int'in alt sınıfı olduğu için açıkça dışlanır.
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        payload[source] = max(0, min(200, int(value)))
+    if len(payload) == 2:
+        return None
+    return target, payload
+
+
 router = APIRouter(tags=["voice"])
 
 
@@ -375,6 +400,11 @@ async def voice_socket(websocket: WebSocket, channel_id: int, token: str = Query
                     await voice_manager.send_to(channel_id, target, payload)
             elif msg_type == "media-subscription":
                 relay = _media_subscription_payload(data, user_id)
+                if relay:
+                    target, payload = relay
+                    await voice_manager.send_to(channel_id, target, payload)
+            elif msg_type == "audio-mix":
+                relay = _audio_mix_payload(data, user_id)
                 if relay:
                     target, payload = relay
                     await voice_manager.send_to(channel_id, target, payload)

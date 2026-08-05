@@ -165,6 +165,20 @@ export function apiUrl(path: string): string {
   return `/api${path}`;
 }
 
+/**
+ * Nexus Lab ayrı bir belgedir ve ayrı pencerede açılır.
+ *
+ * Masaüstü istemcisinde renderer `nexus://app` origin'inde çalışır ve `window.open`
+ * yalnız `https://` adresleri için (harici tarayıcıda) izinlidir; bu yüzden orada
+ * sunucunun genel adresi kullanılır. Web'de aynı origin'deki `/lab` yolu açılır.
+ */
+export function labUrl(query = ""): string {
+  const suffix = query ? `?${query}` : "";
+  const serverUrl = desktopBridge.serverUrl;
+  if (serverUrl) return new URL(`/lab${suffix}`, serverUrl).toString();
+  return `/lab${suffix}`;
+}
+
 export function webSocketUrl(path: string): string {
   const serverUrl = desktopBridge.serverUrl;
   if (serverUrl) {

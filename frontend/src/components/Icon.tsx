@@ -4,7 +4,8 @@ export type IconName =
   | "settings" | "user" | "logout" | "mic" | "micOff" | "headphones" | "headphonesOff"
   | "camera" | "screen" | "phone" | "users" | "edit" | "trash" | "paperclip"
   | "send" | "file" | "close" | "bot" | "hash" | "volume" | "chevron" | "inbox"
-  | "reply" | "search" | "pin" | "smile";
+  | "reply" | "search" | "pin" | "smile" | "gamepad" | "sliders" | "sparkles"
+  | "external";
 
 const paths: Record<IconName, React.ReactNode> = {
   settings: <><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.08.37.29.72.6 1 .3.27.68.4 1.1.4h.09v4h-.09c-.42 0-.8.13-1.1.4-.31.28-.52.63-.6 1Z"/></>,
@@ -33,6 +34,10 @@ const paths: Record<IconName, React.ReactNode> = {
   search: <><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></>,
   pin: <><path d="m12 17v5M7 3h10M8 3l1 8-3 3h12l-3-3 1-8"/></>,
   smile: <><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></>,
+  gamepad: <><path d="M8 6h8a6 6 0 0 1 5.7 7.9l-1.1 3.3a2.4 2.4 0 0 1-4 1l-1.8-2.2H9.2l-1.8 2.2a2.4 2.4 0 0 1-4-1l-1.1-3.3A6 6 0 0 1 8 6Z"/><path d="M7 10v4M5 12h4M16 11h.01M19 13h.01"/></>,
+  sliders: <><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h10M18 18h2"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="16" cy="18" r="2"/></>,
+  sparkles: <><path d="M12 3l1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9Z"/><path d="M19 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8ZM5 2l.6 1.5L7 4.1l-1.4.6L5 6.2l-.6-1.5L3 4.1l1.4-.6Z"/></>,
+  external: <><path d="M14 4h6v6"/><path d="m20 4-9 9"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></>,
 };
 
 export function Icon({ name, ...props }: { name: IconName } & SVGProps<SVGSVGElement>) {

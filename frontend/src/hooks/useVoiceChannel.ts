@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { coreApi, getToken } from "../api/client";
 import { webSocketUrl } from "../desktopBridge";
-import { VIDEO_QUALITY_PRESETS, buildAudioConstraints } from "../settings";
+import { AUDIO_BITRATE, VIDEO_QUALITY_PRESETS, buildAudioConstraints } from "../settings";
 import type { VoiceSettings } from "../settings";
 import { usePushToTalk } from "./usePushToTalk";
 
@@ -56,14 +56,46 @@ export interface RemoteVideoStream {
   stream: MediaStream;
 }
 
+/**
+ * Bir dinleyicinin, yayıncının hangi ses kaynağını hangi seviyede duymak istediği.
+ * Değerler yüzdedir (0 = kapalı, 100 = doğal, 200 = iki kat).
+ *
+ * Bu tercihi dinleyici kendi tarafında uygulayamaz: mikrofon, soundboard ve yayın sesi
+ * tek WebRTC audio m-line'ında karışmış olarak gelir. Bu yüzden tercih signaling ile
+ * yayıncıya iletilir ve yayıncı o dinleyiciye özel bir miks üretir (bkz. PeerAudioMix).
+ */
+export interface PeerAudioPrefs {
+  voice: number;
+  soundboard: number;
+  stream: number;
+}
+
+export const DEFAULT_PEER_AUDIO_PREFS: PeerAudioPrefs = {
+  voice: 100,
+  soundboard: 100,
+  stream: 100,
+};
+
+/** Yayıncı tarafında tek bir dinleyici için üretilen özel miks. */
+interface PeerAudioMix {
+  destination: MediaStreamAudioDestinationNode;
+  voiceGain: GainNode;
+  soundboardGain: GainNode;
+  streamGain: GainNode;
+}
+
 interface OutgoingAudioGraph {
   context: AudioContext;
   gain: GainNode;
   soundboardGain: GainNode;
+  /** Yayın sesinin yayıncı tarafındaki ana seviyesi (kendi "yayın sesi" kaydırıcısı). */
+  screenGain: GainNode;
   destination: MediaStreamAudioDestinationNode;
   screenDestination: MediaStreamAudioDestinationNode;
   localSoundboardDestination: MediaStreamAudioDestinationNode;
   localSoundboardElement: HTMLAudioElement;
+  /** Dinleyici bazlı mikslerin tamamı. Anahtar: dinleyicinin kullanıcı kimliği. */
+  peerMixes: Map<number, PeerAudioMix>;
 }
 
 export interface VoiceConnectionQuality {
@@ -86,6 +118,49 @@ const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },
 ];
 const REMOTE_VOLUME_STORAGE_KEY = "nexus.remoteVoiceVolumes";
+const PEER_AUDIO_PREFS_STORAGE_KEY = "nexus.peerAudioMix";
+
+function clampPercent(value: unknown, fallback: number, maximum = 200): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, Math.min(maximum, Math.round(value)))
+    : fallback;
+}
+
+function isDefaultPrefs(prefs: PeerAudioPrefs): boolean {
+  return prefs.voice === 100 && prefs.soundboard === 100 && prefs.stream === 100;
+}
+
+function loadPeerAudioPrefs(): Map<number, PeerAudioPrefs> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PEER_AUDIO_PREFS_STORAGE_KEY) ?? "{}");
+    const prefs = new Map<number, PeerAudioPrefs>();
+    for (const [key, value] of Object.entries(parsed)) {
+      const peerId = Number(key);
+      if (!Number.isInteger(peerId) || peerId <= 0 || !value || typeof value !== "object") continue;
+      const raw = value as Record<string, unknown>;
+      const entry: PeerAudioPrefs = {
+        voice: clampPercent(raw.voice, 100),
+        soundboard: clampPercent(raw.soundboard, 100),
+        stream: clampPercent(raw.stream, 100),
+      };
+      if (!isDefaultPrefs(entry)) prefs.set(peerId, entry);
+    }
+    return prefs;
+  } catch {
+    return new Map();
+  }
+}
+
+function savePeerAudioPrefs(prefs: Map<number, PeerAudioPrefs>): void {
+  try {
+    localStorage.setItem(
+      PEER_AUDIO_PREFS_STORAGE_KEY,
+      JSON.stringify(Object.fromEntries(prefs)),
+    );
+  } catch {
+    // Gizli mod/depolama kotası sesli görüşmeyi engellememeli.
+  }
+}
 
 function loadRemoteVolumes(): Map<number, number> {
   try {
@@ -237,6 +312,32 @@ async function optimizeVideoSender(
   }
 }
 
+/**
+ * Giden ses için Opus bitrate tavanını ayarlar.
+ *
+ * Tarayıcının varsayılanı konuşma odaklıdır (~32 kbit/sn) ve ekran/sekme sesi bu miksin
+ * içindeyken müzik/oyun sesi belirgin biçimde boğuklaşır. `setParameters` SDP'ye dokunmaz;
+ * transceiver sırası, m-line sayısı ve pazarlık akışı etkilenmez.
+ */
+async function optimizeAudioSender(
+  sender: RTCRtpSender,
+  hasStreamAudio: boolean,
+  vs: VoiceSettings,
+): Promise<void> {
+  try {
+    if (!sender.track) return;
+    const parameters = sender.getParameters();
+    if (!parameters.encodings?.length) parameters.encodings = [{}];
+    parameters.encodings[0].maxBitrate =
+      hasStreamAudio && vs.highFidelityStreamAudio
+        ? AUDIO_BITRATE.withStream
+        : AUDIO_BITRATE.voice;
+    await sender.setParameters(parameters);
+  } catch {
+    // Bazı tarayıcılar ses encoding parametrelerini yok sayar; varsayılan davranış sürer.
+  }
+}
+
 function videoDirection(
   hasLocalTrack: boolean,
   receivingRemoteVideo: boolean,
@@ -289,6 +390,13 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
   const [remoteVolumes, setRemoteVolumes] = useState<Map<number, number>>(loadRemoteVolumes);
   const [soundboardVolume, setSoundboardVolumeState] = useState(100);
   const [soundboardMuted, setSoundboardMuted] = useState(false);
+  // Yayıncının kendi yayın sesi seviyesi: mikrofonundan ve soundboard'ından bağımsızdır.
+  const [streamAudioVolume, setStreamAudioVolumeState] = useState(100);
+  const [streamAudioMuted, setStreamAudioMuted] = useState(false);
+  // Dinleyici olarak: her yayıncının hangi kaynağını hangi seviyede duymak istiyoruz.
+  const [peerAudioPrefs, setPeerAudioPrefs] = useState<Map<number, PeerAudioPrefs>>(
+    loadPeerAudioPrefs,
+  );
   const [connectionQuality, setConnectionQuality] = useState<VoiceConnectionQuality>({
     level: "unknown",
     pingMs: null,
@@ -303,6 +411,12 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
   const audioReplaceRef = useRef<((stream: MediaStream | null) => Promise<void>) | null>(null);
   const soundboardVolumeRef = useRef(soundboardVolume);
   const soundboardMutedRef = useRef(soundboardMuted);
+  const streamAudioVolumeRef = useRef(streamAudioVolume);
+  const streamAudioMutedRef = useRef(streamAudioMuted);
+  const peerAudioPrefsRef = useRef(peerAudioPrefs);
+  // Yayıncı tarafında: hangi dinleyici bizi hangi seviyede duymak istiyor. AudioContext
+  // yeniden kurulunca miksler kaybolur, bu harita kaybolmaz.
+  const inboundPeerPrefsRef = useRef<Map<number, PeerAudioPrefs>>(new Map());
   const cameraTrackRef = useRef<MediaStreamTrack | null>(null);
   const screenTrackRef = useRef<MediaStreamTrack | null>(null);
   const screenAudioStreamRef = useRef<MediaStream | null>(null);
@@ -338,6 +452,9 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
   remoteVolumesRef.current = remoteVolumes;
   soundboardVolumeRef.current = soundboardVolume;
   soundboardMutedRef.current = soundboardMuted;
+  streamAudioVolumeRef.current = streamAudioVolume;
+  streamAudioMutedRef.current = streamAudioMuted;
+  peerAudioPrefsRef.current = peerAudioPrefs;
 
   function attachRemoteAudio(peerId: number, stream: MediaStream) {
     let audioEl = audioElsRef.current.get(peerId);
@@ -409,6 +526,10 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         .getTracks()
         .forEach((track) => track.stop());
       previousGraph.screenDestination.stream.getTracks().forEach((track) => track.stop());
+      previousGraph.peerMixes.forEach((mix) =>
+        mix.destination.stream.getTracks().forEach((track) => track.stop()),
+      );
+      previousGraph.peerMixes.clear();
       void previousGraph.context.close();
     }
     microphoneGraphRef.current = null;
@@ -423,6 +544,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     const context = new AudioContext();
     const gain = context.createGain();
     const soundboardGain = context.createGain();
+    const screenGain = context.createGain();
     const destination = context.createMediaStreamDestination();
     const screenDestination = context.createMediaStreamDestination();
     const localSoundboardDestination = context.createMediaStreamDestination();
@@ -470,25 +592,81 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     // soundboard sesi ana WebRTC audio m-line'ında kalır.
     soundboardGain.connect(localSoundboardDestination);
 
+    screenGain.gain.value = streamAudioMutedRef.current
+      ? 0
+      : Math.max(0, Math.min(2, streamAudioVolumeRef.current / 100));
+    screenGain.connect(screenDestination);
     if (hasScreenAudio && screenStream) {
       const screenSource = context.createMediaStreamSource(screenStream);
-      const screenGain = context.createGain();
-      screenGain.gain.value = 1;
       screenSource.connect(screenGain);
-      screenGain.connect(screenDestination);
     }
     void resumeAudioContext(context).catch(() => {});
     microphoneGraphRef.current = {
       context,
       gain,
       soundboardGain,
+      screenGain,
       destination,
       screenDestination,
       localSoundboardDestination,
       localSoundboardElement,
+      peerMixes: new Map(),
     };
     return destination.stream;
   }, []);
+
+  /**
+   * Bir dinleyici için özel miks düğümlerini (yoksa) oluşturur.
+   *
+   * Üç ana kaynak düğümü (mikrofon `gain`, `soundboardGain`, `screenGain`) zaten kendi
+   * seviyelerini uygular. Burada her kaynak, o dinleyiciye ait ikinci bir gain üzerinden
+   * dinleyiciye özel bir `MediaStreamDestination`'a bağlanır. Sonuç: kaynak başına ayrı
+   * seviye, ama hâlâ **tek** giden audio track — yeni transceiver veya m-line oluşmaz.
+   */
+  const ensurePeerAudioMix = useCallback((peerId: number): PeerAudioMix | null => {
+    const graph = microphoneGraphRef.current;
+    if (!graph || graph.context.state === "closed") return null;
+    const existing = graph.peerMixes.get(peerId);
+    if (existing) return existing;
+
+    const { context } = graph;
+    const mix: PeerAudioMix = {
+      destination: context.createMediaStreamDestination(),
+      voiceGain: context.createGain(),
+      soundboardGain: context.createGain(),
+      streamGain: context.createGain(),
+    };
+    graph.gain.connect(mix.voiceGain);
+    graph.soundboardGain.connect(mix.soundboardGain);
+    graph.screenGain.connect(mix.streamGain);
+    mix.voiceGain.connect(mix.destination);
+    mix.soundboardGain.connect(mix.destination);
+    mix.streamGain.connect(mix.destination);
+    graph.peerMixes.set(peerId, mix);
+    return mix;
+  }, []);
+
+  /** Dinleyicinin bildirdiği tercihleri (ve ekran aboneliğini) o dinleyicinin miksine uygular. */
+  const applyPeerAudioMixGains = useCallback((peerId: number) => {
+    const mix = microphoneGraphRef.current?.peerMixes.get(peerId);
+    if (!mix) return;
+    const prefs = inboundPeerPrefsRef.current.get(peerId) ?? DEFAULT_PEER_AUDIO_PREFS;
+    const wantsScreen = peersRef.current.get(peerId)?.remoteWantsScreen ?? true;
+    mix.voiceGain.gain.value = Math.max(0, Math.min(2, prefs.voice / 100));
+    mix.soundboardGain.gain.value = Math.max(0, Math.min(2, prefs.soundboard / 100));
+    // Yayını izlemeyi kapatan kullanıcı yayın sesini de duymaz; bu eski davranışın karşılığıdır.
+    mix.streamGain.gain.value = wantsScreen ? Math.max(0, Math.min(2, prefs.stream / 100)) : 0;
+  }, []);
+
+  /**
+   * AudioContext yeniden kurulduğunda (mikrofon değişimi, yayın sesi aç/kapa) mevcut tüm
+   * dinleyicilerin mikslerini yeni context'te yeniden üretir ve tercihlerini geri uygular.
+   */
+  const rebuildPeerAudioMixes = useCallback(() => {
+    for (const peerId of peersRef.current.keys()) {
+      if (ensurePeerAudioMix(peerId)) applyPeerAudioMixGains(peerId);
+    }
+  }, [ensurePeerAudioMix, applyPeerAudioMixGains]);
 
   const ensureSoundboardGraph = useCallback(async () => {
     if (deafenedRef.current) {
@@ -653,6 +831,46 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     [applyMuted],
   );
 
+  /** Yayıncı tarafı: kendi yayın sesinin herkese giden ana seviyesi. */
+  const setStreamAudioVolume = useCallback((volume: number) => {
+    const normalized = clampPercent(volume, 100);
+    streamAudioVolumeRef.current = normalized;
+    setStreamAudioVolumeState(normalized);
+    const gain = microphoneGraphRef.current?.screenGain;
+    if (gain) {
+      gain.gain.value = streamAudioMutedRef.current ? 0 : normalized / 100;
+    }
+  }, []);
+
+  const toggleStreamAudioMute = useCallback(() => {
+    const next = !streamAudioMutedRef.current;
+    streamAudioMutedRef.current = next;
+    setStreamAudioMuted(next);
+    const gain = microphoneGraphRef.current?.screenGain;
+    if (gain) {
+      gain.gain.value = next ? 0 : streamAudioVolumeRef.current / 100;
+    }
+  }, []);
+
+  /**
+   * Dinleyici tarafı: bir yayıncının tek bir ses kaynağının seviyesini değiştirir.
+   * Tercih yayıncıya iletilir; miksi yayıncı üretir (bkz. PeerAudioPrefs).
+   */
+  const setPeerSourceVolume = useCallback(
+    (peerId: number, source: keyof PeerAudioPrefs, volume: number) => {
+      const current = peerAudioPrefsRef.current.get(peerId) ?? DEFAULT_PEER_AUDIO_PREFS;
+      const nextPrefs: PeerAudioPrefs = { ...current, [source]: clampPercent(volume, 100) };
+      const next = new Map(peerAudioPrefsRef.current);
+      if (isDefaultPrefs(nextPrefs)) next.delete(peerId);
+      else next.set(peerId, nextPrefs);
+      peerAudioPrefsRef.current = next;
+      setPeerAudioPrefs(next);
+      savePeerAudioPrefs(next);
+      sendWebSocketJson(wsRef.current, { type: "audio-mix", to: peerId, ...nextPrefs });
+    },
+    [],
+  );
+
   const setRemoteVolume = useCallback((peerId: number, volume: number) => {
     const normalized = Math.max(0, Math.min(100, Math.round(volume)));
     const next = new Map(remoteVolumesRef.current);
@@ -748,9 +966,14 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         .getTracks()
         .forEach((track) => track.stop());
       outgoingGraph.screenDestination.stream.getTracks().forEach((track) => track.stop());
+      outgoingGraph.peerMixes.forEach((mix) =>
+        mix.destination.stream.getTracks().forEach((track) => track.stop()),
+      );
+      outgoingGraph.peerMixes.clear();
       void outgoingGraph.context.close();
     }
     microphoneGraphRef.current = null;
+    inboundPeerPrefsRef.current.clear();
     cameraTrackRef.current?.stop();
     screenTrackRef.current?.stop();
     screenAudioStreamRef.current?.getTracks().forEach((track) => track.stop());
@@ -832,6 +1055,15 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         if (key.startsWith(`${peerId}:`)) remoteVideoStateRef.current.delete(key);
       }
       pendingIceRef.current.delete(peerId);
+      const mix = microphoneGraphRef.current?.peerMixes.get(peerId);
+      if (mix) {
+        mix.destination.stream.getTracks().forEach((track) => track.stop());
+        mix.voiceGain.disconnect();
+        mix.soundboardGain.disconnect();
+        mix.streamGain.disconnect();
+        microphoneGraphRef.current?.peerMixes.delete(peerId);
+      }
+      inboundPeerPrefsRef.current.delete(peerId);
       dropRemoteStream(peerId);
     }
 
@@ -849,6 +1081,17 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       audioElsRef.current.clear();
       remoteMediaRef.current.clear();
       remoteVideoStateRef.current.clear();
+      const graph = microphoneGraphRef.current;
+      if (graph) {
+        graph.peerMixes.forEach((mix) => {
+          mix.destination.stream.getTracks().forEach((track) => track.stop());
+          mix.voiceGain.disconnect();
+          mix.soundboardGain.disconnect();
+          mix.streamGain.disconnect();
+        });
+        graph.peerMixes.clear();
+      }
+      inboundPeerPrefsRef.current.clear();
       setParticipants([]);
       setRemoteStreams(new Map());
     }
@@ -896,7 +1139,9 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       let cameraTransceiver: RTCRtpTransceiver | null = null;
       let screenTransceiver: RTCRtpTransceiver | null = null;
       if (initiateNegotiation) {
-        const audioTrack = localStreamRef.current?.getAudioTracks()[0] ?? null;
+        // İlk track doğrudan bu eşin kendi miksinden gelir; böylece bağlantı kurulduktan
+        // sonra ayrıca bir replaceTrack turu gerekmez.
+        const audioTrack = outgoingAudioTrackForPeer(peerId);
         audioTransceiver = pc.addTransceiver(audioTrack ?? "audio", {
           direction: audioTrack ? "sendrecv" : "recvonly",
         });
@@ -1096,21 +1341,33 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       }
     }
 
+    /**
+     * Bu eşe gönderilecek ses track'i.
+     *
+     * Giden ses hattı kuruluysa her eş kendi miksini alır: mikrofon, soundboard ve yayın
+     * sesi o eşin bildirdiği seviyelerde karıştırılır. Hat hiç kurulmadıysa (mikrofon izni
+     * yok, soundboard ve yayın sesi de yok) eski davranış korunur ve `null` dönerek audio
+     * transceiver `recvonly` kalır.
+     */
     function outgoingAudioTrackForPeer(
-      peer: PeerState,
+      peerId: number,
       voiceStream = localStreamRef.current,
     ): MediaStreamTrack | null {
-      const hasScreenAudio = Boolean(
+      const fallback = voiceStream?.getAudioTracks()[0] ?? null;
+      const mix = ensurePeerAudioMix(peerId);
+      if (!mix) return fallback;
+      applyPeerAudioMixGains(peerId);
+      return mix.destination.stream.getAudioTracks()[0] ?? fallback;
+    }
+
+    /** Yayın sesi mikste varken Opus bitrate tavanını yükseltir. */
+    function tuneAudioSender(sender: RTCRtpSender): void {
+      const hasStreamAudio = Boolean(
         screenAudioStreamRef.current
           ?.getAudioTracks()
           .some((track) => track.readyState === "live"),
       );
-      if (peer.remoteWantsScreen && hasScreenAudio) {
-        return microphoneGraphRef.current?.screenDestination.stream.getAudioTracks()[0] ?? null;
-      }
-      // Mikrofon + soundboard her zaman ana, daha önce çalışan track'te kalır. Yayını
-      // izlemeyen kullanıcı temel konuşma için ikincil bir MediaStreamDestination'a bağımlı olmaz.
-      return voiceStream?.getAudioTracks()[0] ?? null;
+      void optimizeAudioSender(sender, hasStreamAudio, voiceSettingsRef.current);
     }
 
     async function syncOutgoingAudioSender(peerId: number, peer: PeerState): Promise<void> {
@@ -1118,11 +1375,12 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       const transceiver = peer.audioTransceiver;
       if (!transceiver) return;
       await resumeAudioContext(microphoneGraphRef.current?.context).catch(() => {});
-      const nextTrack = outgoingAudioTrackForPeer(peer);
+      const nextTrack = outgoingAudioTrackForPeer(peerId);
       if (nextTrack) nextTrack.enabled = true;
       if (transceiver.sender.track !== nextTrack) {
         await transceiver.sender.replaceTrack(nextTrack);
       }
+      tuneAudioSender(transceiver.sender);
       const nextDirection: RTCRtpTransceiverDirection = nextTrack ? "sendrecv" : "recvonly";
       if (transceiver.direction !== nextDirection) {
         transceiver.direction = nextDirection;
@@ -1153,10 +1411,11 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
         videoTransceivers[1] ??
         null;
 
-      const audioTrack = outgoingAudioTrackForPeer(peer);
+      const audioTrack = outgoingAudioTrackForPeer(peerId);
       if (peer.audioTransceiver) {
         await peer.audioTransceiver.sender.replaceTrack(audioTrack);
         peer.audioTransceiver.direction = audioTrack ? "sendrecv" : "recvonly";
+        tuneAudioSender(peer.audioTransceiver.sender);
       }
 
       const localVideo = [
@@ -1186,12 +1445,15 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     }
 
     async function replaceOutgoingAudioStream(nextStream: MediaStream | null) {
-      for (const [, peer] of peersRef.current) {
+      // AudioContext yeni kurulmuş olabilir; eş miksleri yeni context'te yeniden üretilir.
+      rebuildPeerAudioMixes();
+      for (const [peerId, peer] of peersRef.current) {
         const transceiver = peer.audioTransceiver;
         if (!transceiver) continue;
-        const nextTrack = outgoingAudioTrackForPeer(peer, nextStream);
+        const nextTrack = outgoingAudioTrackForPeer(peerId, nextStream);
         if (nextTrack) nextTrack.enabled = true;
         await transceiver.sender.replaceTrack(nextTrack);
+        tuneAudioSender(transceiver.sender);
         const nextDirection: RTCRtpTransceiverDirection = nextTrack ? "sendrecv" : "recvonly";
         if (transceiver.direction !== nextDirection) {
           transceiver.direction = nextDirection;
@@ -1207,16 +1469,29 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
       const peer = peersRef.current.get(peerId);
       if (!peer) return;
       peer.remoteWantsScreen = enabled;
-      const transceiver = peer.audioTransceiver;
-      if (!transceiver) return;
-      const nextTrack = outgoingAudioTrackForPeer(peer);
-      if (nextTrack) nextTrack.enabled = true;
-      await transceiver.sender.replaceTrack(nextTrack);
-      const nextDirection: RTCRtpTransceiverDirection = nextTrack ? "sendrecv" : "recvonly";
-      if (transceiver.direction !== nextDirection) {
-        transceiver.direction = nextDirection;
-        peer.requestNegotiation();
-      }
+      // Eş bazlı mikste yayın sesi ayrı bir gain düğümüdür. Abonelik değişimi artık track
+      // değiştirmez; dolayısıyla yeniden pazarlık ve m-line riski de yoktur.
+      applyPeerAudioMixGains(peerId);
+      await syncOutgoingAudioSender(peerId, peer);
+    }
+
+    /** Bir dinleyicinin bize bildirdiği kaynak seviyelerini kendi miksine uygular. */
+    function applyInboundAudioMix(peerId: number, data: SignalMessage) {
+      const current = inboundPeerPrefsRef.current.get(peerId) ?? DEFAULT_PEER_AUDIO_PREFS;
+      const next: PeerAudioPrefs = {
+        voice: clampPercent(data.voice, current.voice),
+        soundboard: clampPercent(data.soundboard, current.soundboard),
+        stream: clampPercent(data.stream, current.stream),
+      };
+      inboundPeerPrefsRef.current.set(peerId, next);
+      applyPeerAudioMixGains(peerId);
+    }
+
+    /** Bu eşe kendi kaynak tercihlerimizi bildirir (katılım ve reconnect sonrası). */
+    function announceAudioMix(ws: WebSocket, peerId: number) {
+      const prefs = peerAudioPrefsRef.current.get(peerId);
+      if (!prefs) return;
+      sendWebSocketJson(ws, { type: "audio-mix", to: peerId, ...prefs });
     }
     audioReplaceRef.current = replaceOutgoingAudioStream;
 
@@ -1346,6 +1621,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
                 kind: "screen",
                 enabled: !ignoredRemoteScreenIdsRef.current.has(peer.user_id),
               });
+              announceAudioMix(ws, peer.user_id);
             }
             break;
           }
@@ -1387,6 +1663,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
               kind: "screen",
               enabled: !ignoredRemoteScreenIdsRef.current.has(joinedUserId),
             });
+            announceAudioMix(ws, joinedUserId);
             // Oda değişimi mevcut Chromium medya oynatımını hareketlendirebiliyor. Bunu tesadüfi
             // tarayıcı davranışına bırakma; mevcut tüm uzak audio elemanlarını açıkça doğrula.
             resumeAllRemoteAudioPlayback();
@@ -1492,6 +1769,10 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
             if (data.kind === "screen" && typeof data.enabled === "boolean") {
               await applyPeerScreenSubscription(data.from as number, data.enabled);
             }
+            break;
+          }
+          case "audio-mix": {
+            applyInboundAudioMix(data.from as number, data);
             break;
           }
           case "mute-changed":
@@ -1669,6 +1950,10 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
 
     async function applyQuality() {
       const currentSettings = voiceSettingsRef.current;
+      // Ses bitrate tavanı yayın sesi tercihiyle birlikte değişir.
+      for (const [, peer] of peersRef.current) {
+        if (peer.audioTransceiver) tuneAudioSender(peer.audioTransceiver.sender);
+      }
       for (const kind of ["camera", "screen"] as const) {
         const track = kind === "camera" ? cameraTrackRef.current : screenTrackRef.current;
         if (!track) continue;
@@ -2007,7 +2292,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
 
   // Çözünürlük/FPS tercihi değişince devam eden kamera veya ekran paylaşımına anında uygula.
   useEffect(() => {
-    if (connected && (cameraTrackRef.current || screenTrackRef.current)) {
+    if (connected) {
       void videoControlRef.current?.applyQuality();
     }
   }, [
@@ -2015,6 +2300,7 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     voiceSettings.screenShareMode,
     voiceSettings.videoFrameRate,
     voiceSettings.videoQuality,
+    voiceSettings.highFidelityStreamAudio,
   ]);
 
   const toggleMute = useCallback(() => {
@@ -2070,6 +2356,9 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     remoteVolumes,
     soundboardVolume,
     soundboardMuted,
+    streamAudioVolume,
+    streamAudioMuted,
+    peerAudioPrefs,
     connectionQuality,
     error,
     toggleMute,
@@ -2078,10 +2367,13 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
     toggleScreenShare,
     toggleRemoteVideo,
     setRemoteVolume,
+    setPeerSourceVolume,
     playSoundboardPreset,
     playSoundboardClip,
     setSoundboardVolume,
     toggleSoundboardMute,
+    setStreamAudioVolume,
+    toggleStreamAudioMute,
     disconnect: cleanup,
   };
 }

@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 
 import type { VoiceRosterMember } from "../hooks/useGateway";
+import { DEFAULT_PEER_AUDIO_PREFS } from "../hooks/useVoiceChannel";
 import type { VoiceChannelState } from "../hooks/useVoiceChannel";
 import type { VoiceSettings } from "../settings";
 import type { Channel, ChannelType, Server, User } from "../types";
@@ -34,6 +35,141 @@ function memberInitial(name: string): string {
   return name.trim().charAt(0).toUpperCase() || "?";
 }
 
+/**
+ * Bir yayıncının tek bir ses kaynağı için kaydırıcı.
+ *
+ * Mikrofon, soundboard ve yayın sesi tek WebRTC audio track'inde karışmış geldiği için
+ * bu tercih yerelde uygulanamaz; signaling ile yayıncıya iletilir ve yayıncı bu dinleyiciye
+ * özel bir miks üretir. Bu yüzden etki birkaç yüz milisaniye gecikmeyle görülür.
+ */
+function SourceSlider({
+  label,
+  hint,
+  value,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="voice-source" title={hint}>
+      <span className="voice-source__label">{label}</span>
+      <input
+        type="range"
+        min={0}
+        max={200}
+        step={10}
+        value={value}
+        aria-label={`${label} seviyesi`}
+        onChange={(event) => onChange(Number(event.target.value))}
+      />
+      <span className="voice-source__value">%{value}</span>
+    </label>
+  );
+}
+
+function VoiceRosterMemberRow({
+  member,
+  adjustable,
+  voice,
+}: {
+  member: VoiceRosterMember;
+  adjustable: boolean;
+  voice: VoiceChannelState;
+}) {
+  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const volume = voice.remoteVolumes.get(member.user_id) ?? 100;
+  const prefs = voice.peerAudioPrefs.get(member.user_id) ?? DEFAULT_PEER_AUDIO_PREFS;
+  const customized =
+    prefs.voice !== 100 || prefs.soundboard !== 100 || prefs.stream !== 100;
+
+  return (
+    <li
+      className={adjustable
+        ? "voice-roster__member voice-roster__member--adjustable"
+        : "voice-roster__member"}
+    >
+      <span className="voice-roster__identity">
+        {member.avatar_url ? (
+          <img
+            className={member.speaking ? "voice-avatar voice-avatar--speaking" : "voice-avatar"}
+            src={member.avatar_url}
+            alt=""
+          />
+        ) : (
+          <span className={member.speaking ? "voice-avatar voice-avatar--speaking" : "voice-avatar"}>
+            {memberInitial(member.username)}
+          </span>
+        )}
+        <span className="voice-roster__name">{member.username}</span>
+        <span className="voice-roster__icons">
+          {member.muted ? <span title="Susturulmuş"><Icon name="micOff" /></span> : null}
+          {member.deafened ? <span title="Sağır"><Icon name="headphonesOff" /></span> : null}
+        </span>
+      </span>
+      {adjustable ? (
+        <>
+          <div className="voice-roster__controls">
+            <label className="voice-roster__volume" title="Bu kişinin toplam sesi. Yalnız sende geçerlidir.">
+              <Icon name="volume" />
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={volume}
+                aria-label={`${member.username} ses seviyesi`}
+                onChange={(event) =>
+                  voice.setRemoteVolume(member.user_id, Number(event.target.value))
+                }
+              />
+              <span>%{volume}</span>
+            </label>
+            <button
+              type="button"
+              className={sourcesOpen || customized
+                ? "voice-roster__sources-toggle voice-roster__sources-toggle--active"
+                : "voice-roster__sources-toggle"}
+              aria-expanded={sourcesOpen}
+              onClick={() => setSourcesOpen((open) => !open)}
+              title="Konuşma, soundboard ve yayın sesini ayrı ayrı ayarla"
+            >
+              <Icon name="sliders" />
+            </button>
+          </div>
+          {sourcesOpen ? (
+            <div className="voice-roster__sources">
+              <SourceSlider
+                label="Konuşma"
+                hint="Yalnız mikrofon sesi"
+                value={prefs.voice}
+                onChange={(value) => voice.setPeerSourceVolume(member.user_id, "voice", value)}
+              />
+              <SourceSlider
+                label="Soundboard"
+                hint="Yalnız bu kişinin soundboard efektleri"
+                value={prefs.soundboard}
+                onChange={(value) => voice.setPeerSourceVolume(member.user_id, "soundboard", value)}
+              />
+              <SourceSlider
+                label="Yayın sesi"
+                hint="Yalnız paylaştığı ekranın/sekmenin sesi"
+                value={prefs.stream}
+                onChange={(value) => voice.setPeerSourceVolume(member.user_id, "stream", value)}
+              />
+              <p className="voice-roster__sources-note">
+                Bu üç ayar yayıncıya iletilir ve yalnız senin duyduğun miksi değiştirir.
+              </p>
+            </div>
+          ) : null}
+        </>
+      ) : null}
+    </li>
+  );
+}
+
 function VoiceRoster({
   members,
   active,
@@ -48,52 +184,14 @@ function VoiceRoster({
   if (members.length === 0) return null;
   return (
     <ul className="voice-roster">
-      {members.map((m) => {
-        const adjustable = active && voice.connected && m.user_id !== currentUserId;
-        const volume = voice.remoteVolumes.get(m.user_id) ?? 100;
-        return (
-          <li
-            key={m.user_id}
-            className={adjustable
-              ? "voice-roster__member voice-roster__member--adjustable"
-              : "voice-roster__member"}
-          >
-            <span className="voice-roster__identity">
-              {m.avatar_url ? (
-                <img
-                  className={m.speaking ? "voice-avatar voice-avatar--speaking" : "voice-avatar"}
-                  src={m.avatar_url}
-                  alt=""
-                />
-              ) : (
-                <span className={m.speaking ? "voice-avatar voice-avatar--speaking" : "voice-avatar"}>
-                  {memberInitial(m.username)}
-                </span>
-              )}
-              <span className="voice-roster__name">{m.username}</span>
-              <span className="voice-roster__icons">
-                {m.muted ? <span title="Susturulmuş"><Icon name="micOff" /></span> : null}
-                {m.deafened ? <span title="Sağır"><Icon name="headphonesOff" /></span> : null}
-              </span>
-            </span>
-            {adjustable ? (
-              <label className="voice-roster__volume" title="Bu ayar yalnızca sende geçerlidir">
-                <Icon name="volume" />
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  step={5}
-                  value={volume}
-                  aria-label={`${m.username} ses seviyesi`}
-                  onChange={(event) => voice.setRemoteVolume(m.user_id, Number(event.target.value))}
-                />
-                <span>%{volume}</span>
-              </label>
-            ) : null}
-          </li>
-        );
-      })}
+      {members.map((m) => (
+        <VoiceRosterMemberRow
+          key={m.user_id}
+          member={m}
+          adjustable={active && voice.connected && m.user_id !== currentUserId}
+          voice={voice}
+        />
+      ))}
     </ul>
   );
 }

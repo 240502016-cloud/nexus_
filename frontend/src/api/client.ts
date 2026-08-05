@@ -5,6 +5,7 @@ import type {
   AiConversation,
   AiJob,
   Bot,
+  BoardGameView,
   Attachment,
   Channel,
   ChannelType,
@@ -13,10 +14,13 @@ import type {
   CommentarySession,
   CommentatorProfile,
   DirectConversation,
+  EscapeRoomView,
   Friend,
   FriendRequest,
   FriendRequestList,
   LoginResponse,
+  LoreCandidate,
+  LoreEntry,
   Member,
   Message,
   MessagePage,
@@ -27,7 +31,12 @@ import type {
   GeneratedMeme,
   HighlightCandidate,
   HighlightRecording,
+  HiddenRoleGameView,
   RenderedHighlight,
+  RoastProfile,
+  RoastRound,
+  RoastSession,
+  RoastTopic,
   PinnedMessages,
   PluginManifest,
   PublicUser,
@@ -35,6 +44,8 @@ import type {
   ServerInvite,
   ServerInviteList,
   ServerJoinCode,
+  SharedStoryView,
+  StorySafetyProfile,
   User,
 } from "../types";
 import { apiUrl, desktopBridge } from "../desktopBridge";
@@ -75,6 +86,28 @@ export class ApiError extends Error {
     super(message);
     this.status = status;
   }
+}
+
+function readableErrorDetail(value: unknown, fallback: string): string {
+  if (typeof value === "string" && value.trim()) return value;
+  if (Array.isArray(value)) {
+    const messages = value
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const issue = item as { loc?: unknown; msg?: unknown };
+        if (typeof issue.msg !== "string") return null;
+        const field = Array.isArray(issue.loc) ? issue.loc.filter((part) => part !== "body").join(".") : "";
+        return field ? `${field}: ${issue.msg}` : issue.msg;
+      })
+      .filter((message): message is string => Boolean(message));
+    if (messages.length) return messages.join(" · ");
+  }
+  if (value && typeof value === "object") {
+    const objectValue = value as { message?: unknown; detail?: unknown };
+    if (typeof objectValue.message === "string") return objectValue.message;
+    if (typeof objectValue.detail === "string") return objectValue.detail;
+  }
+  return fallback;
 }
 
 interface RequestOptions extends RequestInit {
@@ -142,7 +175,7 @@ async function request<T>(path: string, init?: RequestOptions): Promise<T> {
       let detail = response.statusText;
       try {
         const body = await response.json();
-        detail = body.detail ?? detail;
+        detail = readableErrorDetail(body.detail, detail);
       } catch {
         // yanıt gövdesi JSON değilse statusText'e düş
       }
@@ -165,7 +198,7 @@ async function requestBlob(path: string): Promise<Blob> {
     let detail = response.statusText || "Dosya alınamadı";
     try {
       const body = await response.json();
-      detail = body.detail ?? detail;
+      detail = readableErrorDetail(body.detail, detail);
     } catch {
       // Binary olmayan hata gövdesi JSON değilse statusText yeterlidir.
     }
@@ -227,6 +260,33 @@ export const coreApi = {
 
   listFriends: () => request<Friend[]>("/friends"),
   listFriendRequests: () => request<FriendRequestList>("/friends/requests"),
+  listLoreCandidates: (serverId: number) =>
+    request<LoreCandidate[]>(`/servers/${serverId}/party-lore/candidates`),
+  listLoreEntries: (serverId: number) =>
+    request<LoreEntry[]>(`/servers/${serverId}/party-lore/entries`),
+  createLoreCandidate: (
+    serverId: number,
+    payload: {
+      title: string;
+      summary: string;
+      participant_ids: number[];
+      category: string;
+      sensitivity: "low" | "medium" | "high";
+      allowed_modules: string[];
+    },
+    idempotencyKey: string,
+  ) => request<LoreCandidate>(`/servers/${serverId}/party-lore/candidates`, {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(payload),
+  }),
+  reviewLoreCandidate: (candidateId: string, decision: "approved" | "rejected") =>
+    request<LoreCandidate>(`/party-lore/candidates/${candidateId}/review`, {
+      method: "POST",
+      body: JSON.stringify({ decision }),
+    }),
+  deleteLoreEntry: (loreId: string) =>
+    request<void>(`/party-lore/entries/${loreId}`, { method: "DELETE" }),
   sendFriendRequest: (username: string) =>
     request<FriendRequest>("/friends/requests", {
       method: "POST",
@@ -566,7 +626,7 @@ export const coreApi = {
       let detail = response.statusText || "Video yüklenemedi";
       try {
         const body = await response.json();
-        detail = body.detail ?? detail;
+        detail = readableErrorDetail(body.detail, detail);
       } catch {
         // JSON olmayan hata gövdesinde statusText kullanılır.
       }
@@ -604,6 +664,147 @@ export const coreApi = {
   getRenderedHighlight: (highlightId: string) =>
     request<RenderedHighlight>(`/highlight/renders/${highlightId}`),
   getHighlightAsset: (assetUrl: string) => requestBlob(assetUrl),
+  getRoastProfile: (serverId: number) =>
+    request<RoastProfile>(`/servers/${serverId}/roast-battle/profile/me`),
+  updateRoastProfile: (
+    serverId: number,
+    payload: {
+      roast_enabled: boolean;
+      maximum_intensity: number;
+      allowed_topics: RoastTopic[];
+      allow_party_lore: boolean;
+      allow_highlights: boolean;
+      allow_recent_failures: boolean;
+      blocked_terms: string[];
+    },
+  ) =>
+    request<RoastProfile>(`/servers/${serverId}/roast-battle/profile/me`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  getActiveRoastSession: (serverId: number) =>
+    request<RoastSession | null>(`/servers/${serverId}/roast-battle/sessions/active`),
+  createRoastSession: (
+    serverId: number,
+    payload: { player_ids: number[]; requested_intensity: number },
+    idempotencyKey: string,
+  ) =>
+    request<RoastSession>(`/servers/${serverId}/roast-battle/sessions`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify(payload),
+    }),
+  getRoastSession: (sessionId: string) =>
+    request<RoastSession>(`/roast-battle/sessions/${sessionId}`),
+  submitRoastConsent: (
+    sessionId: string,
+    decision: "READY" | "DECLINE" | "REVOKE",
+    consentVersion: number,
+  ) =>
+    request<RoastSession>(`/roast-battle/sessions/${sessionId}/consent`, {
+      method: "POST",
+      body: JSON.stringify({ decision, consent_version: consentVersion }),
+    }),
+  getCurrentRoastRound: (sessionId: string) =>
+    request<RoastRound | null>(`/roast-battle/sessions/${sessionId}/rounds/current`),
+  startNextRoastRound: (sessionId: string) =>
+    request<RoastRound>(`/roast-battle/sessions/${sessionId}/rounds/next`, {
+      method: "POST",
+    }),
+  getRoastRound: (roundId: string) =>
+    request<RoastRound>(`/roast-battle/rounds/${roundId}`),
+  voteRoast: (candidateId: string, vote: "FUNNY" | "OKAY" | "PASS") =>
+    request<{ candidate_id: string; vote: string; score_contribution: number }>(
+      `/roast-battle/candidates/${candidateId}/vote`,
+      { method: "PUT", body: JSON.stringify({ vote }) },
+    ),
+  getActiveBoardGame: (serverId: number) =>
+    request<BoardGameView | null>(`/servers/${serverId}/board-game/sessions/active`),
+  createBoardGame: (
+    serverId: number,
+    payload: { player_ids: number[]; theme: "ARCANE_RUINS" | "SPACE_WRECK" | "CURSED_CARNIVAL" },
+    idempotencyKey: string,
+  ) =>
+    request<BoardGameView>(`/servers/${serverId}/board-game/sessions`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify(payload),
+    }),
+  getBoardGame: (sessionId: string) =>
+    request<BoardGameView>(`/board-game/sessions/${sessionId}`),
+  submitBoardGameAction: (
+    sessionId: string,
+    payload: { action_id: string; action_token: string; expected_revision: number },
+    idempotencyKey: string,
+  ) =>
+    request<BoardGameView>(`/board-game/sessions/${sessionId}/actions`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify(payload),
+    }),
+  getActiveHiddenRoleGame: (serverId: number) =>
+    request<HiddenRoleGameView | null>(`/servers/${serverId}/hidden-role/sessions/active`),
+  createHiddenRoleGame: (serverId: number, playerIds: number[], idempotencyKey: string) =>
+    request<HiddenRoleGameView>(`/servers/${serverId}/hidden-role/sessions`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify({ player_ids: playerIds }),
+    }),
+  getHiddenRoleGame: (sessionId: string) =>
+    request<HiddenRoleGameView>(`/hidden-role/sessions/${sessionId}`),
+  submitHiddenRoleClaim: (
+    sessionId: string,
+    payload: { subject_option_id: "A" | "B" | "C"; proposition: string; flavor_text: string; action_token: string; expected_revision: number },
+  ) => request<HiddenRoleGameView>(`/hidden-role/sessions/${sessionId}/claims`, { method: "POST", body: JSON.stringify(payload) }),
+  submitHiddenRoleVote: (
+    sessionId: string,
+    payload: { option_id: "A" | "B" | "C"; action_token: string; expected_revision: number },
+  ) => request<HiddenRoleGameView>(`/hidden-role/sessions/${sessionId}/votes`, { method: "POST", body: JSON.stringify(payload) }),
+  submitHiddenRoleDeduction: (
+    sessionId: string,
+    payload: { office_by_user: Record<number, string>; mandate_by_user: Record<number, string>; action_token: string; expected_revision: number },
+  ) => request<HiddenRoleGameView>(`/hidden-role/sessions/${sessionId}/deductions`, { method: "POST", body: JSON.stringify(payload) }),
+  getStorySafetyProfile: (serverId: number) =>
+    request<StorySafetyProfile>(`/servers/${serverId}/shared-story/safety/me`),
+  updateStorySafetyProfile: (
+    serverId: number,
+    payload: Omit<StorySafetyProfile, "server_id" | "user_id" | "version" | "updated_at">,
+  ) => request<StorySafetyProfile>(`/servers/${serverId}/shared-story/safety/me`, { method: "PUT", body: JSON.stringify(payload) }),
+  getActiveSharedStory: (serverId: number) =>
+    request<SharedStoryView | null>(`/servers/${serverId}/shared-story/sessions/active`),
+  createSharedStory: (
+    serverId: number,
+    payload: { player_ids: number[]; theme: "MYSTERY" | "SURVIVAL" | "FANTASY"; length: "SHORT" | "STANDARD" | "LONG"; use_party_lore: boolean },
+    idempotencyKey: string,
+  ) => request<SharedStoryView>(`/servers/${serverId}/shared-story/sessions`, { method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(payload) }),
+  getSharedStory: (sessionId: string) => request<SharedStoryView>(`/shared-story/sessions/${sessionId}`),
+  submitStoryAction: (
+    sessionId: string,
+    payload: { action_id: "INVESTIGATE" | "PROTECT" | "PRESS_ON"; action_token: string; expected_revision: number },
+    idempotencyKey: string,
+  ) => request<SharedStoryView>(`/shared-story/sessions/${sessionId}/actions`, { method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(payload) }),
+  submitStoryVote: (
+    sessionId: string,
+    payload: { choice_id: "STABILIZE" | "REVEAL_PATH" | "PUSH_FORWARD"; action_token: string; expected_revision: number },
+  ) => request<SharedStoryView>(`/shared-story/sessions/${sessionId}/votes`, { method: "POST", body: JSON.stringify(payload) }),
+  getActiveEscapeRoom: (serverId: number) => request<EscapeRoomView | null>(`/servers/${serverId}/escape-room/sessions/active`),
+  createEscapeRoom: (
+    serverId: number,
+    payload: { player_ids: number[]; timer_mode: "RELAXED" | "STANDARD_45" | "CHALLENGE_30"; use_party_lore: boolean },
+    idempotencyKey: string,
+  ) => request<EscapeRoomView>(`/servers/${serverId}/escape-room/sessions`, { method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(payload) }),
+  getEscapeRoom: (sessionId: string) => request<EscapeRoomView>(`/escape-room/sessions/${sessionId}`),
+  submitEscapeAnswer: (
+    sessionId: string,
+    nodeId: string,
+    payload: { answer: string; action_token: string; expected_revision: number },
+    idempotencyKey: string,
+  ) => request<{ validator_result: "CORRECT" | "INCORRECT" | "DUPLICATE"; node_id: string; view: EscapeRoomView }>(`/escape-room/sessions/${sessionId}/nodes/${nodeId}/answers`, { method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(payload) }),
+  requestEscapeHint: (
+    sessionId: string,
+    nodeId: string,
+    payload: { tier: number; action_token: string; expected_revision: number },
+  ) => request<EscapeRoomView>(`/escape-room/sessions/${sessionId}/nodes/${nodeId}/hints`, { method: "POST", body: JSON.stringify(payload) }),
   uploadAttachment: (file: File) => {
     const form = new FormData();
     form.append("file", file);
