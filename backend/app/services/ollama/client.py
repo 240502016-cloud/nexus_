@@ -64,6 +64,7 @@ class OllamaClient:
         max_retries: int | None = None,
         retry_backoff: float | None = None,
         model_cache_seconds: float | None = None,
+        keep_alive: str | None = None,
         http_client: Any = requests,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
@@ -81,6 +82,7 @@ class OllamaClient:
         self.model_cache_seconds = (
             model_cache_seconds if model_cache_seconds is not None else settings.ollama_model_cache_seconds
         )
+        self.keep_alive = keep_alive if keep_alive is not None else settings.ollama_keep_alive
         self._http = http_client
         self._sleep = sleep
         self._clock = clock
@@ -264,6 +266,8 @@ class OllamaClient:
         payload: dict[str, Any] = {"model": model, "messages": messages, "stream": False}
         if options:
             payload["options"] = options
+        if self.keep_alive:
+            payload["keep_alive"] = self.keep_alive
         response = self._request(
             "POST",
             "/api/chat",
@@ -286,6 +290,8 @@ class OllamaClient:
         payload: dict[str, Any] = {"model": model, "messages": messages, "stream": True}
         if options:
             payload["options"] = options
+        if self.keep_alive:
+            payload["keep_alive"] = self.keep_alive
         try:
             response = self._http.request(
                 "POST",

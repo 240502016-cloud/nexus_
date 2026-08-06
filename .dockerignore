@@ -5,6 +5,9 @@
 !.env.example
 **/__pycache__
 **/*.pyc
+.venv
+.pytest_cache
+**/.pytest_cache
 backend/.venv
 frontend/node_modules
 frontend/dist
@@ -12,4 +15,3 @@ frontend/*.tsbuildinfo
 matrix/synapse
 ai-gateway/.venv
 ai-gateway/.env
-

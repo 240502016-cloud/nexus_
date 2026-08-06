@@ -137,6 +137,23 @@ def create_session(
     return _get_session(db, session.id)
 
 
+def ai_seats(session: ExperienceSession) -> list[int]:
+    """AI'ın oynadığı koltuk numaraları. Boş liste = tamamı insan oturumu.
+
+    AI koltukları ``experience_session_players`` tablosunda **satır tutmaz**: o tablonun
+    ``user_id`` sütunu ``users.id``'ye FK'dir ve modül tablolarının hepsi aynı şekilde
+    gerçek kullanıcıya bağlıdır. Sahte bir sistem kullanıcısı açmak yerine AI koltukları
+    yalnız burada, oturum ayarlarında tutulur; modüller kendi JSON/şifreli durumlarında
+    ``ai:<koltuk>`` anahtarıyla temsil eder.
+    """
+    return [int(seat) for seat in (session.settings or {}).get("ai_seats", [])]
+
+
+def participant_key(user_id: int | None, seat: int) -> str:
+    """Modül JSON durumlarında katılımcı anahtarı: insan için id, AI için ``ai:<koltuk>``."""
+    return str(user_id) if user_id is not None else f"ai:{seat}"
+
+
 def create_active_session(
     db: Session,
     *,
@@ -147,12 +164,35 @@ def create_active_session(
     idempotency_key: str,
     channel_id: int | None = None,
     settings: dict | None = None,
+    ai_seat_count: int = 0,
+    min_seats: int = 3,
+    max_seats: int = 3,
+    min_human_players: int = 2,
 ) -> ExperienceSession:
-    """Atomically create an already assembled three-player module session."""
+    """Atomically create an already assembled module session.
+
+    ``player_ids`` yalnız gerçek kullanıcılardır. ``ai_seat_count`` kadar koltuk AI'a
+    ayrılır ve toplam koltuk sayısı ``[min_seats, max_seats]`` aralığında olmalıdır.
+    Varsayılanlar (3/3, AI yok) eski davranışı korur — ``ai_roast_battle`` bunu kullanır.
+    """
     if module_type not in SUPPORTED_MODULES:
         raise HTTPException(status_code=422, detail="Desteklenmeyen deneyim modülü")
-    if len(player_ids) != 3 or len(set(player_ids)) != 3:
-        raise HTTPException(status_code=422, detail="Oturum tam olarak üç farklı oyuncu gerektirir")
+    if ai_seat_count < 0:
+        raise HTTPException(status_code=422, detail="AI koltuk sayısı negatif olamaz")
+    if len(player_ids) != len(set(player_ids)):
+        raise HTTPException(status_code=422, detail="Aynı oyuncu birden çok koltuğa oturamaz")
+    if len(player_ids) < min_human_players:
+        raise HTTPException(
+            status_code=422, detail=f"Oturum en az {min_human_players} gerçek oyuncu gerektirir"
+        )
+    total_seats = len(player_ids) + ai_seat_count
+    if not min_seats <= total_seats <= max_seats:
+        detail = (
+            f"Bu modül {min_seats} koltuk gerektirir"
+            if min_seats == max_seats
+            else f"Bu modül {min_seats}-{max_seats} koltukla oynanır"
+        )
+        raise HTTPException(status_code=422, detail=detail)
     if owner.id not in player_ids:
         raise HTTPException(status_code=422, detail="Oturum sahibi oyuncular arasında olmalı")
 
@@ -182,14 +222,16 @@ def create_active_session(
     if existing:
         return existing
 
+    seat_settings = dict(settings or {})
+    seat_settings["ai_seats"] = list(range(len(player_ids), total_seats))
     session = ExperienceSession(
         module_type=module_type,
         server_id=server_id,
         channel_id=channel_id,
         owner_id=owner.id,
         idempotency_key=idempotency_key,
-        settings=settings or {},
-        max_players=3,
+        settings=seat_settings,
+        max_players=total_seats,
     )
     db.add(session)
     try:
@@ -223,7 +265,7 @@ def create_active_session(
         db,
         session,
         "session.created",
-        {"module_type": module_type, "owner_id": owner.id, "max_players": 3},
+        {"module_type": module_type, "owner_id": owner.id, "max_players": total_seats},
         idempotency_key=f"create:{idempotency_key}",
     )
     session.status = "active"
@@ -233,7 +275,7 @@ def create_active_session(
         db,
         session,
         "session.started",
-        {"player_ids": ordered_ids},
+        {"player_ids": ordered_ids, "ai_seats": seat_settings["ai_seats"]},
         idempotency_key="session:start",
     )
     db.commit()

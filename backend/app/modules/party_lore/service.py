@@ -197,20 +197,16 @@ def list_candidates(
     status: str | None = None,
 ) -> list[LoreCandidate]:
     _server_for_member(db, server_id, actor)
-    query = (
-        db.query(LoreCandidate)
-        .outerjoin(LoreCandidateParticipant)
-        .filter(
-            LoreCandidate.server_id == server_id,
-            or_(
-                LoreCandidate.submitted_by_id == actor.id,
-                LoreCandidateParticipant.user_id == actor.id,
-            ),
-        )
+    query = db.query(LoreCandidate).filter(
+        LoreCandidate.server_id == server_id,
+        or_(
+            LoreCandidate.submitted_by_id == actor.id,
+            LoreCandidate.participants.any(LoreCandidateParticipant.user_id == actor.id),
+        ),
     )
     if status:
         query = query.filter(LoreCandidate.status == status)
-    return query.distinct().order_by(LoreCandidate.created_at.desc()).all()
+    return query.order_by(LoreCandidate.created_at.desc()).all()
 
 
 def review_candidate(

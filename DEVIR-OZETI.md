@@ -4,8 +4,8 @@
 > Önce bu dosyanın tamamını oku, sonra doğrudan kaynak kodu ve canlı sunucuyu doğrula.
 > Öncelik sırası: **canlı sistem → kaynak kod → bu dosya → `docs/` → eski yol haritaları**.
 
-Son güncelleme: **5 Ağustos 2026** (VDS taşıması + kaynak bazlı ses miksi, kalite presetleri,
-Nexus Lab ve görsel cila)
+Son güncelleme: **6 Ağustos 2026** (özellik başına AI modeli, timeout düzeltmesi ve dört oyun
+modülünün iki kişiye açılması)
 
 ---
 
@@ -202,15 +202,22 @@ backend/alembic/versions/0016_ai_board_game.py
 backend/alembic/versions/0017_hidden_role_game.py
 backend/alembic/versions/0018_shared_story.py
 backend/alembic/versions/0019_ai_escape_room.py
-frontend/src/components/{BoardGame,EscapeRoom,HiddenRoleGame,PartyLore,RoastBattle,SharedStory}Panel.tsx
 backend/app/platform/crypto.py
 backend/tests/test_{ai_board_game,ai_escape_room,hidden_role_game,shared_story}.py
 docker-compose.local.yml, Yerel-Test-*.cmd, scripts/*local-dev*, docs/LOCAL_HUMAN_TEST.md
 ```
 
 Değişmiş (modified) dosyalar arasında: `backend/app/main.py`, `backend/app/config.py`,
-`backend/app/platform/worker.py`, `backend/app/modules/ai_roast_battle/{router,service}.py`,
-`backend/app/modules/party_lore/service.py`, `frontend/src/{App.tsx,App.css,types.ts,api/client.ts}`.
+`backend/app/platform/{sessions,schemas,worker}.py`, `backend/app/services/ollama/client.py`,
+`backend/app/modules/ai_roast_battle/{router,service}.py`,
+`backend/app/modules/party_lore/service.py`,
+`frontend/src/{App.css,types.ts,api/client.ts}`,
+`frontend/src/components/{BoardGame,EscapeRoom,HiddenRoleGame,SharedStory}Panel.tsx`.
+
+> ⚠️ **Düzeltme (6 Ağustos 2026).** Bu bölüm daha önce dokuz panel bileşenini "untracked" diye
+> listeliyordu. Yanlıştı: paneller `e52b61c` içinde commit'lidir ve **frontend'leri zaten canlıda**,
+> yalnız `LabApp.tsx` içindeki `released` bayrağı kapalı olduğu için gizliler. Commit'lenmemiş olan
+> gerçekten yalnız backend tarafıdır.
 
 > **5 Ağustos 2026 çalışması dağıtıldı** (`0034708`): kaynak bazlı ses miksi, kalite presetleri,
 > Nexus Lab ve görsel cila. Şemaya dokunmadığı için migration çalıştırılmadı.
@@ -501,8 +508,43 @@ Başlatma:
 .\ai-gateway\start-gateway.ps1 -HostAddress 100.104.192.122 -Port 8090
 ```
 
-Yüklü Ollama modelleri: `qwen3-coder:30b`, `gpt-oss:20b`, `qwen2.5:7b`
-(`.env` varsayılanı `qwen2.5:7b`).
+Yüklü Ollama modelleri: `qwen3-coder:30b`, `gpt-oss:20b`, `qwen2.5:7b`.
+
+### Model dağılımı ve timeout'lar (6 Ağustos 2026)
+
+Geliştirici makinesinde ölçülen değerler (RTX 4050 6 GB VRAM + 47,6 GB RAM):
+
+```text
+qwen2.5:7b       27,8 token/sn    soğuk yükleme  8,1 sn
+qwen3-coder:30b  20,4 token/sn
+gpt-oss:20b      17,7 token/sn    soğuk yükleme 23,2 sn
+```
+
+`gpt-oss:20b` 6 GB VRAM'e sığmadığı için ağırlıklı CPU'da çalışır; MoE mimarisi sayesinde hız
+yine kabul edilebilir. `qwen3-coder:30b` hızlı olmasına rağmen kod için eğitilmiştir ve Türkçe
+anlatı/rol yapma metinlerinde kullanılmaz.
+
+| Ayar | Model | Timeout | Gerekçe |
+|---|---|---|---|
+| `commentator_live_model` | `qwen2.5:7b` | 5 sn (stale 6 sn) | Canlı yorum, gecikmeye duyarlı |
+| `highlight_metadata_model` | `qwen2.5:7b` | 10 sn | Başlık/etiket, mekanik iş |
+| `meme_text_model` | `gpt-oss:20b` | 25 sn | `num_predict` 360 |
+| `roast_generate_model` | `gpt-oss:20b` | 20 sn | `num_predict` 260 |
+| `roast_review_model` | `gpt-oss:20b` | 10 sn | `num_predict` 80 |
+| `board_game_narrator_model` | `gpt-oss:20b` | 12 sn | `num_predict` 100 |
+| `hidden_role_recap_model` | `gpt-oss:20b` | 20 sn | `num_predict` 240 |
+| `shared_story_model` | `gpt-oss:20b` | 45 sn | `num_predict` 650 — en uzun üretim |
+| `escape_room_host_model` | `gpt-oss:20b` | 15 sn | `num_predict` 130 |
+
+Timeout'lar o özelliğin `num_predict` bütçesinin **tamamı** üretilirse geçecek süreyi kapsar.
+Eski değerlerin ikisi zaten kırıktı: Ortak Hikâye 650 token isteyip 12 saniye bekliyordu
+(7b ile bile 23 sn sürer), Canlı Yorumcu 3 saniyede üretip 4 saniyelik stale eşiğine takılıyordu.
+
+**`ollama_keep_alive` ayarı eklendi (varsayılan `30m`).** Ollama modeli varsayılan olarak yalnız
+5 dakika bellekte tutar; soğuk yükleme yukarıdaki timeout'ların hepsini aşar. Ayar
+`backend/app/config.py` içindedir ve `services/ollama/client.py` her `/api/chat` isteğine
+`keep_alive` alanı ekler — ortam değişkenine bağlı değildir, AI Gateway gövdeyi değiştirmeden
+ilettiği için araya girmez. Boş bırakılırsa alan gönderilmez ve Ollama kendi varsayılanını kullanır.
 
 > **Bilinen eksik:** Gateway şu an Windows'ta kalıcı servis/scheduled task olarak
 > kayıtlı değildir; bilgisayar yeniden başlayınca elle açılması gerekir.
@@ -525,6 +567,72 @@ Her modülün tasarım notu ve promptları `docs/architecture/<modül-adı>/` al
 
 `ai_board_game`, `hidden_role_game`, `shared_story`, `ai_escape_room` — kod ve migration'ları
 yerelde mevcut, sunucuda yok. Geliştirme devam ediyor.
+
+### İki kişilik oyun desteği (6 Ağustos 2026)
+
+Dört modül eskiden **tam üç oyuncuya** kilitliydi. Artık hepsi iki kişiyle oynanabilir ve boş
+üçüncü koltuk isteğe bağlı olarak AI tarafından doldurulabilir.
+**`ai_roast_battle` bilinçli olarak üç kişiye kilitli bırakıldı** (kullanıcı kararı).
+
+Ortak giriş noktası `backend/app/platform/sessions.py` içindeki `create_active_session`'dır;
+artık `ai_seat_count`, `min_seats`, `max_seats` ve `min_human_players` alır. Varsayılanları
+(3/3, AI yok) eski davranışı korur, `ai_roast_battle` bunu kullanır. Şemalar
+`app/platform/schemas.py` içindeki ortak `SeatedGameCreate` tabanından gelir: geçerli birleşimler
+2 insan · 2 insan + 1 AI · 3 insan.
+
+#### AI koltuğu neden tabloda satır tutmuyor
+
+Dört modülün **tüm** tabloları `user_id`'yi `users.id`'ye foreign key ile bağlar ve bu projede
+botlar kullanıcı değildir (ayrı `bots` tablosu). AI'a sahte bir kullanıcı satırı açmak, `users`
+tablosuna sistem hesabı sokmayı ve onu kullanıcı arama, arkadaşlık ve üye listelerinden ayıklamayı
+gerektirirdi — sosyal grafiğe sızma riski.
+
+Bunun yerine AI koltukları yalnız `session.settings["ai_seats"]` içinde tutulur; modüller kendi
+JSON/şifreli durumlarında `ai:<koltuk>` anahtarıyla temsil eder. Per-user tablolara **yalnız gerçek
+kullanıcılar** yazılır. `users` tablosuna ve migration zincirine hiç dokunulmadı.
+
+#### AI kararları modele sorulmaz
+
+Sahne seçimi, ortak oy, iddia, oylama, çıkarım ve tahta hamleleri oturumun tohumundan
+**deterministik** türetilir. Gerekçe §9'daki kuraldır: AI Gateway kapalıyken yalnız AI özellikleri
+pasifleşmeli, oyun kilitlenmemelidir. Model yalnız anlatım metnini yazar, kararı vermez.
+Yan fayda: `rng_commitment` doğrulanabilirliği korunur.
+
+#### Modül bazında yapılanlar
+
+| Modül | Değişiklik |
+|---|---|
+| `shared_story` | Sahne sırası ve oy sayımı koltuk sayısına bağlandı. Final eşikleri ölçeklendi: `goal` artık `chapter_count * (koltuk + 1)`, `mystery` `chapter_count * koltuk * 2 // 3` — üç koltukta eski değerlerin **birebir aynısını** verir, iki koltukta iyi son ulaşılabilir kalır. AI karakteri `Yankı`. |
+| `hidden_role_game` | `== 3` sayımları insan sayısına bağlandı. Çoğunluk kuralı "en az iki oy" yerine "koltukların yarısından fazlası" oldu (üç koltukta aynı sonuç). Hakem koltuğu `% 3` yerine koltuk sayısına göre döner — eskisi iki kişilik oyunda var olmayan 2 numaralı koltuğu arayıp `StopIteration` ile çökerdi. AI koltuğunun gizli ataması zaten şifreli olan `engine_ciphertext` içinde. İçerik değişmedi: dört senaryonun her birinde herhangi iki ofis ipucu güvenli seçeneği verir. AI koltuğu `Vekil`. |
+| `ai_board_game` | Koltuk sırası, tur döngüsü ve momentum kuralı genelleştirildi. **Denge ayarı:** iki koltukta tur başına 3 AP (üçte 2 AP). AI oyuncu `Gezgin`, hamleleri hedefe genişlik öncelikli arama + öncelik sırasıyla belirlenir. |
+| `ai_escape_room` | Üç mod. `content.py` artık iki set tutar: `nadir3-v1` (üç konsol) ve **yeni** `nadir2-v1` (iki konsol). Koltuk sayısı hangi setin kullanılacağını belirler. 2 insan + AI modunda NADİR-3 içeriği aynen kalır; AI kendi özel ipuçlarını açık düğümler için paylaşır, M1 senkronunda kendi kodunu insanlar girdikten sonra gönderir, final yardım onayına katılır. **AI'ın tuttuğu role ait bulmacaları insanlar gönderebilir** — aksi hâlde o düğüm hiç gönderilemezdi. |
+
+#### Son Portal denge ayarının ölçümü
+
+Portalı açmak üç mühür ve üç şarj ister; bu hedef koltuk sayısıyla değişmez. İki koltukta tur
+başına bir oyuncu eksik olduğu için aksiyon bütçesi üçte bir azalır. 300 sabit tohumla ölçüldü:
+
+```text
+2 koltuk / 2 AP   kazanma %0,0    (300 oyunun tamamı kayıp)
+2 koltuk / 3 AP   kazanma %79,0
+2 koltuk / 4 AP   kazanma %85,3
+3 koltuk / 2 AP   kazanma %78,3   (mevcut üç kişilik zorluk)
+```
+
+2 AP bir zorluk meselesi değil, matematiksel imkânsızlıktı. 3 AP üç kişilik oyunun zorluğunu
+yeniden üretir. `tests/test_ai_board_game.py::BoardGameBalanceTests` bu ölçümü sabit tohumlarla
+korur. **Dikkat:** oyun tohumu oturum UUID'sinden türer, bu yüzden servis seviyesindeki
+senaryo testleri kazanma sonucuna değil, oyunun kilitlenmeden bittiğine bakar.
+
+#### API sözleşmesi değişiklikleri
+
+- Dört modülün oturum kurulumu artık `ai_players` alanı alır (0 veya 1).
+- Üç Mühür çıkarımı `office_by_user`/`mandate_by_user` yerine `office_by_key`/`mandate_by_key`
+  alır ve anahtarlar **string**'dir (`"12"` ya da `"ai:2"`). Sebep: AI koltuğunun kullanıcı
+  kimliği yoktur.
+- Görünümlere `active_seat`, `active_is_ai`, `seat_count`, `human_player_count`, `ai_consoles`
+  ve `rules_version` alanları eklendi; oyuncu/karakter kayıtlarında `user_id` artık `null`
+  olabilir ve `ai` bayrağı taşır.
 
 ---
 
@@ -1092,12 +1200,16 @@ Botun voice peer olarak roster'a girdiği doğrulanmalı.
 Bu paket hazırlanırken bilinen sonuçlar:
 
 ```text
-backend            97 passed   (test_meme_generator.py hariç — aşağıdaki nota bak)
+backend           113 passed   (test_meme_generator.py hariç — aşağıdaki nota bak)
 ai-gateway          9 passed   (test_gateway.py::test_settings PytestReturnNotNoneWarning verir;
                                 fonksiyon return yerine assert kullanacak şekilde temizlenebilir)
 frontend lint      tsc --noEmit başarılı
 frontend build     Vite production build başarılı (index + lab olmak üzere iki giriş noktası)
 ```
+
+6 Ağustos 2026'da eklenen 16 test iki kişilik ve AI koltuklu senaryoları kapsar; üç kişilik
+senaryoların hepsi korundu. Takım dört kez arka arkaya çalıştırılıp kararlılığı doğrulandı
+(oyun tohumu oturum UUID'sinden türediği için bu kontrol anlamlıdır).
 
 Testleri çalıştırma (geliştirici makinesi):
 
@@ -1333,5 +1445,15 @@ HTTPS_REVERSE_PROXY,DATABASE_SECURITY}.md` · `scripts/`
   çubuğundan çıkarıldı (§17).
 - **Eski kurulum kapatıldı.** Ev bilgisayarındaki tunnel tabanlı Nexus durduruldu; verisi
   gerekmediğine karar verildi. Kök domain artık boştur ve portal için ayrılmıştır (§2).
+- **Dört oyun modülü artık iki kişiyle oynanabilir**; boş üçüncü koltuğu isteğe bağlı olarak AI
+  doldurur ve AI kararları tohumdan deterministik türetilir (§9). `ai_roast_battle` üç kişide kaldı.
+- **AI modelleri özellik başına ayrıldı**: gecikmeye duyarlı işler `qwen2.5:7b`, yaratıcı metin
+  üretimi `gpt-oss:20b`. Timeout'lar ölçülen üretim hızına göre yeniden hesaplandı (§9).
 - **Sıradaki büyük iş:** kök domainde hub/portal + on-demand proje launcher'ı (§25).
 - **En önemli açık risk:** yeni sunucuda gerçek iki kullanıcılı ses/medya smoke testi henüz yapılmadı.
+
+> ⚠️ **Sunucu yedeği yok.** 6 Ağustos 2026'da Keyubu panelinde snapshot alınmak istendi ancak
+> mevcut hizmet paketi bu özelliği kapsamıyor. Kullanıcı yedeksiz devam etmeyi onayladı.
+> Dört modülün dağıtımı `0016`–`0019` migration'larını çalıştıracaktır; tek koruma dağıtım
+> öncesi alınacak `pg_dump`'tır. Sunucu son iki günde dört kez sert sıfırlandığı için
+> migration'ın ortasında çökme riski açıktır.

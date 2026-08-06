@@ -11,4 +11,5 @@ requests>=2.32
 pyjwt>=2.9
 python-multipart>=0.0.12
 Pillow>=11.0
+cryptography>=44.0
 aiortc>=1.15.0

@@ -24,6 +24,7 @@ vite.config.d.ts
 .preview-*.log
 .preview-*.pid
 .env.local
+.local-runtime/
 .env.backup-*
 ai-gateway/.env
 ai-gateway/.env.backup-*

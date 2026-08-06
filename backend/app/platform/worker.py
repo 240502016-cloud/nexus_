@@ -13,7 +13,10 @@ from app.modules.ai_commentator.worker import process_commentator_job
 from app.modules.meme_generator.worker import process_meme_job
 from app.modules.highlight_generator.metadata_worker import process_highlight_metadata_job
 from app.modules.ai_roast_battle.worker import process_roast_job
-from app.modules.ai_roast_battle.worker import process_roast_job
+from app.modules.ai_board_game.worker import process_board_narration_job
+from app.modules.hidden_role_game.worker import process_hidden_recap_job
+from app.modules.shared_story.worker import process_story_job
+from app.modules.ai_escape_room.worker import process_escape_host_job
 from app.platform.models import BackgroundJob, utcnow
 
 
@@ -26,7 +29,11 @@ HANDLERS: dict[tuple[str, str], JobHandler] = {
     ("meme_generator", "meme.caption"): process_meme_job,
     ("highlight_generator", "highlight.metadata"): process_highlight_metadata_job,
     ("ai_roast_battle", "roast.generate_review"): process_roast_job,
-    ("ai_roast_battle", "roast.generate_review"): process_roast_job,
+    ("ai_board_game", "board.narrate"): process_board_narration_job,
+    ("hidden_role_game", "hidden.end_recap"): process_hidden_recap_job,
+    ("shared_story", "story.scene_write"): process_story_job,
+    ("shared_story", "story.ending_write"): process_story_job,
+    ("ai_escape_room", "escape.host_message"): process_escape_host_job,
 }
 
 

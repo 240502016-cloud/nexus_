@@ -1,5 +1,9 @@
 # Nexus Communication Platform
 
+Dokuz AI oyun modulunu production'a aktarmadan yerel arayuzde denemek icin
+[`Yerel-Test-Baslat.cmd`](./Yerel-Test-Baslat.cmd) dosyasina cift tiklayin. Izole ortam ve
+Ollama notlari: [docs/LOCAL_HUMAN_TEST.md](./docs/LOCAL_HUMAN_TEST.md).
+
 Discord benzeri temel iletişim özelliklerine sahip, ancak Discord'un bir kopyası olmayı
 hedeflemeyen; kendi plugin ve bot ekosistemine sahip özel bir iletişim platformu.
 

@@ -86,9 +86,7 @@ const MODULES: LabModule[] = [
     icon: "file",
     category: "Anı",
     Component: PartyLorePanel,
-    // Backend modülü sunucuda var, ancak servisi ve bu panel yerelde birlikte değişti;
-    // ikisi birden dağıtılana kadar production'da kapalı.
-    released: false,
+    released: true,
   },
   {
     key: "commentator",
@@ -106,8 +104,7 @@ const MODULES: LabModule[] = [
     icon: "bot",
     category: "Sahne",
     Component: RoastBattlePanel,
-    // Party Lore ile aynı durum: router/service yerelde değişti, panel yeni.
-    released: false,
+    released: true,
   },
   {
     key: "board-game",
@@ -116,8 +113,7 @@ const MODULES: LabModule[] = [
     icon: "gamepad",
     category: "Oyun",
     Component: BoardGamePanel,
-    // Backend modülü ve 0016 migration'ı henüz dağıtılmadı.
-    released: false,
+    released: true,
   },
   {
     key: "hidden-role",
@@ -126,8 +122,7 @@ const MODULES: LabModule[] = [
     icon: "users",
     category: "Oyun",
     Component: HiddenRoleGamePanel,
-    // Backend modülü ve 0017 migration'ı henüz dağıtılmadı.
-    released: false,
+    released: true,
   },
   {
     key: "shared-story",
@@ -136,8 +131,7 @@ const MODULES: LabModule[] = [
     icon: "file",
     category: "Oyun",
     Component: SharedStoryPanel,
-    // Backend modülü ve 0018 migration'ı henüz dağıtılmadı.
-    released: false,
+    released: true,
   },
   {
     key: "escape-room",
@@ -146,8 +140,7 @@ const MODULES: LabModule[] = [
     icon: "pin",
     category: "Oyun",
     Component: EscapeRoomPanel,
-    // Backend modülü ve 0019 migration'ı henüz dağıtılmadı.
-    released: false,
+    released: true,
   },
 ];
 

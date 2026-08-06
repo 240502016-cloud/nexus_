@@ -479,7 +479,9 @@ export interface BoardGameAction {
 }
 
 export interface BoardGamePlayer {
-  user_id: number;
+  /** AI'ın oturduğu koltukta null olur; koltuk sahibi gerçek bir kullanıcı değildir. */
+  user_id: number | null;
+  ai: boolean;
   display_name: string;
   seat: number;
   tile_id: string;
@@ -511,6 +513,9 @@ export interface BoardGameView {
   round: number;
   maximum_rounds: number;
   active_user_id: number | null;
+  active_seat: number | null;
+  active_is_ai: boolean;
+  seat_count: number;
   action_points: number;
   chaos: number;
   chaos_limit: number;
@@ -542,8 +547,10 @@ export interface HiddenRoleGameView {
     public_clue: string;
     options: Array<{ id: "A" | "B" | "C"; disposition: "SEAL" | "REVEAL" | "REDIRECT"; title: string }>;
   } | null;
-  players: Array<{ user_id: number; display_name: string; seat: number; reputation: number; insight: number }>;
-  claims: Array<{ id: string; user_id: number; subject_option_id: string; proposition: string; flavor_text: string; verdict: string | null }>;
+  /** `key` katılımcı anahtarıdır: insan için kullanıcı kimliği, AI koltuğu için "ai:<koltuk>". */
+  players: Array<{ user_id: number | null; ai: boolean; key: string; display_name: string; seat: number; reputation: number; insight: number }>;
+  human_player_count: number;
+  claims: Array<{ id: string | null; user_id: number | null; key: string; subject_option_id: string; proposition: string; flavor_text: string; verdict: string | null }>;
   submitted_vote_count: number;
   submitted_deduction_count: number;
   round_results: Array<Record<string, unknown>>;
@@ -558,9 +565,10 @@ export interface HiddenRoleGameView {
   legal_action: { kind: "CLAIM" | "VOTE" | "DEDUCTION"; token: string } | null;
   result: {
     group_outcome: string;
-    winner_user_id: number;
-    scores: Array<{ user_id: number; total: number; insight: number; mandate_points: number; objective_points: number; deduction_points: number; reputation: number }>;
-    assignments: Record<number, { office: string; mandate: string; objective: string }>;
+    winner_key: string;
+    winner_user_id: number | null;
+    scores: Array<{ key: string; user_id: number | null; ai: boolean; total: number; insight: number; mandate_points: number; objective_points: number; deduction_points: number; reputation: number }>;
+    assignments: Record<string, { office: string; mandate: string; objective: string }>;
   } | null;
   recap: string | null;
   rng_commitment: string;
@@ -592,12 +600,15 @@ export interface SharedStoryView {
   chapter_count: number;
   phase: "SPOTLIGHT" | "JOINT_VOTE" | "COMPLETED";
   active_user_id: number | null;
+  active_seat: number | null;
+  active_is_ai: boolean;
+  seat_count: number;
   scene_number: number;
   threat: number;
   goal_progress: number;
   mystery_progress: number;
   bond: number;
-  characters: Array<{ user_id: number; seat: number; name: string; archetype: string; traits: string[]; location: string; inventory: string[]; actions_taken: number }>;
+  characters: Array<{ user_id: number | null; ai: boolean; seat: number; name: string; archetype: string; traits: string[]; location: string; inventory: string[]; actions_taken: number }>;
   safety_envelope: Record<string, string | number | boolean>;
   spotlight_choices: Array<{ id: "INVESTIGATE" | "PROTECT" | "PRESS_ON"; label: string; risk: string; effects: Record<string, number> }>;
   joint_choices: Array<{ id: "STABILIZE" | "REVEAL_PATH" | "PUSH_FORWARD"; label: string; effects: Record<string, number> }>;
@@ -631,11 +642,16 @@ export interface EscapeRoomView {
   server_id: number;
   status: "ACTIVE" | "COMPLETED";
   revision: number;
+  /** nadir3-v1 üç konsollu set, nadir2-v1 AI'sız iki kişilik odanın iki konsollu seti. */
+  rules_version: "nadir3-v1" | "nadir2-v1";
+  seat_count: number;
   timer_mode: "RELAXED" | "STANDARD_45" | "CHALLENGE_30";
   elapsed_seconds: number;
   overtime: boolean;
   nodes: EscapeRoomNode[];
-  players: Array<{ user_id: number; display_name: string; seat: number; role: "ENGINEER" | "ANALYST" | "NAVIGATOR" }>;
+  players: Array<{ user_id: number | null; ai: boolean; display_name: string; seat: number; role: "ENGINEER" | "ANALYST" | "NAVIGATOR" }>;
+  /** AI'ın tuttuğu konsolun açık düğümler için paylaştığı özel ipuçları. */
+  ai_consoles: Array<{ role: "ENGINEER" | "ANALYST" | "NAVIGATOR"; clues: Record<string, string> }>;
   shared_inventory: string[];
   own_private: { role: "ENGINEER" | "ANALYST" | "NAVIGATOR"; clues: Record<string, string>; ability_available: boolean };
   hints: Array<{ node_id: string; tier: number; text: string }>;

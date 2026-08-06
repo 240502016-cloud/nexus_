@@ -722,7 +722,7 @@ export const coreApi = {
     request<BoardGameView | null>(`/servers/${serverId}/board-game/sessions/active`),
   createBoardGame: (
     serverId: number,
-    payload: { player_ids: number[]; theme: "ARCANE_RUINS" | "SPACE_WRECK" | "CURSED_CARNIVAL" },
+    payload: { player_ids: number[]; ai_players: number; theme: "ARCANE_RUINS" | "SPACE_WRECK" | "CURSED_CARNIVAL" },
     idempotencyKey: string,
   ) =>
     request<BoardGameView>(`/servers/${serverId}/board-game/sessions`, {
@@ -744,11 +744,11 @@ export const coreApi = {
     }),
   getActiveHiddenRoleGame: (serverId: number) =>
     request<HiddenRoleGameView | null>(`/servers/${serverId}/hidden-role/sessions/active`),
-  createHiddenRoleGame: (serverId: number, playerIds: number[], idempotencyKey: string) =>
+  createHiddenRoleGame: (serverId: number, playerIds: number[], aiPlayers: number, idempotencyKey: string) =>
     request<HiddenRoleGameView>(`/servers/${serverId}/hidden-role/sessions`, {
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },
-      body: JSON.stringify({ player_ids: playerIds }),
+      body: JSON.stringify({ player_ids: playerIds, ai_players: aiPlayers }),
     }),
   getHiddenRoleGame: (sessionId: string) =>
     request<HiddenRoleGameView>(`/hidden-role/sessions/${sessionId}`),
@@ -762,7 +762,7 @@ export const coreApi = {
   ) => request<HiddenRoleGameView>(`/hidden-role/sessions/${sessionId}/votes`, { method: "POST", body: JSON.stringify(payload) }),
   submitHiddenRoleDeduction: (
     sessionId: string,
-    payload: { office_by_user: Record<number, string>; mandate_by_user: Record<number, string>; action_token: string; expected_revision: number },
+    payload: { office_by_key: Record<string, string>; mandate_by_key: Record<string, string>; action_token: string; expected_revision: number },
   ) => request<HiddenRoleGameView>(`/hidden-role/sessions/${sessionId}/deductions`, { method: "POST", body: JSON.stringify(payload) }),
   getStorySafetyProfile: (serverId: number) =>
     request<StorySafetyProfile>(`/servers/${serverId}/shared-story/safety/me`),
@@ -774,7 +774,7 @@ export const coreApi = {
     request<SharedStoryView | null>(`/servers/${serverId}/shared-story/sessions/active`),
   createSharedStory: (
     serverId: number,
-    payload: { player_ids: number[]; theme: "MYSTERY" | "SURVIVAL" | "FANTASY"; length: "SHORT" | "STANDARD" | "LONG"; use_party_lore: boolean },
+    payload: { player_ids: number[]; ai_players: number; theme: "MYSTERY" | "SURVIVAL" | "FANTASY"; length: "SHORT" | "STANDARD" | "LONG"; use_party_lore: boolean },
     idempotencyKey: string,
   ) => request<SharedStoryView>(`/servers/${serverId}/shared-story/sessions`, { method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(payload) }),
   getSharedStory: (sessionId: string) => request<SharedStoryView>(`/shared-story/sessions/${sessionId}`),
@@ -790,7 +790,7 @@ export const coreApi = {
   getActiveEscapeRoom: (serverId: number) => request<EscapeRoomView | null>(`/servers/${serverId}/escape-room/sessions/active`),
   createEscapeRoom: (
     serverId: number,
-    payload: { player_ids: number[]; timer_mode: "RELAXED" | "STANDARD_45" | "CHALLENGE_30"; use_party_lore: boolean },
+    payload: { player_ids: number[]; ai_players: number; timer_mode: "RELAXED" | "STANDARD_45" | "CHALLENGE_30"; use_party_lore: boolean },
     idempotencyKey: string,
   ) => request<EscapeRoomView>(`/servers/${serverId}/escape-room/sessions`, { method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(payload) }),
   getEscapeRoom: (sessionId: string) => request<EscapeRoomView>(`/escape-room/sessions/${sessionId}`),

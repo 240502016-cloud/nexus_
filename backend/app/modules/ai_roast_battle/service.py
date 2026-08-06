@@ -41,6 +41,29 @@ def update_profile(db: Session, *, server_id: int, actor: User, payload: RoastPr
     return db.get(RoastProfile, {"server_id": server_id, "user_id": actor.id})
 
 
+def get_profile(db: Session, *, server_id: int, actor: User) -> RoastProfile | dict:
+    server = db.get(Server, server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="Sunucu bulunamadı")
+    ensure_server_member(db, server, actor)
+    profile = db.get(RoastProfile, {"server_id": server_id, "user_id": actor.id})
+    if profile is not None:
+        return profile
+    return {
+        "server_id": server_id,
+        "user_id": actor.id,
+        "roast_enabled": False,
+        "maximum_intensity": 1,
+        "allowed_topics": ["FUNNY_HIGHLIGHTS", "MATCH_STATISTICS"],
+        "allow_party_lore": False,
+        "allow_highlights": True,
+        "allow_recent_failures": False,
+        "blocked_terms": [],
+        "consent_version": 1,
+        "updated_at": utcnow(),
+    }
+
+
 def _roast_session(db: Session, session_id: str, *, lock: bool = False) -> ExperienceSession:
     query = db.query(ExperienceSession).filter(ExperienceSession.id == session_id)
     if lock:
@@ -52,17 +75,20 @@ def _roast_session(db: Session, session_id: str, *, lock: bool = False) -> Exper
 
 
 def create_roast_session(db: Session, *, server_id: int, actor: User, payload: RoastSessionCreate, idempotency_key: str) -> ExperienceSession:
-    session = create_session(db, server_id=server_id, module_type="ai_roast_battle", owner=actor, idempotency_key=idempotency_key, settings={"mode": "BALANCED_SPOTLIGHT", "requested_intensity": payload.requested_intensity, "target_order": payload.player_ids, "current_round": 0})
-    if db.query(RoastSessionPlayer).filter(RoastSessionPlayer.session_id == session.id).count() == 3:
-        return session
     if actor.id not in payload.player_ids:
         raise HTTPException(status_code=422, detail="Oturum sahibi oyuncular arasında olmalı")
     server = db.get(Server, server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="Sunucu bulunamadı")
+    ensure_server_member(db, server, actor)
     users = {row.id: row for row in db.query(User).filter(User.id.in_(payload.player_ids)).all()}
     if set(users) != set(payload.player_ids):
         raise HTTPException(status_code=422, detail="Oyunculardan biri bulunamadı")
     for user in users.values():
         ensure_server_member(db, server, user)
+    session = create_session(db, server_id=server_id, module_type="ai_roast_battle", owner=actor, idempotency_key=idempotency_key, settings={"mode": "BALANCED_SPOTLIGHT", "requested_intensity": payload.requested_intensity, "target_order": payload.player_ids, "current_round": 0})
+    if db.query(RoastSessionPlayer).filter(RoastSessionPlayer.session_id == session.id).count() == 3:
+        return session
     existing_players = {row.user_id: row for row in session.players}
     for seat, user_id in enumerate(payload.player_ids):
         if user_id not in existing_players:
@@ -83,6 +109,25 @@ def create_roast_session(db: Session, *, server_id: int, actor: User, payload: R
 def session_to_dict(db: Session, session: ExperienceSession) -> dict:
     rows = db.query(RoastSessionPlayer).filter(RoastSessionPlayer.session_id == session.id).order_by(RoastSessionPlayer.seat).all()
     return {"id": session.id, "server_id": session.server_id, "player_ids": [row.user_id for row in rows], "consent": {row.user_id: row.consent_state.upper() for row in rows}, "requested_intensity": int((session.settings or {}).get("requested_intensity", 1)), "status": session.status.upper(), "current_round": int((session.settings or {}).get("current_round", 0)), "revision": session.revision}
+
+
+def get_active_session(db: Session, *, server_id: int, actor: User) -> ExperienceSession | None:
+    server = db.get(Server, server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="Sunucu bulunamadı")
+    ensure_server_member(db, server, actor)
+    return (
+        db.query(ExperienceSession)
+        .join(RoastSessionPlayer, RoastSessionPlayer.session_id == ExperienceSession.id)
+        .filter(
+            ExperienceSession.server_id == server_id,
+            ExperienceSession.module_type == "ai_roast_battle",
+            ExperienceSession.status.in_(["consent_pending", "active"]),
+            RoastSessionPlayer.user_id == actor.id,
+        )
+        .order_by(ExperienceSession.updated_at.desc())
+        .first()
+    )
 
 
 def submit_consent(db: Session, *, session_id: str, actor: User, decision: str, consent_version: int) -> ExperienceSession:
@@ -119,7 +164,14 @@ def submit_consent(db: Session, *, session_id: str, actor: User, decision: str, 
 
 
 def _source_for_target(db: Session, session: ExperienceSession, target_id: int, snapshot: dict, actor: User) -> dict | None:
-    recent_events = db.query(CommentatorEvent).filter(CommentatorEvent.session_id == session.id).order_by(CommentatorEvent.created_at.desc()).limit(50).all()
+    recent_events = (
+        db.query(CommentatorEvent)
+        .join(ExperienceSession, ExperienceSession.id == CommentatorEvent.session_id)
+        .filter(ExperienceSession.server_id == session.server_id)
+        .order_by(CommentatorEvent.created_at.desc())
+        .limit(50)
+        .all()
+    )
     for event in recent_events:
         if target_id in event.actor_player_ids and event.category not in {"ARGUMENT"} and event.source_confidence >= 0.85:
             return {"type": "GAMING_EVENT", "id": event.id, "fact": event.normalized_summary, "topic": event.category, "confidence": event.source_confidence}
@@ -170,6 +222,18 @@ def start_next_round(db: Session, *, session_id: str, actor: User) -> RoastRound
 def round_to_dict(db: Session, row: RoastRound) -> dict:
     candidate = db.get(RoastCandidate, row.selected_candidate_id) if row.selected_candidate_id else None
     return {"id": row.id, "session_id": row.session_id, "round_number": row.round_number, "target_player_id": row.target_player_id, "effective_intensity": row.effective_intensity, "status": row.status.upper(), "candidate_id": candidate.id if candidate else None, "roast_text": candidate.roast_text if candidate else None, "angle": candidate.angle if candidate else None}
+
+
+def get_current_round(db: Session, *, session_id: str, actor: User) -> RoastRound | None:
+    session = _roast_session(db, session_id)
+    ensure_session_access(db, session, actor)
+    ensure_session_player(db, session, actor.id)
+    return (
+        db.query(RoastRound)
+        .filter(RoastRound.session_id == session.id)
+        .order_by(RoastRound.round_number.desc())
+        .first()
+    )
 
 
 def vote(db: Session, *, candidate_id: str, actor: User, vote_type: str) -> RoastVote:

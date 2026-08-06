@@ -34,6 +34,14 @@ from app.modules.highlight_generator import models as highlight_generator_models
 from app.modules.highlight_generator.router import router as highlight_generator_router
 from app.modules.ai_roast_battle import models as ai_roast_battle_models  # noqa: F401
 from app.modules.ai_roast_battle.router import router as ai_roast_battle_router
+from app.modules.ai_board_game import models as ai_board_game_models  # noqa: F401
+from app.modules.ai_board_game.router import router as ai_board_game_router
+from app.modules.hidden_role_game import models as hidden_role_game_models  # noqa: F401
+from app.modules.hidden_role_game.router import router as hidden_role_game_router
+from app.modules.shared_story import models as shared_story_models  # noqa: F401
+from app.modules.shared_story.router import router as shared_story_router
+from app.modules.ai_escape_room import models as ai_escape_room_models  # noqa: F401
+from app.modules.ai_escape_room.router import router as ai_escape_room_router
 from app.plugins_engine.loader import PluginLoadError, discover_manifests, plugin_registry
 from app.platform import models as platform_models  # noqa: F401
 from app.platform.router import router as experiences_router
@@ -75,6 +83,10 @@ app.include_router(ai_commentator_router)
 app.include_router(meme_generator_router)
 app.include_router(highlight_generator_router)
 app.include_router(ai_roast_battle_router)
+app.include_router(ai_board_game_router)
+app.include_router(hidden_role_game_router)
+app.include_router(shared_story_router)
+app.include_router(ai_escape_room_router)
 
 
 def _reload_enabled_plugins() -> None:

@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     ollama_max_retries: int = 2
     ollama_retry_backoff_seconds: float = 0.5
     ollama_model_cache_seconds: float = 30.0
+    # Ollama modeli bu süre boyunca bellekte tutar. Varsayılan 5 dakikadır ve
+    # ölçüldüğünde soğuk yükleme qwen2.5:7b için 8,1 sn, gpt-oss:20b için 23,2 sn
+    # sürüyor — yani boştan sonraki ilk istek modül timeout'larının hepsini aşıyor.
+    # Boş bırakılırsa alan isteğe eklenmez ve Ollama kendi varsayılanını kullanır.
+    ollama_keep_alive: str = "30m"
 
     # TASK-007: AI generation is handled by the separate ai-worker service.
     ai_worker_poll_seconds: float = 0.5
@@ -38,14 +43,26 @@ class Settings(BaseSettings):
     ai_max_output_tokens: int = 1024
     ai_stream_poll_seconds: float = 0.15
 
+    # Model seçimi ve timeout'lar geliştirici makinesinde ölçülerek belirlendi
+    # (6 Ağustos 2026, RTX 4050 6 GB VRAM + 47 GB RAM):
+    #   qwen2.5:7b   27,8 token/sn   soğuk yükleme  8,1 sn
+    #   gpt-oss:20b  17,7 token/sn   soğuk yükleme 23,2 sn
+    # Her timeout, o özelliğin num_predict bütçesinin tamamı üretilirse geçecek
+    # süreyi kapsar. Model 20b'ye VRAM yetmediği için ağırlıklı CPU'da çalışır;
+    # geliştirici makinesinde OLLAMA_KEEP_ALIVE=-1 olmalıdır, aksi halde 5 dakika
+    # boştan sonraki ilk istek soğuk yükleme süresine takılır.
+
     # AI Commentator uses a logical role in module code. Until the Gateway supports
     # server-side logical profiles, this setting maps that role to an installed model.
+    # Canlı yorum gecikmeye duyarlı olduğu için hızlı model korunur.
     commentator_live_model: str = "qwen2.5:7b"
-    commentator_timeout_seconds: float = 3.0
-    commentator_stale_seconds: float = 4.0
+    commentator_timeout_seconds: float = 5.0
+    # Üretim bu süreden uzun sürerse yorum "stale" sayılıp atılır; timeout'tan
+    # büyük olmalı, yoksa zamanında biten üretim de çöpe gider.
+    commentator_stale_seconds: float = 6.0
 
-    meme_text_model: str = "qwen2.5:7b"
-    meme_timeout_seconds: float = 8.0
+    meme_text_model: str = "gpt-oss:20b"
+    meme_timeout_seconds: float = 25.0
     generated_media_dir: str = "/srv/generated-media"
 
     highlight_media_dir: str = "/srv/highlight-media"
@@ -55,12 +72,22 @@ class Settings(BaseSettings):
     highlight_probe_timeout_seconds: float = 30.0
     highlight_render_timeout_seconds: float = 600.0
     media_worker_poll_seconds: float = 0.5
+    # Başlık/etiket üretimi mekanik bir iş; hızlı model yeterli.
     highlight_metadata_model: str = "qwen2.5:7b"
-    highlight_metadata_timeout_seconds: float = 4.0
-    roast_generate_model: str = "qwen2.5:7b"
-    roast_review_model: str = "qwen2.5:7b"
-    roast_generate_timeout_seconds: float = 6.0
-    roast_review_timeout_seconds: float = 4.0
+    highlight_metadata_timeout_seconds: float = 10.0
+    roast_generate_model: str = "gpt-oss:20b"
+    roast_review_model: str = "gpt-oss:20b"
+    roast_generate_timeout_seconds: float = 20.0
+    roast_review_timeout_seconds: float = 10.0
+    board_game_narrator_model: str = "gpt-oss:20b"
+    board_game_narrator_timeout_seconds: float = 12.0
+    hidden_role_recap_model: str = "gpt-oss:20b"
+    hidden_role_recap_timeout_seconds: float = 20.0
+    shared_story_model: str = "gpt-oss:20b"
+    # num_predict 650 — bu modüldeki en uzun üretim.
+    shared_story_timeout_seconds: float = 45.0
+    escape_room_host_model: str = "gpt-oss:20b"
+    escape_room_host_timeout_seconds: float = 15.0
 
     # TASK-010: untrusted plugin code is executed by the dedicated sandbox sidecar.
     # ``local`` exists only for controlled development and must not be used in production.

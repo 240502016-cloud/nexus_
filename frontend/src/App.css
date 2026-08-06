@@ -3741,6 +3741,54 @@ button {
   .escape-panel__graph { grid-template-columns: 1fr; }
 }
 
+/* İki kişilik oyunlarda boş koltuğu AI'ın doldurması için ortak seçim kutusu.
+   Dört oyun panelinde de aynı görünür; koltuk seçimi ikiye düştüğünde belirir. */
+.board-game-panel__ai-toggle,
+.hidden-role-panel__ai-toggle,
+.story-panel__ai-toggle,
+.escape-panel__ai-toggle {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 4px 9px;
+  padding: 11px 13px;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 35%, var(--border-subtle));
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--accent-primary) 7%, var(--surface-raised));
+  cursor: pointer;
+}
+
+.board-game-panel__ai-toggle small,
+.hidden-role-panel__ai-toggle small,
+.story-panel__ai-toggle small,
+.escape-panel__ai-toggle small {
+  grid-column: 2;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+/* AI'ın tuttuğu koltuk insan oyunculardan görsel olarak ayrılır. */
+.board-game-panel__rail article.is-ai,
+.hidden-role-panel__players article.is-ai,
+.escape-panel__players article.is-ai {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--accent-primary) 45%, var(--border-subtle));
+}
+
+.escape-panel__ai-console {
+  display: grid;
+  gap: 8px;
+  padding: 13px 15px;
+  border: 1px dashed color-mix(in srgb, var(--accent-primary) 45%, var(--border-subtle));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent-primary) 5%, var(--surface-raised));
+}
+
+.escape-panel__ai-console h3 { margin: 0; font-size: 13px; }
+.escape-panel__ai-console article { display: grid; gap: 4px; }
+.escape-panel__ai-console p { margin: 0; color: var(--text-muted); font-size: 11px; }
+.escape-panel__ai-console b { color: var(--accent-primary); margin-right: 6px; }
+
 .highlight-panel {
   max-width: 900px;
 }

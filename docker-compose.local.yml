@@ -1,0 +1,15 @@
+# Production topolojisini degistirmeyen, yalnizca localhost'a acilan test altyapisi.
+# Backend, worker, AI Gateway ve React arayuzu scripts/start-local-dev.ps1 ile hostta calisir.
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:${LOCAL_POSTGRES_PORT:-55432}:5432"
+    networks:
+      - app
+      - data
+
+  matrix:
+    # Production ile ayni degismez altyapi image'ini kullanir; --no-build etiketi degistirmez.
+    image: nexus-matrix:1.153.0
+    ports:
+      - "127.0.0.1:${LOCAL_MATRIX_PORT:-18008}:8008"

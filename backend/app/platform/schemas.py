@@ -3,7 +3,27 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+
+class SeatedGameCreate(BaseModel):
+    """İki veya üç koltuklu oyun modüllerinin ortak kurulum alanları.
+
+    ``ai_players`` boş koltuğu AI'ın doldurmasını ister. Geçerli birleşimler:
+    2 insan (2 koltuk) · 2 insan + 1 AI (3 koltuk) · 3 insan (3 koltuk).
+    ``ai_roast_battle`` bu tabanı kullanmaz; o modül üç insana kilitli kalır.
+    """
+
+    player_ids: list[int] = Field(min_length=2, max_length=3)
+    ai_players: int = Field(default=0, ge=0, le=1)
+
+    @model_validator(mode="after")
+    def _validate_seats(self) -> "SeatedGameCreate":
+        if len(set(self.player_ids)) != len(self.player_ids):
+            raise ValueError("player ids must be unique")
+        if len(self.player_ids) + self.ai_players > 3:
+            raise ValueError("a session can hold at most three seats")
+        return self
 
 
 class ExperienceCreate(BaseModel):

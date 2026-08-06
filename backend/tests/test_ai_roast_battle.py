@@ -10,7 +10,7 @@ from app.core.models import Server, ServerMember, User
 from app.database import Base
 from app.modules.ai_roast_battle.models import RoastCandidate, RoastRound, RoastVote
 from app.modules.ai_roast_battle.schemas import RoastProfileUpdate, RoastSessionCreate
-from app.modules.ai_roast_battle.service import create_roast_session, start_next_round, submit_consent, update_profile, vote
+from app.modules.ai_roast_battle.service import create_roast_session, get_active_session, get_current_round, get_profile, start_next_round, submit_consent, update_profile, vote
 from app.modules.ai_roast_battle.worker import process_roast_job
 from app.modules.highlight_generator.models import HighlightMarker, HighlightRecording
 from app.platform.models import AiRun, BackgroundJob
@@ -60,6 +60,16 @@ class AiRoastBattleTests(unittest.TestCase):
         self.assertEqual(session.status, "active")
         session = submit_consent(self.db, session_id=session.id, actor=self.players[1], decision="REVOKE", consent_version=1)
         self.assertEqual(session.status, "cancelled")
+
+    def test_profile_active_session_and_current_round_can_be_restored(self):
+        profile = get_profile(self.db, server_id=self.server.id, actor=self.players[0])
+        self.assertTrue(profile.roast_enabled)
+        session = self.activate()
+        active = get_active_session(self.db, server_id=self.server.id, actor=self.players[1])
+        self.assertEqual(active.id, session.id)
+        self.assertIsNone(get_current_round(self.db, session_id=session.id, actor=self.players[2]))
+        round_row = start_next_round(self.db, session_id=session.id, actor=self.players[0])
+        self.assertEqual(get_current_round(self.db, session_id=session.id, actor=self.players[1]).id, round_row.id)
 
     def test_generate_review_persists_only_selected_safe_roast_and_votes_close_round(self):
         session = self.activate(); self.add_source(self.players[0])

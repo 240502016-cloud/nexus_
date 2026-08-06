@@ -22,6 +22,7 @@ interface BoardGamePanelProps {
 export function BoardGamePanel({ server, members, currentUser, onClose }: BoardGamePanelProps) {
   const [game, setGame] = useState<BoardGameView | null>(null);
   const [players, setPlayers] = useState<number[]>([]);
+  const [withAi, setWithAi] = useState(false);
   const [theme, setTheme] = useState<"ARCANE_RUINS" | "SPACE_WRECK" | "CURSED_CARNIVAL">("ARCANE_RUINS");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -59,15 +60,19 @@ export function BoardGamePanel({ server, members, currentUser, onClose }: BoardG
       : current.length < 3 ? [...current, userId] : current);
   }
 
+  // AI ancak üçüncü koltuk boşken eklenebilir; toplam koltuk üçü aşamaz.
+  const aiPlayers = players.length === 2 && withAi ? 1 : 0;
+  const seatCount = players.length + aiPlayers;
+
   async function createGame() {
-    if (players.length !== 3) {
-      setError("Son Portal tam olarak üç oyuncu gerektirir.");
+    if (players.length < 2) {
+      setError("Son Portal en az iki oyuncu gerektirir.");
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      setGame(await coreApi.createBoardGame(server.id, { player_ids: players, theme }, createKey.current));
+      setGame(await coreApi.createBoardGame(server.id, { player_ids: players, ai_players: aiPlayers, theme }, createKey.current));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Oyun başlatılamadı.");
     } finally {
@@ -101,12 +106,19 @@ export function BoardGamePanel({ server, members, currentUser, onClose }: BoardG
 
         {!loading && !game ? (
           <section className="board-game-panel__lobby">
-            <div><span>Üç oyuncu seç</span><p>Kurallar sunucuda çalışır; AI yalnız gerçekleşmiş hamleleri anlatır ve erişilemezse oyun devam eder.</p></div>
+            <div><span>İki veya üç oyuncu seç</span><p>Kurallar sunucuda çalışır; AI yalnız gerçekleşmiş hamleleri anlatır ve erişilemezse oyun devam eder.</p></div>
             <div className="board-game-panel__member-grid">
               {members.map((member) => <label key={member.id} className={players.includes(member.id) ? "is-selected" : ""}><input type="checkbox" checked={players.includes(member.id)} disabled={member.id === currentUser.id} onChange={() => togglePlayer(member.id)} />{member.display_name || member.username}</label>)}
             </div>
+            {players.length === 2 ? (
+              <label className="board-game-panel__ai-toggle">
+                <input type="checkbox" checked={withAi} onChange={(event) => setWithAi(event.target.checked)} />
+                Üçüncü koltuğu AI oynasın
+                <small>{withAi ? "Gezgin üçüncü oyuncu olur; hamleleri tohumdan belirlenir." : "İki kişilik masada tur başına 3 aksiyon puanı verilir."}</small>
+              </label>
+            ) : null}
             <label>Tema<select value={theme} onChange={(event) => setTheme(event.target.value as typeof theme)}><option value="ARCANE_RUINS">Gizemli Harabeler</option><option value="SPACE_WRECK">Uzay Enkazı</option><option value="CURSED_CARNIVAL">Lanetli Karnaval</option></select></label>
-            <button type="button" disabled={busy || players.length !== 3} onClick={() => void createGame()}>Masayı kur</button>
+            <button type="button" disabled={busy || players.length < 2} onClick={() => void createGame()}>Masayı kur ({seatCount} koltuk)</button>
           </section>
         ) : null}
 
@@ -125,22 +137,22 @@ export function BoardGamePanel({ server, members, currentUser, onClose }: BoardG
                 {TILE_ORDER.map((tileId) => {
                   const tile = game.tiles[tileId];
                   const occupants = game.players.filter((player) => player.tile_id === tileId);
-                  return <article key={tileId} className={`board-tile board-tile--${tile.region.toLowerCase()} ${tileId === "P" ? "board-tile--portal" : ""}`}><small>{tile.type}</small><strong>{tile.label}</strong><div>{occupants.map((player) => <span key={player.user_id} title={player.display_name}>P{player.seat + 1}</span>)}</div></article>;
+                  return <article key={tileId} className={`board-tile board-tile--${tile.region.toLowerCase()} ${tileId === "P" ? "board-tile--portal" : ""}`}><small>{tile.type}</small><strong>{tile.label}</strong><div>{occupants.map((player) => <span key={player.seat} title={player.display_name}>{player.ai ? "AI" : `P${player.seat + 1}`}</span>)}</div></article>;
                 })}
               </section>
 
               <aside className="board-game-panel__rail">
-                {game.players.map((player) => <article key={player.user_id} className={game.active_user_id === player.user_id ? "is-active" : ""}><header><strong>{player.display_name}</strong><span>{memberMap.get(player.user_id)?.username}</span></header><div><span>⚡ {player.energy}</span><span>🔩 {player.scrap}</span><span>★ {player.fame}</span><span>◆ {player.sigils.length}</span></div></article>)}
+                {game.players.map((player) => <article key={player.seat} className={game.active_seat === player.seat ? "is-active" : ""}><header><strong>{player.display_name}</strong><span>{player.ai ? "AI oyuncu" : memberMap.get(player.user_id ?? -1)?.username}</span></header><div><span>⚡ {player.energy}</span><span>🔩 {player.scrap}</span><span>★ {player.fame}</span><span>◆ {player.sigils.length}</span></div></article>)}
               </aside>
             </div>
 
             {game.status === "ACTIVE" ? (
               <section className="board-game-panel__actions">
-                <header><div><span>AKTİF OYUNCU</span><strong>{game.players.find((player) => player.user_id === game.active_user_id)?.display_name}</strong></div>{game.active_user_id !== currentUser.id ? <p>Sıra diğer oyuncuda. Ekran otomatik yenileniyor.</p> : null}</header>
+                <header><div><span>AKTİF OYUNCU</span><strong>{game.players.find((player) => player.seat === game.active_seat)?.display_name}</strong></div>{game.active_user_id !== currentUser.id ? <p>{game.active_is_ai ? "Sıra AI oyuncuda; hamlesini kendi yapıyor." : "Sıra diğer oyuncuda. Ekran otomatik yenileniyor."}</p> : null}</header>
                 <div>{game.legal_actions.map((action) => <button key={action.id} type="button" disabled={busy} onClick={() => void act(action)}><strong>{action.label}</strong><span>{action.cost}</span></button>)}</div>
               </section>
             ) : (
-              <section className="board-game-panel__result"><span>{game.group_outcome}</span><h3>Kazanan: {game.players.find((player) => player.user_id === game.winner_user_id)?.display_name}</h3><p>{game.end_reason}</p></section>
+              <section className="board-game-panel__result"><span>{game.group_outcome}</span><h3>Kazanan: {game.players.find((player) => player.user_id !== null && player.user_id === game.winner_user_id)?.display_name ?? "AI oyuncu"}</h3><p>{game.end_reason}</p></section>
             )}
 
             <section className="board-game-panel__log">
