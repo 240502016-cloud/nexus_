@@ -178,13 +178,14 @@ branch  cekingen
 ### Sunucuda çalışan sürüm
 
 ```text
-0034708  Add per-listener audio mixing, higher media quality and Nexus Lab
-DB revizyonu: 0015_user_auth_version   (değişmedi — bu commit şemaya dokunmaz)
+0d96b19  Open the four parked game modules to two players and split AI models per feature
+DB revizyonu: 0019_ai_escape_room
 ```
 
-Bu commit **yalnız** kaynak bazlı ses miksi, kalite presetleri, Nexus Lab ve görsel cilayı
-içerir. Dört AI oyun modülü, `0016`–`0019` migration'ları ve yerel test ortamı bilinçli olarak
-dışarıda bırakıldı (bkz. aşağıdaki bölüm). Geri alma noktası: `2aa6ce3`.
+**6 Ağustos 2026'da dağıtıldı.** Dört AI oyun modülü (`ai_board_game`, `hidden_role_game`,
+`shared_story`, `ai_escape_room`), `0016`–`0019` migration'ları, iki kişilik oyun desteği ve
+özellik başına AI model dağılımı bu commit'le canlıya alındı. Dokuz Lab modülünün tamamı artık
+`released: true`. Geri alma noktası: `e52b61c` (DB `0015`).
 
 ### ⚠️ Yerelde commit'lenmemiş, DAĞITILMAMIŞ çalışma
 
@@ -429,7 +430,8 @@ postgres_socket, postgres_backups, caddy_data, caddy_config
 
 ## 8. Veritabanı ve migration
 
-Sunucudaki güncel head: **`0015_user_auth_version`**
+Sunucudaki güncel head: **`0019_ai_escape_room`** (6 Ağustos 2026'da `0015`'ten yükseltildi;
+`nexus` veritabanı 56 tablodan 74 tabloya çıktı, mevcut veri korundu)
 
 ```text
 0001_initial_schema        0009_platform_foundation
@@ -442,8 +444,8 @@ Sunucudaki güncel head: **`0015_user_auth_version`**
 0008_server_join_codes
 ```
 
-Yerelde ek olarak (dağıtılmamış): `0016_ai_board_game`, `0017_hidden_role_game`,
-`0018_shared_story`, `0019_ai_escape_room`.
+`0016_ai_board_game`, `0017_hidden_role_game`, `0018_shared_story`, `0019_ai_escape_room`
+6 Ağustos 2026'da dağıtıldı ve tek seferde sorunsuz uygulandı.
 
 Başlıca Core modelleri: `User`, `Friendship`, `Server`, `ServerMember`, `ServerInvite`,
 `ServerJoinCode`, `Channel`, `Role`, `Plugin`, `Bot`, `BotServerLink`, `BotPluginLink`,
@@ -1241,10 +1243,16 @@ WebRTC/TURN matrisi otomatik değil · Electron installer'ın imzalı production
 Taşıma sonrası **iki gerçek kullanıcıyla ses/kamera/ekran paylaşımı smoke testi yapılmamıştır.**
 Endpoint'ler ve TLS doğrulandı, ancak gerçek mikrofon/RTP akışı ve TURN relay yolu canlı test edilmedi.
 
-`0034708` dağıtımında doğrulananlar: `/healthz`, `/api/health`, `/_matrix/client/versions`,
-`/lab` (200 + doğru başlık), canlı bundle hash'lerinin yerel build ile birebir eşleşmesi,
-çalışan konteynerde `_audio_mix_payload`'ın varlığı, dört park edilmiş modülün konteynerde
-**bulunmadığı**, alembic'in `0015`'te kaldığı ve logların temiz olduğu.
+`0d96b19` dağıtımında doğrulananlar (6 Ağustos 2026): `/healthz`, `/api/health`,
+`/_matrix/client/versions`, `/lab` (200), dört yeni modül ucunun 404 değil **401** dönmesi
+(router'lar kayıtlı), canlı bundle hash'lerinin yerel build ile birebir eşleşmesi
+(`lab-BMfY9m7Q.js`, `index-ZQMe5KzV.js`, `main-CLTbe0EQ.js`), `media-worker`'ın **ayrı imajının
+yeni kodu içerdiği**, alembic'in `0019`'a çıktığı, tablo sayısının 56→74 olduğu, kullanıcı/sunucu/
+kanal verisinin korunduğu ve dağıtımdan sonraki iki dakikada hiç hata olmadığı.
+
+> ⚠️ Dağıtım sırasında konteynerler yeniden başlarken **~15 saniye 502** verildi ve o anda sitede
+> aktif bir kullanıcı vardı. Yeniden başlatma tamamlanınca istekler 200'e döndü. İleride
+> dağıtımları kullanıcı trafiğinin düşük olduğu bir saate almak bu kesintiyi görünmez kılar.
 
 **Doğrulanmayan:** kaynak bazlı ses miksinin gerçek iki kullanıcıyla çalıştığı. Bu, yukarıdaki
 smoke testinin parçasıdır ve hâlâ açıktır.
@@ -1330,6 +1338,10 @@ Yapılacaklar:
 ## 26. Sonraki adımlar
 
 ### P0
+0. **AI Gateway'i aç.** Dört yeni modül canlıda ama AI anlatımı (Son Portal anlatıcısı, Üç Mühür
+   özeti, Ortak Hikâye düzyazısı, Escape Room sunucusu) gateway kapalıyken üretilmez. Oyunların
+   mekaniği bundan etkilenmez — kararlar tohumdan deterministik türetilir — yalnız metin gelmez.
+   `.\ai-gateway\start-gateway.ps1 -HostAddress 100.104.192.122 -Port 8090`
 1. İki gerçek kullanıcıyla ses/kamera/ekran smoke testi (yeni sunucuda hiç yapılmadı).
    **Bu tur ayrıca kaynak bazlı ses miksini de kapsamalıdır:** A ekran+ses paylaşırken B,
    A'nın yayın sesini 0'a indirip konuşmasını duymaya devam edebiliyor mu; B, A'nın
@@ -1434,8 +1446,8 @@ HTTPS_REVERSE_PROXY,DATABASE_SECURITY}.md` · `scripts/`
 - Sertifika Caddy + Cloudflare DNS-01 ile otomatik alınır ve yenilenir.
 - AI, Tailscale üzerinden geliştirici makinesindeki Ollama'ya bağlanır; kapalıysa yalnız AI
   özellikleri pasifleşir.
-- Sunucu `2aa6ce3` commit'inde ve DB `0015_user_auth_version` revizyonundadır.
-  Yerelde dört yeni AI deneyim modülü ve dört migration bilinçli olarak dağıtılmamıştır.
+- Sunucu `0d96b19` commit'inde ve DB `0019_ai_escape_room` revizyonundadır. Dört AI oyun modülü
+  6 Ağustos 2026'da dağıtıldı; Nexus Lab'deki dokuz modülün tamamı artık production'da görünür.
 - Mesajlaşma, sosyal sistem, DM, attachment, bot/plugin, ses, kamera, ekran paylaşımı, soundboard,
   kalite ayarları, dinamik sahne, AI deneyim modülleri ve Electron istemcisi uygulanmıştır.
 - **Ses kaynakları artık dinleyici başına ayrı ayrı ayarlanabilir** (konuşma / soundboard /
