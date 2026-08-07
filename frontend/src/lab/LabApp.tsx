@@ -13,6 +13,7 @@ import { MemeGeneratorPanel } from "../components/MemeGeneratorPanel";
 import { PartyLorePanel } from "../components/PartyLorePanel";
 import { RoastBattlePanel } from "../components/RoastBattlePanel";
 import { SharedStoryPanel } from "../components/SharedStoryPanel";
+import { LAB_HAS_VISIBLE_MODULES, labModuleIsVisible } from "./released";
 import { loadVoiceSettings } from "../settings";
 import type { Member, Server, User } from "../types";
 
@@ -31,25 +32,11 @@ interface LabModule {
   icon: IconName;
   category: "Anı" | "Sahne" | "Oyun";
   Component: ComponentType<LabModuleProps>;
-  /**
-   * Modülün backend'i production sunucusunda çalışıyor mu.
-   *
-   * `false` olanların kodu burada durur ama katalogda görünmez; endpoint'leri sunucuda
-   * olmadığı için açılsalar 404 alırlar. Backend'leri dağıtıldığında bu bayrak `true`
-   * yapılır — başka değişiklik gerekmez.
-   */
-  released: boolean;
 }
 
-/**
- * Geliştirmede dağıtılmamış modüller de görünür: `docs/LOCAL_HUMAN_TEST.md` ortamı tam da
- * bunları gerçek arayüzden denemek için var. Production build'de yalnız `VITE_LAB_UNRELEASED=1`
- * ile açılırlar.
- */
-const SHOW_UNRELEASED = import.meta.env.DEV || import.meta.env.VITE_LAB_UNRELEASED === "1";
-
+/** Hangi modülün production'da açık olduğu `released.ts` içindedir. */
 function isVisible(module: LabModule): boolean {
-  return module.released || SHOW_UNRELEASED;
+  return labModuleIsVisible(module.key);
 }
 
 /**
@@ -68,7 +55,6 @@ const MODULES: LabModule[] = [
     icon: "screen",
     category: "Anı",
     Component: HighlightGeneratorPanel,
-    released: true,
   },
   {
     key: "meme",
@@ -77,7 +63,6 @@ const MODULES: LabModule[] = [
     icon: "smile",
     category: "Anı",
     Component: MemeGeneratorPanel,
-    released: true,
   },
   {
     key: "party-lore",
@@ -86,7 +71,6 @@ const MODULES: LabModule[] = [
     icon: "file",
     category: "Anı",
     Component: PartyLorePanel,
-    released: true,
   },
   {
     key: "commentator",
@@ -95,7 +79,6 @@ const MODULES: LabModule[] = [
     icon: "bot",
     category: "Sahne",
     Component: CommentatorModule,
-    released: true,
   },
   {
     key: "roast",
@@ -104,7 +87,6 @@ const MODULES: LabModule[] = [
     icon: "bot",
     category: "Sahne",
     Component: RoastBattlePanel,
-    released: true,
   },
   {
     key: "board-game",
@@ -113,7 +95,6 @@ const MODULES: LabModule[] = [
     icon: "gamepad",
     category: "Oyun",
     Component: BoardGamePanel,
-    released: true,
   },
   {
     key: "hidden-role",
@@ -122,7 +103,6 @@ const MODULES: LabModule[] = [
     icon: "users",
     category: "Oyun",
     Component: HiddenRoleGamePanel,
-    released: true,
   },
   {
     key: "shared-story",
@@ -131,7 +111,6 @@ const MODULES: LabModule[] = [
     icon: "file",
     category: "Oyun",
     Component: SharedStoryPanel,
-    released: true,
   },
   {
     key: "escape-room",
@@ -140,7 +119,6 @@ const MODULES: LabModule[] = [
     icon: "pin",
     category: "Oyun",
     Component: EscapeRoomPanel,
-    released: true,
   },
 ];
 
@@ -353,6 +331,13 @@ export function LabApp() {
             <p className="lab-empty">
               Henüz bir sunucun yok. Nexus'ta bir sunucu oluşturduktan sonra buradaki
               modüller kullanılabilir olur.
+            </p>
+          ) : !LAB_HAS_VISIBLE_MODULES ? (
+            // Tüm modüller kapalıyken katalog boş kalır; yer imiyle gelen kullanıcı
+            // bozuk bir sayfa değil, ne olduğunu anlatan bir mesaj görmeli.
+            <p className="lab-empty">
+              Lab modülleri şu an geliştirme aşamasında ve kullanıma kapalı. Hazır
+              olduklarında burada tekrar görünecekler.
             </p>
           ) : (
             CATEGORIES.filter((category) =>

@@ -17,6 +17,8 @@ import { ServerSettingsPanel } from "./components/ServerSettingsPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { VideoStage } from "./components/VideoStage";
 import { desktopBridge, labUrl } from "./desktopBridge";
+// Yalnız görünürlük bayrakları; LabApp'i import etmek Lab'in ayrı chunk olmasını bozardı.
+import { LAB_HAS_VISIBLE_MODULES } from "./lab/released";
 import { useGateway } from "./hooks/useGateway";
 import { useVoiceChannel } from "./hooks/useVoiceChannel";
 import { playMessageNotification } from "./notifications";
@@ -1131,7 +1133,7 @@ export default function App() {
                 Ses bağlı
               </span>
             ) : null}
-            {activeServer ? (
+            {activeServer && LAB_HAS_VISIBLE_MODULES ? (
               <button
                 type="button"
                 className="toolbar-action toolbar-action--lab"

@@ -226,22 +226,32 @@ Değişmiş (modified) dosyalar arasında: `backend/app/main.py`, `backend/app/c
 **Sonuç:** Yerelde migration zinciri `0019`'a kadar gider, sunucuda `0015`'te durur. Bu bir hata
 değil, bilinçli durumdur.
 
-### Nexus Lab'in dağıtılmamış modüllerle ilişkisi
+### Nexus Lab'in görünürlüğü
 
-Lab dokuz modülü de **kod olarak** içerir, ancak `LabApp.tsx` içindeki `released` bayrağı
-backend'i sunucuda çalışmayanları production build'de gizler:
+> ⚠️ **6 Ağustos 2026: dokuz modülün tamamı production'da kapalı.** Backend'lerinin hepsi
+> sunucuda çalışıyor ve `0019` migration'ı uygulanmış durumda — kapatma sebebi teknik değil,
+> **deneyimin yeterince iyi olmaması**. Kullanıcı kararı: kod dursun, geliştirilsin, canlıda
+> görünmesin. Veriye, tablolara ve backend uçlarına dokunulmadı.
 
-| Modül | `released` | Neden |
-|---|---|---|
-| Highlight, Meme, AI Yorumcu | `true` | Backend'leri `0015`'te mevcut ve değişmedi |
-| Party Lore, Roast Battle | `false` | Backend modülü sunucuda var ama servisi **ve** paneli yerelde birlikte değişti; ikisi birden dağıtılmalı |
-| Son Portal, Üç Mühür, Ortak Hikâye, Escape Room | `false` | Backend modülü ve `0016`–`0019` migration'ları hiç dağıtılmadı |
+Görünürlük tek bir yerden yönetilir: `frontend/src/lab/released.ts` içindeki
+`RELEASED_LAB_MODULES` kümesi. Şu an **boş**. Bir modülü açmak için anahtarını bu kümeye
+eklemek yeterlidir, başka değişiklik gerekmez.
+
+```text
+geçerli anahtarlar: highlight · meme · party-lore · commentator · roast ·
+                    board-game · hidden-role · shared-story · escape-room
+```
+
+Bu dosya bilinçli olarak küçüktür ve panel bileşenlerini import etmez; hem `LabApp` hem ana
+uygulama okur. Ana uygulama `LabApp`'i import etseydi Lab'in ayrı chunk olması bozulur ve ana
+paket büyürdü.
+
+Hiç görünür modül kalmadığında iki şey olur: ana araç çubuğundaki **Lab düğmesi gizlenir**
+(yoksa boş pencere açardı) ve `/lab` adresine doğrudan gelen kullanıcı boş sayfa yerine
+"modüller geliştirme aşamasında" mesajını görür.
 
 Geliştirmede (`import.meta.env.DEV`) hepsi görünür — `docs/LOCAL_HUMAN_TEST.md` ortamı tam da
 bunun için var. Production'da geçici olarak açmak gerekirse `VITE_LAB_UNRELEASED=1` ile build alınır.
-
-**Bir modülün backend'i dağıtıldığında yapılacak tek şey:** `LabApp.tsx` içinde o modülün
-`released` değerini `true` yapmak. Başka değişiklik gerekmez.
 
 > ⚠️ `backend/app/main.py` yereldeki dört modülün router'ını **koşulsuz** import eder. Yani
 > backend'i olduğu gibi dağıtmak dört modülü ve `0016`–`0019` migration'larını da zorunlu olarak
@@ -1338,9 +1348,11 @@ Yapılacaklar:
 ## 26. Sonraki adımlar
 
 ### P0
-0. **AI Gateway'i aç.** Dört yeni modül canlıda ama AI anlatımı (Son Portal anlatıcısı, Üç Mühür
-   özeti, Ortak Hikâye düzyazısı, Escape Room sunucusu) gateway kapalıyken üretilmez. Oyunların
-   mekaniği bundan etkilenmez — kararlar tohumdan deterministik türetilir — yalnız metin gelmez.
+0. **Lab modüllerini geliştir.** Dokuzu da canlıda kapalı çünkü deneyim yeterince iyi değil.
+   Backend, migration ve veri hazır; iş tamamen deneyim tarafında. Bir modül hazır olduğunda
+   `frontend/src/lab/released.ts` içindeki kümeye anahtarını eklemek yeterli.
+   Denemek için: geliştirme ortamı hepsini açık gösterir (`docs/LOCAL_HUMAN_TEST.md`),
+   AI metinleri için gateway gerekir:
    `.\ai-gateway\start-gateway.ps1 -HostAddress 100.104.192.122 -Port 8090`
 1. İki gerçek kullanıcıyla ses/kamera/ekran smoke testi (yeni sunucuda hiç yapılmadı).
    **Bu tur ayrıca kaynak bazlı ses miksini de kapsamalıdır:** A ekran+ses paylaşırken B,
@@ -1446,8 +1458,9 @@ HTTPS_REVERSE_PROXY,DATABASE_SECURITY}.md` · `scripts/`
 - Sertifika Caddy + Cloudflare DNS-01 ile otomatik alınır ve yenilenir.
 - AI, Tailscale üzerinden geliştirici makinesindeki Ollama'ya bağlanır; kapalıysa yalnız AI
   özellikleri pasifleşir.
-- Sunucu `0d96b19` commit'inde ve DB `0019_ai_escape_room` revizyonundadır. Dört AI oyun modülü
-  6 Ağustos 2026'da dağıtıldı; Nexus Lab'deki dokuz modülün tamamı artık production'da görünür.
+- Sunucu DB `0019_ai_escape_room` revizyonundadır ve dört AI oyun modülünün backend'i 6 Ağustos
+  2026'da dağıtıldı. **Ancak Lab modüllerinin dokuzu da production'da kapalıdır** — kod ve veri
+  yerinde, yalnız arayüzde gizli; sebep deneyimin geliştirilmeye ihtiyaç duyması (§3).
 - Mesajlaşma, sosyal sistem, DM, attachment, bot/plugin, ses, kamera, ekran paylaşımı, soundboard,
   kalite ayarları, dinamik sahne, AI deneyim modülleri ve Electron istemcisi uygulanmıştır.
 - **Ses kaynakları artık dinleyici başına ayrı ayrı ayarlanabilir** (konuşma / soundboard /
