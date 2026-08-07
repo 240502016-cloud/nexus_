@@ -8,32 +8,69 @@ interface ThemeStageProps {
   callActive: boolean;
 }
 
-interface Star {
+/** Parçacık 3B uzayda yaşar; her karede perspektifle 2B'ye izdüşürülür. */
+interface Particle {
   x: number;
   y: number;
-  r: number;
+  z: number;
   a: number;
-  vx: number;
-  vy: number;
 }
 
+const PARTICLE_COUNT = 800;
+const YAW_PER_FRAME = 0.0005; // rad/kare — spesifikasyondaki kamera hızı
+const DEPTH = 1400;
+
 /**
- * Tema arka planının canlı katmanı.
+ * Tema arka planının canlı katmanı. Şu an yalnız "space" temasında çizer;
+ * diğer temaların dokuları saf CSS olduğu için canvas hiç mount edilmez.
  *
- * Şu an yalnız "space" temasının yıldız akışını çizer; diğer temaların
- * dokuları saf CSS olduğu için burada iş yapmazlar ve canvas hiç mount edilmez.
+ * NEDEN three.js DEĞİL: spesifikasyon WebGL öneriyor, ancak three.js ~600 kB
+ * ve bu uygulama aynı GPU üzerinde WebRTC video kodluyor. 800 parçacığın
+ * perspektif izdüşümü ve additive blending'i 2B canvas'ta doğrudan yazılabilir;
+ * görsel sonuç aynı, bağımlılık ve GPU baskısı yok.
  *
- * PERFORMANS SÖZLEŞMESİ — bu proje bir portfolyo sitesi değil, aynı GPU
- * üzerinde WebRTC video kodluyor. Döngü şu üç durumda tamamen bırakılır
- * (kare atlamak değil, `requestAnimationFrame` zincirinden çıkmak):
- *   1. sesli görüşme aktifken
- *   2. sekme arka plandayken
- *   3. kullanıcı hareket azaltma tercihi verdiyse
+ * PERFORMANS SÖZLEŞMESİ: döngü şu üç durumda tamamen bırakılır (kare atlamak
+ * değil, rAF zincirinden çıkmak): sesli görüşme aktifken, sekme arka plandayken,
+ * hareket azaltma tercihi verildiğinde. Sonuncusunda canvas gizlenir ve CSS
+ * statik nebula yedeği devreye girer.
  */
 export function ThemeStage({ theme, callActive }: ThemeStageProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const callActiveRef = useRef(callActive);
   callActiveRef.current = callActive;
+
+  // Panel spotlight'ı: işaretçi konumu köke yazılır, CSS radial-gradient izler.
+  useEffect(() => {
+    if (theme !== "space") return;
+    let queued = false;
+    let px = 0;
+    let py = 0;
+
+    function flush() {
+      queued = false;
+      const root = document.documentElement;
+      root.style.setProperty("--mx", `${px}px`);
+      root.style.setProperty("--my", `${py}px`);
+    }
+
+    function onMove(event: PointerEvent) {
+      const target = (event.target as HTMLElement | null)?.closest<HTMLElement>(
+        ".settings-panel, .settings-panel--wide, .lab-card, .theme-card",
+      );
+      if (!target) return;
+      const box = target.getBoundingClientRect();
+      px = event.clientX - box.left;
+      py = event.clientY - box.top;
+      // Kare başına en fazla bir yazma; pointermove saniyede yüzlerce kez gelir.
+      if (!queued) {
+        queued = true;
+        requestAnimationFrame(flush);
+      }
+    }
+
+    window.addEventListener("pointermove", onMove, { passive: true });
+    return () => window.removeEventListener("pointermove", onMove);
+  }, [theme]);
 
   useEffect(() => {
     if (theme !== "space") return;
@@ -46,31 +83,19 @@ export function ThemeStage({ theme, callActive }: ThemeStageProps) {
     let width = 0;
     let height = 0;
     let dpr = 1;
-    let stars: Star[] = [];
+    let particles: Particle[] = [];
+    let yaw = 0;
     let running = false;
     let frameId = 0;
 
-    const lanes = [
-      { x: 0.22, y: 0.18, r: 0.62, phase: 0, speed: 0.000012 },
-      { x: 0.80, y: 0.74, r: 0.55, phase: 2.1, speed: -0.000009 },
-    ];
-
     function build() {
-      // Alan başına sabit yoğunluk; büyük ekranda kalabalıklaşmaz.
-      const count = Math.round(Math.min(120, (width * height) / 26000));
-      stars = Array.from({ length: count }, () => {
-        const depth = Math.random();
-        const layer = depth < 0.45 ? 0.25 : depth < 0.8 ? 0.55 : 1;
-        return {
-          x: Math.random() * width,
-          y: Math.random() * height,
-          r: (layer * 0.9 + 0.25) * dpr,
-          a: 0.1 + layer * 0.3,
-          // Sürüklenme algı eşiğinin altında: birkaç piksel/dakika.
-          vx: (0.01 + Math.random() * 0.02) * layer,
-          vy: (0.004 + Math.random() * 0.01) * layer,
-        };
-      });
+      particles = Array.from({ length: PARTICLE_COUNT }, () => ({
+        x: (Math.random() - 0.5) * 2600,
+        y: (Math.random() - 0.5) * 2600,
+        z: Math.random() * DEPTH,
+        // Spesifikasyondaki 0.15–0.35 opaklık aralığı.
+        a: 0.15 + Math.random() * 0.2,
+      }));
     }
 
     function resize() {
@@ -79,78 +104,84 @@ export function ThemeStage({ theme, callActive }: ThemeStageProps) {
       height = canvas!.clientHeight * dpr;
       canvas!.width = width;
       canvas!.height = height;
-      build();
+      if (particles.length === 0) build();
     }
 
-    function draw(time: number) {
+    function draw() {
       const styles = getComputedStyle(document.documentElement);
-      const ground = styles.getPropertyValue("--bg-app").trim() || "#07090F";
-      const dust = styles.getPropertyValue("--accent").trim() || "#C77B4E";
-      const star = styles.getPropertyValue("--text-bright").trim() || "#E8EAED";
+      const ground = styles.getPropertyValue("--bg-app").trim() || "#05060B";
+      const nebula = styles.getPropertyValue("--accent").trim() || "#8AA0FF";
+      const fore = styles.getPropertyValue("--text-bright").trim() || "#EDEFF7";
 
+      ctx!.globalCompositeOperation = "source-over";
       ctx!.fillStyle = ground;
       ctx!.fillRect(0, 0, width, height);
 
-      // Toz şeritleri ışık EKLEMEZ, ışık EKSİLTİR. Gerçek karanlık nebulalar
-      // emisyon değil okültasyondur; panelin arkasını koyulaştırdıkları için
-      // metin kontrastı düşmez, artar.
-      for (const lane of lanes) {
-        const cx = width * lane.x + Math.cos(time * lane.speed + lane.phase) * width * 0.05;
-        const cy = height * lane.y + Math.sin(time * lane.speed + lane.phase) * height * 0.04;
-        const radius = Math.max(width, height) * lane.r;
-        const gradient = ctx!.createRadialGradient(cx, cy, 0, cx, cy, radius);
-        gradient.addColorStop(0, "rgba(0,0,0,0.55)");
-        gradient.addColorStop(0.55, "rgba(0,0,0,0.22)");
-        gradient.addColorStop(1, "rgba(0,0,0,0)");
-        ctx!.fillStyle = gradient;
-        ctx!.fillRect(0, 0, width, height);
-      }
+      const cx = width / 2;
+      const cy = height / 2;
+      const focal = height * 0.9;
+      const cos = Math.cos(yaw);
+      const sin = Math.sin(yaw);
 
-      for (const item of stars) {
-        item.x += item.vx;
-        item.y += item.vy;
-        if (item.x > width + 2) item.x = -2;
-        if (item.y > height + 2) item.y = -2;
-        ctx!.globalAlpha = item.a;
-        // En yakın katman toz rengini alır; derindekiler beyaz kalır.
-        ctx!.fillStyle = item.r > 1.4 * dpr ? dust : star;
+      // Additive blending: üst üste binen parçacıklar birikerek nebula yoğunluğu üretir.
+      ctx!.globalCompositeOperation = "lighter";
+
+      for (const p of particles) {
+        // Kamerayı döndürmek yerine dünyayı ters yönde döndürmek daha ucuz.
+        const rx = p.x * cos - p.z * sin;
+        const rz = p.z * cos + p.x * sin;
+        const depth = rz + DEPTH * 0.35;
+        if (depth <= 1) continue;
+
+        const scale = focal / depth;
+        const sx = cx + rx * scale;
+        const sy = cy + p.y * scale;
+        if (sx < -8 || sx > width + 8 || sy < -8 || sy > height + 8) continue;
+
+        // Uzaktakiler küçülür ve söner; yakındakiler nebula rengini alır.
+        const near = 1 - depth / (DEPTH * 1.35);
+        const radius = Math.max(0.35, scale * 1.5) * dpr;
+        ctx!.globalAlpha = p.a * Math.max(0.15, near);
+        ctx!.fillStyle = near > 0.55 ? nebula : fore;
         ctx!.beginPath();
-        ctx!.arc(item.x, item.y, item.r, 0, Math.PI * 2);
+        ctx!.arc(sx, sy, radius, 0, Math.PI * 2);
         ctx!.fill();
       }
+
       ctx!.globalAlpha = 1;
+      ctx!.globalCompositeOperation = "source-over";
     }
 
     const idle = () => document.hidden || callActiveRef.current || reduced.matches;
 
-    function frame(time: number) {
+    function frame() {
       if (idle()) {
         running = false;
-        draw(time);
+        draw();
         return;
       }
-      draw(time);
+      yaw += YAW_PER_FRAME;
+      draw();
       frameId = requestAnimationFrame(frame);
     }
 
     function wake() {
       if (running) return;
       if (idle()) {
-        draw(performance.now());
+        draw();
         return;
       }
       running = true;
       frameId = requestAnimationFrame(frame);
     }
 
-    resize();
-    wake();
-
-    // Kaldırılabilmesi için adlandırılmış olmalı; anonim fonksiyon sızdırırdı.
-    const handleResize = () => {
+    function handleResize() {
       resize();
       wake();
-    };
+    }
+
+    resize();
+    wake();
 
     window.addEventListener("resize", handleResize);
     document.addEventListener("visibilitychange", wake);

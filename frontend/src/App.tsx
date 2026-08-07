@@ -18,6 +18,7 @@ import { ServerInvitesPanel } from "./components/ServerInvitesPanel";
 import { ServerSettingsPanel } from "./components/ServerSettingsPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { ThemeStage } from "./components/ThemeStage";
+import { installThemeEffects, stampHanko } from "./themeEffects";
 import { VideoStage } from "./components/VideoStage";
 import { desktopBridge, labUrl } from "./desktopBridge";
 // Yalnız görünürlük bayrakları; LabApp'i import etmek Lab'in ayrı chunk olmasını bozardı.
@@ -164,6 +165,12 @@ export default function App() {
   const [voiceStageVisible, setVoiceStageVisible] = useState(true);
   // "system" çözüldükten sonraki gerçek tema; tema arka plan katmanı bunu izler.
   const [appliedTheme, setAppliedTheme] = useState<ThemeMode>("dark");
+  // Tema etkileri bir kez kurulur ve güncel değerleri ref üzerinden okur;
+  // böylece her tema/ayar değişiminde dinleyici sökülüp takılmaz.
+  const appliedThemeRef = useRef(appliedTheme);
+  appliedThemeRef.current = appliedTheme;
+  const voiceSettingsRef = useRef(voiceSettings);
+  voiceSettingsRef.current = voiceSettings;
   const [membersVisible, setMembersVisible] = useState(false);
   const [serverInvitesOpen, setServerInvitesOpen] = useState(false);
   const [joinServerOpen, setJoinServerOpen] = useState(() => Boolean(inviteCodeFromLocation()));
@@ -409,6 +416,14 @@ export default function App() {
     }
     apply(voiceSettings.theme);
   }, [voiceSettings.theme]);
+
+  // Temaya bağlı ses/mühür etkileri. Yalnız ilgili tema etkinken iş yaparlar.
+  useEffect(() => {
+    return installThemeEffects(
+      () => appliedThemeRef.current,
+      () => voiceSettingsRef.current.themeSoundEffects,
+    );
+  }, []);
 
   // İlk açılışta saklı bir token varsa oturumu doğrula.
   useEffect(() => {
@@ -932,6 +947,9 @@ export default function App() {
             : mergeIncomingMessage(current, sent),
         );
       }
+      // Sessiz Mürekkep: sunucu teslimi onayladığında hanko mührü basılır.
+      // İyimser gönderimde değil, gerçekten ulaştığında.
+      stampHanko();
     } catch (err) {
       if (activeChannelIdRef.current === channelId) {
         setMessages((current) =>

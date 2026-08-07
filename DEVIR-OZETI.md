@@ -995,10 +995,10 @@ Altı tema vardır. İkisi varsayılan, dördü sonradan eklenmiş konsepttir.
 |---|---|---|
 | *(yok)* | Koyu | Varsayılan. Mor vurgu, glassmorphism |
 | `light` | Açık | Varsayılan |
-| `space` | Derin Uzay | Karanlık nebula, oksitlenmiş bakır (#C77B4E) vurgu |
-| `bespoke` | Özel Dikim | Mat deri dokusu, eskitilmiş altın (#B08D4F), serif başlık |
-| `feline` | Feline | Latte/krem — **tek açık konsept**, line-art kuyruk/kulak detayları |
-| `razor` | Jilet | Saf siyah, elektrik mavisi (#0F5BFF), 0px köşe, gölge yok |
+| `space` | Derin Uzay | Nebula mavisi (#8AA0FF), 800 parçacıklı canvas, spotlight |
+| `bespoke` | Özel Dikim | feTurbulence kumaş, bakır dikiş (#B08D57), serif başlık |
+| `feline` | Feline | Latte/krem, line-art kedi, 200 Hz filtreli tok tık sesi |
+| `ink` | Sessiz Mürekkep | Washi kağıt, sumi mürekkep, hanko kırmızısı (#8B1A1A) |
 
 **Mimari — bu kural bozulmamalı:** dört yeni tema `frontend/src/themes.css` içindedir ve
 **tamamen eklemelidir**. Her kural `:root[data-theme="<ad>"]` altına kapatılmıştır; `App.css`
@@ -1006,6 +1006,22 @@ içindeki koyu ve açık temalara hiç dokunulmaz. Doğrulandı: koyu `#080b14`/
 `#edf0f7`/`#6656e8` — ikisi de eklemeden önceki değerleriyle birebir aynı.
 
 Geri alma: `App.tsx` ve `lab/main.tsx` içindeki `import "./themes.css"` satırlarını sil.
+
+**Fontlar kendi sunucumuzda barındırılır.** CSP `font-src 'self' data:` diyor, Google Fonts CDN
+engelli. `frontend/public/fonts/` altında Space Grotesk, Inter Tight ve Shippori Mincho'nun
+latin + latin-ext alt kümeleri var (216 KB, hepsi SIL OFL). **latin-ext zorunludur** — `ğ`, `ş`
+ve noktasız `ı` latin alt kümesinde yoktur. GT Sectra, Canela ve Söhne ticari lisanslıdır,
+kullanılmadı; yerlerine en yakın sistem yığınları konuldu.
+
+**Space canvas'ı three.js kullanmaz.** 800 parçacık 3B uzayda tutulup her karede perspektifle
+izdüşürülüyor, `globalCompositeOperation = "lighter"` ile additive blending yapılıyor, kamera
+kare başına 0.0005 rad dönüyor. three.js ~600 kB ve aynı GPU WebRTC video kodluyor; bağımlılık
+eklemeye değmedi. Görsel sonuç spesifikasyonla aynı.
+
+**Ses:** yalnız Feline'de, 40 ms 200 Hz alçak geçiren sentetik tık (`themeEffects.ts`), örnek
+dosya yok. Sesli sohbette mikrofona sızmaması için kısık; Ayarlar'dan kapatılabilir. Özel Dikim
+ve Sessiz Mürekkep bilinçli olarak sessizdir.
+
 
 **Neden yerinde token'lama yapılmadı:** `App.css` 10.000 satırı aşıyor ve token bloklarının
 dışında ~390 sabit renk barındırıyor (367 satır). Dağılım: medya sahnesi 104, `bots-panel` 44,

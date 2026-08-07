@@ -7,7 +7,7 @@ export type VoiceMode = "toggle" | "ptt";
  * `:root[data-theme="..."]` seçicileri altında yaşarlar, varsayılan iki temaya
  * dokunmazlar.
  */
-export type ThemeMode = "dark" | "light" | "system" | "space" | "bespoke" | "feline" | "razor";
+export type ThemeMode = "dark" | "light" | "system" | "space" | "bespoke" | "feline" | "ink";
 
 export interface ThemeOption {
   value: ThemeMode;
@@ -21,10 +21,10 @@ export const THEME_OPTIONS: ThemeOption[] = [
   { value: "system",  label: "Sistem",        hint: "İşletim sisteminin tercihini izler",        swatch: ["#1e1f22", "#313338", "#5865f2"] },
   { value: "dark",    label: "Koyu",          hint: "Varsayılan mor vurgulu koyu tema",          swatch: ["#080b14", "#1d2234", "#8168ff"] },
   { value: "light",   label: "Açık",          hint: "Varsayılan açık tema",                      swatch: ["#edf0f7", "#ffffff", "#6656e8"] },
-  { value: "space",   label: "Derin Uzay",    hint: "Karanlık nebula, oksitlenmiş bakır vurgu",  swatch: ["#07090f", "#141b28", "#c77b4e"] },
-  { value: "bespoke", label: "Özel Dikim",    hint: "Mat deri dokusu, eskitilmiş altın, serif",  swatch: ["#14120e", "#201d17", "#b08d4f"] },
-  { value: "feline",  label: "Feline",        hint: "Latte ve krem, line-art detaylar",          swatch: ["#ede8e0", "#f8f5f0", "#a6714a"] },
-  { value: "razor",   label: "Jilet",         hint: "Keskin köşe, tek piksel çizgi, saf kontrast", swatch: ["#000000", "#101010", "#0f5bff"] },
+  { value: "space",   label: "Derin Uzay",    hint: "Nebula parçacıkları, cam yüzeyler, spotlight", swatch: ["#05060B", "#0E1220", "#8AA0FF"] },
+  { value: "bespoke", label: "Özel Dikim",    hint: "Mat kumaş, bakır dikiş, serif başlıklar",      swatch: ["#1B1A17", "#F3EFE7", "#B08D57"] },
+  { value: "feline",  label: "Feline",        hint: "Latte ve krem, line-art kedi, tok tık sesi",   swatch: ["#EDE6DA", "#FBF7F0", "#8A6A4B"] },
+  { value: "ink",     label: "Sessiz Mürekkep", hint: "Washi kağıt, sumi mürekkep, hanko mührü",    swatch: ["#F4EFE6", "#FBF8F2", "#8B1A1A"] },
 ];
 
 const THEME_VALUES = THEME_OPTIONS.map((option) => option.value);
@@ -136,6 +136,8 @@ export interface VoiceSettings {
   screenShareMode: ScreenShareMode;
   /** Ekran/sekme sesi paylaşılırken giden ses bitrate'ini yükseltir. */
   highFidelityStreamAudio: boolean;
+  /** Temaya ait ses geri bildirimi (şu an yalnız Feline'in tok tıklaması). */
+  themeSoundEffects: boolean;
   // Ses işleme (getUserMedia MediaTrackConstraints'e uygulanır).
   noiseSuppression: boolean;
   echoCancellation: boolean;
@@ -188,6 +190,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   videoFrameRate: 60,
   screenShareMode: "motion",
   highFidelityStreamAudio: true,
+  themeSoundEffects: true,
   noiseSuppression: true,
   echoCancellation: true,
   autoGainControl: true,
@@ -248,6 +251,7 @@ export function loadVoiceSettings(): VoiceSettings {
         ? (parsed.videoQuality as VideoQuality)
         : "1080p",
       highFidelityStreamAudio: boolWithDefault(parsed.highFidelityStreamAudio, true),
+      themeSoundEffects: boolWithDefault(parsed.themeSoundEffects, true),
       videoFrameRate: parsed.videoFrameRate === 30 ? 30 : 60,
       screenShareMode: parsed.screenShareMode === "detail" ? "detail" : "motion",
       noiseSuppression: boolWithDefault(parsed.noiseSuppression, true),

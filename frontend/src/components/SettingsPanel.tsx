@@ -701,9 +701,20 @@ export function SettingsPanel({
                 </button>
               ))}
             </div>
+            <label className="settings-panel__radio">
+              <input
+                type="checkbox"
+                checked={settings.themeSoundEffects}
+                onChange={(e) => update({ themeSoundEffects: e.target.checked })}
+              />
+              Tema ses geri bildirimi (yalnız Feline)
+            </label>
             <p className="settings-panel__hint">
               Tema anında uygulanır. Koyu ve Açık varsayılan temalardır; diğerleri ayrı bir
-              katman olarak eklenmiştir ve varsayılanları değiştirmez.
+              katman olarak eklenmiştir ve varsayılanları değiştirmez. Feline'in tıklama sesi
+              çok kısa ve alçak frekanslıdır; sesli sohbette rahatsız etmemesi için kısık
+              tutulur, buradan tamamen kapatılabilir. Özel Dikim ve Sessiz Mürekkep bilinçli
+              olarak sessizdir.
             </p>
           </div>
         ) : null}
