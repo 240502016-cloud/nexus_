@@ -558,8 +558,11 @@ Eski değerlerin ikisi zaten kırıktı: Ortak Hikâye 650 token isteyip 12 sani
 `keep_alive` alanı ekler — ortam değişkenine bağlı değildir, AI Gateway gövdeyi değiştirmeden
 ilettiği için araya girmez. Boş bırakılırsa alan gönderilmez ve Ollama kendi varsayılanını kullanır.
 
-> **Bilinen eksik:** Gateway şu an Windows'ta kalıcı servis/scheduled task olarak
-> kayıtlı değildir; bilgisayar yeniden başlayınca elle açılması gerekir.
+> **Çözüldü (7 Ağustos 2026):** Gateway artık oturum açılışında otomatik başlar.
+> Kurulum `scripts\windows\install-nexus-tasks.ps1` ile yapılır ve Başlangıç klasörüne
+> gizli bir kısayol koyar. **Zamanlanmış görev değildir**: oturum açılışı (`AtLogOn`)
+> tetikleyicili görev kaydetmek yönetici hakkı ister ve bu makinede "Erişim engellendi"
+> döner; Başlangıç klasörü aynı işi yönetici hakkı olmadan yapar.
 
 ### Dağıtılan deneyim modülleri (`backend/app/modules/`)
 
@@ -1156,6 +1159,33 @@ için güncellenmemiştir.** Sunucuda doğrudan `docker compose` kullan. Script'
 backup/restore/AI gateway mantığı için referanstır.
 
 ---
+
+## 20b. Geliştirici makinesindeki otomatik görevler
+
+`scripts\windows\install-nexus-tasks.ps1` üç şeyi kurar (tekrar çalıştırmak güvenlidir,
+`-Remove` ile hepsi kaldırılır):
+
+| Ne | Nasıl | Ne zaman |
+|---|---|---|
+| AI Gateway | Başlangıç klasörü kısayolu | oturum açılışında |
+| Sağlık izleme | zamanlanmış görev | 15 dakikada bir |
+| Yedek çekme | zamanlanmış görev | günlük 09:00 |
+
+**Sağlık izleme** siteyi dışarıdan yoklar ve yalnız durum **değiştiğinde** bildirim gösterir
+(ayakta → düştü, düştü → döndü). Sunucunun dışından yapılması şarttır: sunucu düştüğünde
+üzerindeki bir izleyici de düşeceği için haber veremezdi. Log:
+`%LOCALAPPDATA%\nexus-monitor\health.log`.
+
+Kurarken karşılaşılan iki tuzak:
+
+- `AtLogOn` tetikleyicili görev kaydı **yönetici hakkı ister**. Gateway bu yüzden
+  zamanlanmış görev değil, Başlangıç klasörü kısayoludur.
+- İzleme script'inin durum/log yolları görev tanımında **mutlak** verilir. Ortam
+  değişkenine bırakılırsa görevin ortamı farklı çözerse sessizce başka dosyaya yazar.
+
+Ayrıca `/healthz` yanıtı `Content-Type` içinde charset taşımadığı için PowerShell içeriği
+`Byte[]` olarak döndürür; desen eşleştirmeden önce metne çevrilmelidir. Aksi hâlde site
+ayaktayken bile sürekli yanlış alarm üretir.
 
 ## 21. Sorun giderme
 
