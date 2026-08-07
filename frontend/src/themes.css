@@ -1,0 +1,529 @@
+/* ==========================================================================
+   Nexus — tema sistemi
+   ==========================================================================
+
+   MIMARI KARARI: bu dosya tamamen EKLEMELIDIR.
+
+   Mevcut "dark" ve "light" temalar App.css icinde durur ve buradan hic
+   etkilenmez; her kural `:root[data-theme="<yeni-tema>"]` altina kapatilmistir.
+   Yani varsayilan iki temada tek piksel degismez, regresyon riski yoktur.
+   Geri almak icin App.tsx icindeki tek satirlik import silinir.
+
+   NEDEN BOYLE: App.css 10.000 satiri asiyor ve token bloklarinin disinda
+   ~390 sabit renk barindiriyor (agirlikli olarak medya sahnesi, bots-panel ve
+   giris ekrani). Bunlari yerinde token'a cevirmek tum arayuzu riske atardi.
+   Bunun yerine yeni temalar hem temel token'lari ezer hem de bu sabit renk
+   kumelerini kendi seciciler altinda acikca ele alir.
+
+   TOKEN SOZLESMESI: bir tema asagidaki temel token'lari tanimlar. Turetilmis
+   olanlar (--product-*, --accent-gradient, --ring) color-mix ile kendiliginden
+   gelir, tekrar tanimlanmalari gerekmez.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Sozlesmeye eklenen yeni token'lar.
+   Varsayilanlari mevcut davranisi birebir korur; yalnizca yeni temalar ezer.
+   -------------------------------------------------------------------------- */
+:root {
+  /* Vurgu zeminlerinin uzerindeki metin. Mor/mavi vurgularda beyaz dogruydu,
+     altin ve latte gibi acik vurgularda beyaz okunmaz hale gelir. */
+  --on-accent: #fff;
+
+  /* Tipografi rolleri. Varsayilan: mevcut tek aile. */
+  --font-display: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-body: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-num: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, monospace;
+
+  /* Sayfa dokusu (kumas/deri/noise). Varsayilan: yok. */
+  --page-texture: none;
+
+  /* Cam yogunlugu. Razor gibi temalar bunu 0'a indirir. */
+  --glass-blur: 24px;
+
+  /* App.css'te KULLANILAN ama hicbir yerde TANIMLANMAYAN token'lar.
+     Tanimsiz olduklari icin oyun panelleri (Son Portal, Escape Room, Ortak
+     Hikaye, Uc Muhur) kismen renksiz kaliyordu. Burada varsayilanlarini
+     mevcut sisteme baglayarak onariyoruz. */
+  --accent-primary: var(--accent);
+  --border-subtle: var(--glass-border);
+  --surface-raised: var(--bg-panel);
+  --shadow-xl: var(--shadow-strong);
+  --text: var(--text-primary);
+}
+
+/* ==========================================================================
+   1 — DERIN UZAY AKISI  (data-theme="space")
+   Tez: arka plan isik EKLEMEZ, isik EKSILTIR. Gercek karanlik nebulalar
+   emisyon degil okultasyondur. Vurgu neon mor degil, astrofotograflardaki
+   gercek toz rengi: oksitlenmis bakir. Turuncu ayrica video dosemelerindeki
+   ten tonlariyla cakismaz — mor cakisir.
+   ========================================================================== */
+:root[data-theme="space"] {
+  color-scheme: dark;
+
+  --text-primary: #C9D0DC;
+  --text-muted:   #8892A3;
+  --text-soft:    #AEB7C6;
+  --text-bright:  #E8EAED;
+  --text-dim:     #5C6676;
+
+  --accent:       #C77B4E;
+  --accent-hover: #D68C5E;
+  --accent-soft:  rgba(199, 123, 78, 0.16);
+  --accent-cyan:  #6E8CA8;
+
+  --green:        #5FA97C;
+  --green-hover:  #6FB98C;
+  --red:          #C25B5B;
+  --danger:       #C25B5B;
+
+  --bg-app:          #07090F;
+  --bg-darkest:      #05070B;
+  --bg-sidebar:      rgba(12, 17, 25, 0.82);
+  --bg-content:      rgba(9, 13, 20, 0.88);
+  --bg-panel:        rgba(20, 27, 40, 0.80);
+  --bg-button:       rgba(200, 215, 235, 0.07);
+  --bg-button-hover: rgba(200, 215, 235, 0.13);
+  --bg-hover:        rgba(200, 215, 235, 0.06);
+  --bg-input:        rgba(4, 6, 11, 0.72);
+  --bg-video:        #04060B;
+
+  --glass-border:    rgba(200, 215, 235, 0.09);
+  --glass-highlight: rgba(200, 215, 235, 0.05);
+
+  --shadow-soft:   0 20px 60px rgba(0, 0, 0, 0.42);
+  --shadow-strong: 0 30px 80px rgba(0, 0, 0, 0.62);
+
+  --on-accent: #120A05;
+}
+
+/* Toz seritleri: isik ekleyen bulutlar degil, isik eksilten karartmalar.
+   Cok yavas — 90 saniyelik tur, alginin esigin altinda. */
+:root[data-theme="space"] body {
+  background:
+    radial-gradient(58% 52% at 20% 18%, rgba(0, 0, 0, 0.55), transparent 70%),
+    radial-gradient(52% 48% at 82% 76%, rgba(0, 0, 0, 0.46), transparent 72%),
+    radial-gradient(40% 38% at 62% 12%, rgba(199, 123, 78, 0.07), transparent 68%),
+    var(--bg-app);
+}
+
+:root[data-theme="space"] body::before {
+  background:
+    radial-gradient(34% 36% at 24% 26%, rgba(199, 123, 78, 0.10), transparent 70%),
+    radial-gradient(30% 32% at 78% 72%, rgba(110, 140, 168, 0.08), transparent 72%);
+  opacity: 0.7;
+  animation-duration: 90s;
+}
+
+/* ==========================================================================
+   2 — OZEL DIKIM ZARAFETI  (data-theme="bespoke")
+   Koyu yun ve mat deri. Sicak siyah zemin (mavi degil), eskitilmis altin ve
+   bakir aksan. Serif baslik / sans govde. Yuzeyler kagit gibi ince, golge
+   yerine hairline cizgi.
+   ========================================================================== */
+:root[data-theme="bespoke"] {
+  color-scheme: dark;
+
+  --text-primary: #D8D0C0;
+  --text-muted:   #948B79;
+  --text-soft:    #C0B7A5;
+  --text-bright:  #F2EDE2;
+  --text-dim:     #6E6656;
+
+  --accent:       #B08D4F;   /* eskitilmis altin */
+  --accent-hover: #C29E5E;
+  --accent-soft:  rgba(176, 141, 79, 0.15);
+  --accent-cyan:  #9A6B43;   /* bakir — ikinci aksan */
+
+  --green:        #7D8F5A;
+  --green-hover:  #8C9E68;
+  --red:          #B45B4A;
+  --danger:       #B45B4A;
+
+  --bg-app:          #14120E;
+  --bg-darkest:      #0F0D0A;
+  --bg-sidebar:      rgba(26, 23, 18, 0.86);
+  --bg-content:      rgba(20, 18, 14, 0.90);
+  --bg-panel:        rgba(32, 29, 23, 0.88);
+  --bg-button:       rgba(216, 208, 192, 0.07);
+  --bg-button-hover: rgba(216, 208, 192, 0.13);
+  --bg-hover:        rgba(216, 208, 192, 0.06);
+  --bg-input:        rgba(12, 10, 8, 0.70);
+  --bg-video:        #0B0A08;
+
+  --glass-border:    rgba(176, 141, 79, 0.20);
+  --glass-highlight: rgba(242, 237, 226, 0.05);
+
+  --shadow-soft:   0 18px 44px rgba(0, 0, 0, 0.44);
+  --shadow-strong: 0 26px 64px rgba(0, 0, 0, 0.58);
+
+  --on-accent: #17140D;
+  --glass-blur: 14px;
+
+  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+  --font-body: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+/* Mat deri dokusu: iki cok dusuk kontrastli capraz gradyan. Gorsel dosya yok,
+   bu yuzden bant genisligi maliyeti sifir. */
+:root[data-theme="bespoke"] body {
+  background:
+    repeating-linear-gradient(48deg, rgba(255, 250, 235, 0.014) 0 2px, transparent 2px 5px),
+    repeating-linear-gradient(-42deg, rgba(0, 0, 0, 0.05) 0 3px, transparent 3px 7px),
+    radial-gradient(70% 60% at 50% 0%, rgba(176, 141, 79, 0.07), transparent 70%),
+    var(--bg-app);
+}
+
+:root[data-theme="bespoke"] body::before { opacity: 0.25; }
+
+/* Serif baslik — terzinin etiketi. Govde metni sans kalir. */
+:root[data-theme="bespoke"] h1,
+:root[data-theme="bespoke"] h2,
+:root[data-theme="bespoke"] h3,
+:root[data-theme="bespoke"] .settings-panel__header h2,
+:root[data-theme="bespoke"] .panel-eyebrow {
+  font-family: var(--font-display);
+  letter-spacing: -0.005em;
+  font-weight: 600;
+}
+
+/* Ince bakir aksan cizgileri: golge yerine kenar. */
+:root[data-theme="bespoke"] .app-main__toolbar,
+:root[data-theme="bespoke"] .channel-sidebar__header {
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+}
+
+:root[data-theme="bespoke"] .server-icon.active {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+/* ==========================================================================
+   3 — SOFISTIKE FELINE  (data-theme="feline")
+   Kedi temasinin yetiskin versiyonu: renkli cizim yok, keskin hatli line-art
+   siluetler ve latte/komur/krem paleti. TEK ACIK TEMA.
+   ========================================================================== */
+:root[data-theme="feline"] {
+  color-scheme: light;
+
+  --text-primary: #2B2724;
+  --text-muted:   #6B635C;
+  --text-soft:    #443E39;
+  --text-bright:  #17140F;
+  --text-dim:     #8C837A;
+
+  --accent:       #A6714A;   /* latte */
+  --accent-hover: #91603C;
+  --accent-soft:  rgba(166, 113, 74, 0.13);
+  --accent-cyan:  #6E7A6A;   /* soluk zeytin — ikinci aksan */
+
+  --green:        #4F7A52;
+  --green-hover:  #416845;
+  --red:          #B04A3E;
+  --danger:       #B04A3E;
+
+  --bg-app:          #EDE8E0;
+  --bg-darkest:      #DFD8CD;
+  --bg-sidebar:      rgba(245, 241, 235, 0.88);
+  --bg-content:      rgba(252, 250, 246, 0.92);
+  --bg-panel:        rgba(248, 245, 240, 0.94);
+  --bg-button:       rgba(43, 39, 36, 0.06);
+  --bg-button-hover: rgba(43, 39, 36, 0.11);
+  --bg-hover:        rgba(43, 39, 36, 0.05);
+  --bg-input:        rgba(255, 255, 255, 0.94);
+  --bg-video:        #1B1815;   /* video her temada koyu kalir */
+
+  --glass-border:    rgba(43, 39, 36, 0.12);
+  --glass-highlight: rgba(255, 255, 255, 0.85);
+
+  --shadow-soft:   0 16px 40px rgba(70, 60, 50, 0.12);
+  --shadow-strong: 0 26px 64px rgba(70, 60, 50, 0.18);
+
+  --on-accent: #FBF8F4;
+  --glass-blur: 12px;
+}
+
+/* Kagit dokusu — cok ince, latte tonunda. */
+:root[data-theme="feline"] body {
+  background:
+    repeating-linear-gradient(0deg, rgba(43, 39, 36, 0.014) 0 1px, transparent 1px 4px),
+    radial-gradient(60% 50% at 15% 0%, rgba(166, 113, 74, 0.10), transparent 68%),
+    var(--bg-app);
+}
+
+:root[data-theme="feline"] body::before { opacity: 0.2; }
+
+/*
+ * Mikro etkileşim: kuyruk.
+ * Aktif sunucu ikonunun sag alt kosesinde ince bir line-art kuyruk belirir ve
+ * cok yavas sallanir. Cizim degil, tek bir egri kenardan uretiliyor — ek
+ * varlik dosyasi yok. Hover'da uyanir, sonra durur; surekli oynamaz.
+ */
+:root[data-theme="feline"] .server-icon { position: relative; }
+
+:root[data-theme="feline"] .server-icon.active::after,
+:root[data-theme="feline"] .server-icon:hover::after {
+  content: "";
+  position: absolute;
+  right: -7px;
+  bottom: 4px;
+  width: 15px;
+  height: 15px;
+  border: 1.6px solid var(--accent);
+  border-color: transparent var(--accent) transparent transparent;
+  border-radius: 0 100% 0 0;
+  transform-origin: 0 100%;
+  animation: feline-tail 2.8s var(--ease-out, ease) 1;
+  pointer-events: none;
+}
+
+@keyframes feline-tail {
+  0%   { transform: rotate(-14deg); opacity: 0; }
+  18%  { opacity: 1; }
+  45%  { transform: rotate(9deg); }
+  72%  { transform: rotate(-4deg); }
+  100% { transform: rotate(0deg); opacity: 1; }
+}
+
+/* Kulak: kanal listesindeki aktif satirin ucunda iki keskin ucgen. */
+:root[data-theme="feline"] .channel-item.active::after {
+  content: "";
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  width: 0;
+  height: 0;
+  transform: translateY(-50%);
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-bottom: 6px solid color-mix(in srgb, var(--accent) 62%, transparent);
+  pointer-events: none;
+}
+
+/* Acik temada video sahnesi koyu kalmali; sabit koyu renkler zaten dogru,
+   yalniz kontrollerin okunakliligini garantiye aliyoruz. */
+:root[data-theme="feline"] .video-stage,
+:root[data-theme="feline"] .video-tile {
+  color: #EDE8E0;
+}
+
+/* ==========================================================================
+   4 — JILET  (data-theme="razor")
+   Sifir yuvarlatma, sifir golge, sifir bulaniklik. Her ayrim tek piksellik
+   cizgi. Tek vurucu renk: elektrik mavisi.
+   ========================================================================== */
+:root[data-theme="razor"] {
+  color-scheme: dark;
+
+  --text-primary: #E4E4E4;
+  --text-muted:   #8A8A8A;
+  --text-soft:    #C4C4C4;
+  --text-bright:  #FFFFFF;
+  --text-dim:     #616161;
+
+  --accent:       #0F5BFF;   /* elektrik mavisi */
+  --accent-hover: #2E72FF;
+  --accent-soft:  rgba(15, 91, 255, 0.16);
+  --accent-cyan:  #0F5BFF;   /* tek vurgu — gradyan da duz kalir */
+
+  --green:        #00C566;
+  --green-hover:  #00A957;
+  --red:          #FF2D2D;
+  --danger:       #FF2D2D;
+
+  --bg-app:          #000000;
+  --bg-darkest:      #000000;
+  --bg-sidebar:      #070707;
+  --bg-content:      #0A0A0A;
+  --bg-panel:        #101010;
+  --bg-button:       #161616;
+  --bg-button-hover: #1F1F1F;
+  --bg-hover:        #141414;
+  --bg-input:        #000000;
+  --bg-video:        #000000;
+
+  --glass-border:    #262626;
+  --glass-highlight: transparent;
+
+  --shadow-soft:   none;
+  --shadow-strong: none;
+  --lift-shadow:   none;
+
+  --on-accent: #FFFFFF;
+  --glass-blur: 0px;
+
+  /* Keskin kose — token seviyesinde. */
+  --radius-lg: 0px;
+  --radius-md: 0px;
+  --surface-radius: 0px;
+  --control-radius: 0px;
+}
+
+/* Yuvarlatma ve bulaniklik topyekun kaldirilir. Token'lari ezmek yetmez;
+   App.css icinde dogrudan px yazilmis yerler de var. */
+:root[data-theme="razor"] *,
+:root[data-theme="razor"] *::before,
+:root[data-theme="razor"] *::after {
+  border-radius: 0 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Golge yok — tek istisna yok. Derinlik yalniz cizgiyle anlatilir. */
+:root[data-theme="razor"] .settings-panel,
+:root[data-theme="razor"] .settings-panel--wide,
+:root[data-theme="razor"] .lab-card,
+:root[data-theme="razor"] .voice-ctrl,
+:root[data-theme="razor"] .stage-control,
+:root[data-theme="razor"] .server-icon,
+:root[data-theme="razor"] .chat-message__actions button {
+  box-shadow: none !important;
+}
+
+/* Tek piksellik ayrimlar, her yerde ayni kalinlik ve ayni renk. */
+:root[data-theme="razor"] .channel-sidebar,
+:root[data-theme="razor"] .members-panel,
+:root[data-theme="razor"] .app-main__toolbar,
+:root[data-theme="razor"] .server-rail {
+  border-color: var(--glass-border);
+}
+
+/* Aktif durum dolgu ile degil, tam kontrastla anlatilir. */
+:root[data-theme="razor"] .server-icon.active {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+:root[data-theme="razor"] .channel-item.active {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* Zemin duz siyah — ortam isigi ve gradyan yok. */
+:root[data-theme="razor"] body {
+  background: var(--bg-app);
+}
+
+:root[data-theme="razor"] body::before {
+  display: none;
+}
+
+/* ==========================================================================
+   Tum yeni temalar icin ortak duzeltmeler
+   App.css icinde sabit kodlanmis, tema degisince yanlis kalan noktalar.
+   ========================================================================== */
+
+/* Vurgu zemini uzerindeki metin sabit #fff yazilmis (68 yerde). Altin ve
+   latte gibi acik vurgularda beyaz okunmaz; --on-accent devreye girer. */
+:root[data-theme="space"] .server-icon.active,
+:root[data-theme="bespoke"] .server-icon.active,
+:root[data-theme="feline"] .server-icon.active,
+:root[data-theme="space"] .login-form button[type="submit"],
+:root[data-theme="bespoke"] .login-form button[type="submit"],
+:root[data-theme="feline"] .login-form button[type="submit"],
+:root[data-theme="space"] .register-form button[type="submit"],
+:root[data-theme="bespoke"] .register-form button[type="submit"],
+:root[data-theme="feline"] .register-form button[type="submit"],
+:root[data-theme="space"] .settings-panel__section button[type="submit"],
+:root[data-theme="bespoke"] .settings-panel__section button[type="submit"],
+:root[data-theme="feline"] .settings-panel__section button[type="submit"],
+:root[data-theme="space"] .lab-button,
+:root[data-theme="bespoke"] .lab-button,
+:root[data-theme="feline"] .lab-button {
+  color: var(--on-accent);
+}
+
+/* Cam yogunlugu tema basina. */
+:root[data-theme="space"] .settings-panel,
+:root[data-theme="bespoke"] .settings-panel,
+:root[data-theme="feline"] .settings-panel,
+:root[data-theme="space"] .settings-panel--wide,
+:root[data-theme="bespoke"] .settings-panel--wide,
+:root[data-theme="feline"] .settings-panel--wide {
+  backdrop-filter: blur(var(--glass-blur)) saturate(130%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(130%);
+}
+
+/* Giris ekrani gorseli koyu sabitlerle kurulu; acik temada zemini duzelt. */
+:root[data-theme="feline"] .login-visual {
+  background:
+    radial-gradient(60% 60% at 30% 20%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 70%),
+    var(--bg-darkest);
+  color: var(--text-primary);
+}
+
+/* Bots paneli en yogun sabit renk kumesi (44 nokta). Yeni temalarda
+   yuzeyi ve kenari token'a baglayarak tabani duzeltiyoruz. */
+:root[data-theme="space"] .bots-panel,
+:root[data-theme="bespoke"] .bots-panel,
+:root[data-theme="feline"] .bots-panel,
+:root[data-theme="razor"] .bots-panel {
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  border-color: var(--glass-border);
+}
+
+/* Yeni temalarda hareket azaltma tercihi yine mutlaktir. */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme="feline"] .server-icon.active::after,
+  :root[data-theme="feline"] .server-icon:hover::after {
+    animation: none;
+  }
+}
+
+/* ==========================================================================
+   Ayarlar > Görünüm — tema seçici
+   Her kart kendi paletini üç noktayla gösterir; isim okumadan da seçilebilir.
+   ========================================================================== */
+.theme-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 9px;
+}
+
+.theme-card {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md, 12px);
+  background: var(--bg-button);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.theme-card:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: var(--bg-button-hover);
+}
+
+.theme-card--active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.theme-card__swatch {
+  display: flex;
+  gap: 3px;
+  height: 22px;
+}
+
+.theme-card__swatch span {
+  flex: 1;
+  border-radius: 4px;
+  border: 1px solid var(--glass-border);
+}
+
+.theme-card__name {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text-bright);
+}
+
+.theme-card__hint {
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--text-dim);
+}

@@ -15,6 +15,7 @@ import { RoastBattlePanel } from "../components/RoastBattlePanel";
 import { SharedStoryPanel } from "../components/SharedStoryPanel";
 import { LAB_HAS_VISIBLE_MODULES, labModuleIsVisible } from "./released";
 import { loadVoiceSettings } from "../settings";
+import type { ThemeMode } from "../settings";
 import type { Member, Server, User } from "../types";
 
 /** Lab modüllerinin ortak sözleşmesi. Panellerin kendi kodu değişmez. */
@@ -141,19 +142,19 @@ function readInitialSelection(): { serverId: number | null; moduleKey: string | 
 function useSharedTheme(): void {
   useEffect(() => {
     const root = document.documentElement;
-    const apply = (light: boolean) => {
-      if (light) root.setAttribute("data-theme", "light");
-      else root.removeAttribute("data-theme");
+    const apply = (theme: ThemeMode) => {
+      if (theme === "dark") root.removeAttribute("data-theme");
+      else root.setAttribute("data-theme", theme);
     };
     const preference = loadVoiceSettings().theme;
     if (preference === "system") {
       const query = window.matchMedia("(prefers-color-scheme: light)");
-      apply(query.matches);
-      const handler = (event: MediaQueryListEvent) => apply(event.matches);
+      apply(query.matches ? "light" : "dark");
+      const handler = (event: MediaQueryListEvent) => apply(event.matches ? "light" : "dark");
       query.addEventListener("change", handler);
       return () => query.removeEventListener("change", handler);
     }
-    apply(preference === "light");
+    apply(preference);
   }, []);
 }
 

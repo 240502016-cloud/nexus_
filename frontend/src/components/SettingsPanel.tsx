@@ -7,6 +7,7 @@ import type { DesktopUpdateStatus } from "../desktopBridge";
 import type { KeyCombo, VoiceSettings } from "../settings";
 import {
   DEFAULT_VOICE_SETTINGS,
+  THEME_OPTIONS,
   VIDEO_QUALITY_ORDER,
   VIDEO_QUALITY_PRESETS,
   buildAudioConstraints,
@@ -678,31 +679,32 @@ export function SettingsPanel({
         {tab === "appearance" ? (
           <div className="settings-panel__section">
             <h3 className="settings-panel__section-title">Tema</h3>
-            <label className="settings-panel__radio">
-              <input
-                type="radio"
-                checked={settings.theme === "system"}
-                onChange={() => update({ theme: "system" })}
-              />
-              Sistem temasını kullan
-            </label>
-            <label className="settings-panel__radio">
-              <input
-                type="radio"
-                checked={settings.theme === "dark"}
-                onChange={() => update({ theme: "dark" })}
-              />
-              Koyu
-            </label>
-            <label className="settings-panel__radio">
-              <input
-                type="radio"
-                checked={settings.theme === "light"}
-                onChange={() => update({ theme: "light" })}
-              />
-              Açık
-            </label>
-            <p className="settings-panel__hint">Değişiklik kaydedilince uygulanır.</p>
+            <div className="theme-picker" role="radiogroup" aria-label="Tema">
+              {THEME_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={settings.theme === option.value}
+                  className={settings.theme === option.value
+                    ? "theme-card theme-card--active"
+                    : "theme-card"}
+                  onClick={() => update({ theme: option.value })}
+                >
+                  <span className="theme-card__swatch" aria-hidden="true">
+                    {option.swatch.map((color, index) => (
+                      <span key={index} style={{ background: color }} />
+                    ))}
+                  </span>
+                  <span className="theme-card__name">{option.label}</span>
+                  <span className="theme-card__hint">{option.hint}</span>
+                </button>
+              ))}
+            </div>
+            <p className="settings-panel__hint">
+              Tema anında uygulanır. Koyu ve Açık varsayılan temalardır; diğerleri ayrı bir
+              katman olarak eklenmiştir ve varsayılanları değiştirmez.
+            </p>
           </div>
         ) : null}
 

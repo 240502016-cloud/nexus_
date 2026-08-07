@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import "./App.css";
+// Eklemeli tema katmanı. App.css'ten SONRA gelmeli; kaldırmak için bu satırı sil.
+import "./themes.css";
 import { coreApi, getToken, setToken } from "./api/client";
 import { ChannelSidebar } from "./components/ChannelSidebar";
 import { ChatArea } from "./components/ChatArea";
@@ -22,7 +24,7 @@ import { LAB_HAS_VISIBLE_MODULES } from "./lab/released";
 import { useGateway } from "./hooks/useGateway";
 import { useVoiceChannel } from "./hooks/useVoiceChannel";
 import { playMessageNotification } from "./notifications";
-import type { VoiceSettings } from "./settings";
+import type { ThemeMode, VoiceSettings } from "./settings";
 import { loadVoiceSettings } from "./settings";
 import type { Channel, ChannelType, Member, Message, Server, ServerInviteList, User } from "./types";
 import { composeAttachmentMessage } from "./messageContent";
@@ -380,22 +382,27 @@ export default function App() {
     if (gateway.selfStatus.status === "dnd" && gateway.incomingCall) gateway.rejectCall();
   }, [gateway.incomingCall, gateway.rejectCall, gateway.selfStatus.status]);
 
-  // Tema uygula: koyu = varsayılan (data-theme yok), açık = data-theme="light".
-  // "system" seçiliyse işletim sistemi tercihini izler ve anlık değişimi dinler.
+  // Tema uygula.
+  //
+  // "system" işletim sistemi tercihini izler ve anlık değişimi dinler.
+  // "dark" data-theme'i hiç yazmaz (koyu, App.css'teki varsayılan köktür).
+  // Diğer tüm temalar kendi adlarını data-theme olarak yazar; kuralları
+  // themes.css içinde, kendi seçicileri altında yaşar.
   useEffect(() => {
     const root = document.documentElement;
-    const apply = (light: boolean) => {
-      if (light) root.setAttribute("data-theme", "light");
-      else root.removeAttribute("data-theme");
+    const apply = (theme: ThemeMode) => {
+      if (theme === "dark") root.removeAttribute("data-theme");
+      else root.setAttribute("data-theme", theme);
     };
     if (voiceSettings.theme === "system") {
       const mq = window.matchMedia("(prefers-color-scheme: light)");
-      apply(mq.matches);
-      const handler = (e: MediaQueryListEvent) => apply(e.matches);
+      const sync = (light: boolean) => apply(light ? "light" : "dark");
+      sync(mq.matches);
+      const handler = (e: MediaQueryListEvent) => sync(e.matches);
       mq.addEventListener("change", handler);
       return () => mq.removeEventListener("change", handler);
     }
-    apply(voiceSettings.theme === "light");
+    apply(voiceSettings.theme);
   }, [voiceSettings.theme]);
 
   // İlk açılışta saklı bir token varsa oturumu doğrula.

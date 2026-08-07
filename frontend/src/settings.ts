@@ -1,5 +1,37 @@
 export type VoiceMode = "toggle" | "ptt";
-export type ThemeMode = "dark" | "light" | "system";
+/**
+ * Tema kimlikleri.
+ *
+ * `dark` / `light` / `system` mevcut davranıştır ve hiç değişmedi. Diğer dördü
+ * `themes.css` içinde tanımlı, tamamen eklemeli temalardır: kendi
+ * `:root[data-theme="..."]` seçicileri altında yaşarlar, varsayılan iki temaya
+ * dokunmazlar.
+ */
+export type ThemeMode = "dark" | "light" | "system" | "space" | "bespoke" | "feline" | "razor";
+
+export interface ThemeOption {
+  value: ThemeMode;
+  label: string;
+  hint: string;
+  /** Seçicideki önizleme noktaları: zemin, yüzey, vurgu. */
+  swatch: [string, string, string];
+}
+
+export const THEME_OPTIONS: ThemeOption[] = [
+  { value: "system",  label: "Sistem",        hint: "İşletim sisteminin tercihini izler",        swatch: ["#1e1f22", "#313338", "#5865f2"] },
+  { value: "dark",    label: "Koyu",          hint: "Varsayılan mor vurgulu koyu tema",          swatch: ["#080b14", "#1d2234", "#8168ff"] },
+  { value: "light",   label: "Açık",          hint: "Varsayılan açık tema",                      swatch: ["#edf0f7", "#ffffff", "#6656e8"] },
+  { value: "space",   label: "Derin Uzay",    hint: "Karanlık nebula, oksitlenmiş bakır vurgu",  swatch: ["#07090f", "#141b28", "#c77b4e"] },
+  { value: "bespoke", label: "Özel Dikim",    hint: "Mat deri dokusu, eskitilmiş altın, serif",  swatch: ["#14120e", "#201d17", "#b08d4f"] },
+  { value: "feline",  label: "Feline",        hint: "Latte ve krem, line-art detaylar",          swatch: ["#ede8e0", "#f8f5f0", "#a6714a"] },
+  { value: "razor",   label: "Jilet",         hint: "Keskin köşe, tek piksel çizgi, saf kontrast", swatch: ["#000000", "#101010", "#0f5bff"] },
+];
+
+const THEME_VALUES = THEME_OPTIONS.map((option) => option.value);
+
+export function isThemeMode(value: unknown): value is ThemeMode {
+  return typeof value === "string" && THEME_VALUES.includes(value as ThemeMode);
+}
 export type VideoQuality = "480p" | "720p" | "1080p" | "1440p" | "2160p";
 export type VideoFrameRate = 30 | 60;
 export type ScreenShareMode = "motion" | "detail";
@@ -226,7 +258,7 @@ export function loadVoiceSettings(): VoiceSettings {
       mentionNotifications: boolWithDefault(parsed.mentionNotifications, true),
       notificationSound: boolWithDefault(parsed.notificationSound, true),
       callRingtone: boolWithDefault(parsed.callRingtone, true),
-      theme: parsed.theme === "light" || parsed.theme === "system" ? parsed.theme : "dark",
+      theme: isThemeMode(parsed.theme) ? parsed.theme : "dark",
       desktopCloseBehavior: parsed.desktopCloseBehavior === "quit" ? "quit" : "tray",
       desktopOpenAtLogin: boolWithDefault(parsed.desktopOpenAtLogin, false),
       desktopStartMinimized: boolWithDefault(parsed.desktopStartMinimized, false),

@@ -5,6 +5,7 @@ import { initializeTokenStorage } from "../api/client";
 import { desktopBridge } from "../desktopBridge";
 import "../index.css";
 import "../App.css";
+import "../themes.css";
 import "./lab.css";
 import { LabApp } from "./LabApp";
 

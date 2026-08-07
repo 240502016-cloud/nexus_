@@ -987,6 +987,49 @@ gösterilir. Yeniden adlandırma, açıklama, ayrılma ve silme buradadır.
 **İkonlar:** emoji/karışık sembol yerine ortak modern SVG seti. Ayarlar dişli simgesiyle açılır,
 çıkış profil alanının içindedir ve bir kez "emin misiniz?" onayı gösterir.
 
+### Tema sistemi
+
+Altı tema vardır. İkisi varsayılan, dördü sonradan eklenmiş konsepttir.
+
+| `data-theme` | Ad | Karakter |
+|---|---|---|
+| *(yok)* | Koyu | Varsayılan. Mor vurgu, glassmorphism |
+| `light` | Açık | Varsayılan |
+| `space` | Derin Uzay | Karanlık nebula, oksitlenmiş bakır (#C77B4E) vurgu |
+| `bespoke` | Özel Dikim | Mat deri dokusu, eskitilmiş altın (#B08D4F), serif başlık |
+| `feline` | Feline | Latte/krem — **tek açık konsept**, line-art kuyruk/kulak detayları |
+| `razor` | Jilet | Saf siyah, elektrik mavisi (#0F5BFF), 0px köşe, gölge yok |
+
+**Mimari — bu kural bozulmamalı:** dört yeni tema `frontend/src/themes.css` içindedir ve
+**tamamen eklemelidir**. Her kural `:root[data-theme="<ad>"]` altına kapatılmıştır; `App.css`
+içindeki koyu ve açık temalara hiç dokunulmaz. Doğrulandı: koyu `#080b14`/`#8168ff`, açık
+`#edf0f7`/`#6656e8` — ikisi de eklemeden önceki değerleriyle birebir aynı.
+
+Geri alma: `App.tsx` ve `lab/main.tsx` içindeki `import "./themes.css"` satırlarını sil.
+
+**Neden yerinde token'lama yapılmadı:** `App.css` 10.000 satırı aşıyor ve token bloklarının
+dışında ~390 sabit renk barındırıyor (367 satır). Dağılım: medya sahnesi 104, `bots-panel` 44,
+giriş ekranı 21, sohbet 12. Bunları yerinde token'a çevirmek tüm arayüzü riske atardı. Yeni
+temalar bunun yerine hem temel token'ları ezer hem de bu kümeleri kendi seçicileri altında
+açıkça ele alır. Medya sahnesindeki koyu sabitler zaten **bilinçlidir** — video her temada
+siyah zeminde durur.
+
+**Türetilmiş token'lar yeniden tanımlanmaz:** `--product-*`, `--accent-gradient` ve `--ring`
+`color-mix` ile temel token'lardan türer. Bir tema yalnız temel token'ları tanımlar.
+
+**Yan onarım:** `--accent-primary`, `--border-subtle`, `--surface-raised`, `--shadow-xl` ve
+`--text` App.css'te **kullanılıyor ama hiçbir yerde tanımlı değildi**; oyun panelleri bu yüzden
+kısmen renksiz kalıyordu (production'da gizli oldukları için fark edilmemişti). `themes.css`
+bunların varsayılanlarını mevcut sisteme bağlayarak onarır.
+
+**Yeni token'lar:** `--on-accent` (vurgu zemini üzerindeki metin — altın/latte gibi açık
+vurgularda beyaz okunmaz), `--font-display` / `--font-body` / `--font-num`, `--glass-blur`,
+`--page-texture`.
+
+Seçici: **Ayarlar → Görünüm**, her tema kendi paletini üç noktayla gösteren bir kart olarak.
+`THEME_OPTIONS` listesi `settings.ts` içindedir; yeni tema eklemek için oraya bir satır ve
+`themes.css`'e bir blok yeter.
+
 **Görsel cila katmanı:** `App.css` sonunda ayrı bir bölümdür. Yalnız görünüm özellikleri
 (renk, kenar, gölge, tipografi, geçiş, animasyon) içerir; `display/position/grid/flex` gibi
 yerleşim kuralları bilinçli olarak dışarıdadır. Böylece sahne, sohbet kaydırması ve panel akışı
