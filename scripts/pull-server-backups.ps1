@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Sunucudaki PostgreSQL yedeklerini geliştirici makinesine indirir.
 
