@@ -1,0 +1,16 @@
+[Unit]
+Description=Nexus PostgreSQL yedeği
+Documentation=file:///opt/nexus/docs/deployment/BACKUP.md
+# Docker hazır değilken çalışırsa yedek boş çıkar; servisi ona bağla.
+After=docker.service nexus.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/nexus
+ExecStart=/opt/nexus/scripts/server/backup-postgres.sh
+# Yedek uzun sürerse takılı kalmasın.
+TimeoutStartSec=1800
+# Çıktı journald'a gider: journalctl -u nexus-backup.service
+StandardOutput=journal
+StandardError=journal

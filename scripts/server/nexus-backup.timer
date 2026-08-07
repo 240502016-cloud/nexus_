@@ -1,0 +1,14 @@
+[Unit]
+Description=Nexus PostgreSQL yedeğini günlük çalıştır
+
+[Timer]
+# Gece yarısından sonra, kullanımın en düşük olduğu saat (sunucu saati UTC).
+OnCalendar=*-*-* 03:30:00
+# Sabit saatte yığılma olmasın; sunucu o an meşgulse birkaç dakika kayar.
+RandomizedDelaySec=600
+# Sunucu sert sıfırlandığı için zamanlanan çalışma kaçabilir; açılışta telafi et.
+# Bu önemli: makine 5 Ağustos gecesi 10 saat kapalı kaldı.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
