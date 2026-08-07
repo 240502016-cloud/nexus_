@@ -17,6 +17,7 @@ import { ServerRail } from "./components/ServerRail";
 import { ServerInvitesPanel } from "./components/ServerInvitesPanel";
 import { ServerSettingsPanel } from "./components/ServerSettingsPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { ThemeStage } from "./components/ThemeStage";
 import { VideoStage } from "./components/VideoStage";
 import { desktopBridge, labUrl } from "./desktopBridge";
 // Yalnız görünürlük bayrakları; LabApp'i import etmek Lab'in ayrı chunk olmasını bozardı.
@@ -161,6 +162,8 @@ export default function App() {
   const [serverSettingsOpen, setServerSettingsOpen] = useState(false);
   const [callError, setCallError] = useState<string | null>(null);
   const [voiceStageVisible, setVoiceStageVisible] = useState(true);
+  // "system" çözüldükten sonraki gerçek tema; tema arka plan katmanı bunu izler.
+  const [appliedTheme, setAppliedTheme] = useState<ThemeMode>("dark");
   const [membersVisible, setMembersVisible] = useState(false);
   const [serverInvitesOpen, setServerInvitesOpen] = useState(false);
   const [joinServerOpen, setJoinServerOpen] = useState(() => Boolean(inviteCodeFromLocation()));
@@ -393,6 +396,8 @@ export default function App() {
     const apply = (theme: ThemeMode) => {
       if (theme === "dark") root.removeAttribute("data-theme");
       else root.setAttribute("data-theme", theme);
+      // Canvas katmanı "system" gibi dolaylı değerleri değil, çözülmüş temayı bilmeli.
+      setAppliedTheme(theme);
     };
     if (voiceSettings.theme === "system") {
       const mq = window.matchMedia("(prefers-color-scheme: light)");
@@ -1052,14 +1057,19 @@ export default function App() {
   }
 
   if (!user) {
-    return authMode === "login" ? (
-      <LoginForm onLogin={handleLogin} onSwitchToRegister={() => { setAuthError(null); setAuthMode("register"); }} error={authError} />
-    ) : (
-      <RegisterForm
-        onRegister={handleRegister}
-        onSwitchToLogin={() => { setAuthError(null); setAuthMode("login"); }}
-        error={authError}
-      />
+    return (
+      <>
+        <ThemeStage theme={appliedTheme} callActive={false} />
+        {authMode === "login" ? (
+          <LoginForm onLogin={handleLogin} onSwitchToRegister={() => { setAuthError(null); setAuthMode("register"); }} error={authError} />
+        ) : (
+          <RegisterForm
+            onRegister={handleRegister}
+            onSwitchToLogin={() => { setAuthError(null); setAuthMode("login"); }}
+            error={authError}
+          />
+        )}
+      </>
     );
   }
 
@@ -1068,6 +1078,7 @@ export default function App() {
 
   return (
     <div className={membersVisible ? "app-shell app-shell--members-open" : "app-shell"}>
+      <ThemeStage theme={appliedTheme} callActive={voice.connected} />
       <ServerRail
         servers={servers}
         activeServerId={activeServerId}
