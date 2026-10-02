@@ -25,7 +25,10 @@
 [CmdletBinding()]
 param(
     [string]$Destination = (Join-Path $env:USERPROFILE 'nexus-backups'),
-    [string]$ServerHost = 'root@45.155.124.254',
+    # Eski sunucu Ekim 2026'da kaybedildi ve IP'si (45.155.124.254) başka bir müşteriye
+    # verildi. Varsayılan bilerek boş: yanlışlıkla yabancı bir makineye bağlanılmasın.
+    # Yeni sunucu kurulunca buraya 'root@<yeni-ip>' yaz.
+    [string]$ServerHost = '',
     [string]$IdentityFile = (Join-Path $env:USERPROFILE '.ssh\nexus_vds_migration_ed25519'),
     [string]$RemoteDirectory = '/var/backups/nexus',
     [ValidateRange(1, 3650)]
@@ -34,6 +37,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+if (-not $ServerHost) {
+    throw "Sunucu adresi ayarlanmamış. Yeni sunucu kurulduktan sonra bu script'teki `$ServerHost varsayılanını güncelle veya -ServerHost parametresiyle çağır."
+}
 if (-not (Test-Path -LiteralPath $IdentityFile)) {
     throw "SSH anahtarı bulunamadı: $IdentityFile"
 }

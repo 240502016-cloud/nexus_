@@ -11,6 +11,11 @@ modülünün iki kişiye açılması)
 
 ## 0. Yeni sohbete temel talimat
 
+> 🚨 **ÖNCE BUNU BİL:** Production sunucusu Ekim 2026'da kaybedildi (fatura ödenmedi, IP
+> başkasına verildi). Çalışan bir kurulum **yok**. Sıradaki iş **§2b'deki taşımadır** ve
+> belgenin "canlı sunucu" anlatan kısımları tarihsel referanstır. `45.155.124.254`
+> adresine bağlanma.
+
 1. Bu dosyanın tamamını oku.
 2. `git status --short --branch` ve `git log -1 --oneline` çalıştır. **Çıktıyı `head`/`tail` ile kesme** —
    bu repoda 40+ commit'lenmemiş dosya var, kesilen çıktı yanlış sonuca götürür.
@@ -53,23 +58,124 @@ Temel tasarım kararları:
 > yolları, Hamachi IP'leri (`25.x.x.x`), tunnel token/connector kavramları ve `502 Host Error`
 > bölümü artık geçersizdir.
 
-### Production sunucusu (VDS)
+### ⛔ Production sunucusu KAYBEDİLDİ (Ekim 2026)
+
+**Sunucu ücreti ödenmediği için Keyubu VDS kapatıldı ve geri dönüştürüldü.**
+Şu an Nexus'un çalıştığı bir sunucu **yoktur**; `https://nexus.cekin.gen.tr` erişilemez.
+
+> 🚨 **`45.155.124.254` adresine bağlanma.** O IP başka bir müşteriye verilmiştir —
+> SSH host anahtarının değiştiği doğrulandı. Oraya anahtar, parola veya `.env` gönderme.
+> Geliştirici makinesindeki `known_hosts` kaydı temizlenmelidir.
+
+Eski kurulumun künyesi (yeni sunucuyu aynı şekilde kurmak için referans):
 
 ```text
-IP        : 45.155.124.254
 OS        : Ubuntu 24.04 LTS
 Donanım   : 4 vCPU / 5.8 GB RAM (+3.1 GB swap) / 50 GB disk
 Proje yolu: /opt/nexus
-Erişim    : root@45.155.124.254
-SSH key   : ~/.ssh/nexus_vds_migration_ed25519   (geliştirici makinesinde)
-Docker    : 29.1.3 + Compose 2.40.3
+Erişim    : root
+SSH key   : ~/.ssh/nexus_vds_migration_ed25519   (geliştirici makinesinde, hâlâ duruyor)
+Docker    : 29.1.3 + Compose 2.40.3 (Docker'ın resmi deposundan, Ubuntu'nun docker.io
+            paketinden değil)
 ```
 
-Örnek bağlantı:
+Yeni sunucu kiralandı; künyesi (IP, Tailscale IP) **doldurulmayı bekliyor**.
+Taşıma adımları için §2b'ye bak — oradan başla.
 
-```bash
-ssh -i ~/.ssh/nexus_vds_migration_ed25519 root@45.155.124.254
-```
+Seçim gerekçeleri (Ekim 2026'da kararlaştırıldı):
+
+- **VPS yeterli, VDS gerekmiyor.** Sunucu boştayken 1,4/5,8 GB RAM ve 14/50 GB disk
+  kullanıyordu. İki ağır iş zaten sunucuda değil: AI geliştirici makinesinde çalışır,
+  WebRTC medyası eşler arasında doğrudan gider. Sunucudaki en ağır iş seyrek çalışan
+  ffmpeg highlight render'ıdır. Kullanıcı sayısı 7–8.
+- **Hangi paket olursa olsun dört şart:** KVM sanallaştırma (OpenVZ/LXC'de Docker
+  düzgün çalışmaz) · kendine ait IPv4 ve **kısıtsız UDP** (TURN için `3478/udp` ve
+  `50000-50040/udp`; UDP kısıtlıysa simetrik NAT arkasındaki kullanıcılarda ses sessizce
+  bozulur) · bol/limitsiz trafik (TURN relay görüşmenin tüm medyasını taşır) ·
+  **snapshot desteği** (eski pakette yoktu, makine seviyesinde hiç geri dönüşümüz olmadı).
+- **Ubuntu 24.04 LTS.** Nisan 2029'a kadar destekli; 22.04'ün standart desteği Nisan
+  2027'de biter, 20.04 ve öncesi ile 23.10/25.04 zaten bitti. Eski sunucu da 24.04'tü,
+  yani dokümanlar ve `scripts/server/` birebir uyar.
+
+## 2b. Yeni sunucuya taşıma — BURADAN BAŞLA
+
+Bu bölüm Ekim 2026'daki sunucu kaybından sonra yazıldı ve sıradaki işin tamamıdır.
+
+### Elimizde ne var, ne yok
+
+Kurduğumuz otomatik yedek 7–27 Ağustos arası her gün çalıştı ve kopyalar
+`C:\Users\mahfl\nexus-backups\` altında duruyor.
+
+| Veri | Durum |
+|---|---|
+| Uygulama veritabanı (hesap, sunucu, kanal, rol, davet, bot, oyun) | ✅ `nexus-20260827T033514Z.dump` — sha256 doğrulandı |
+| Matrix mesaj geçmişi | ⚠️ **26 Ağustos** kullanılacak: `synapse-20260826T033428Z.dump`. 27 Ağustos kopyası **bozuk** (480 KB, olması gereken 976 KB, sha256 tutmuyor — indirme yarıda kalmış) |
+| Rol/parola globalleri | ✅ `globals-20260827T033514Z.sql.gz` |
+| Parola hash'leri | ✅ veritabanında, kullanıcılar eski parolalarıyla girer |
+| `.env` (JWT sırrı, Cloudflare tokeni, TURN secret, `OLLAMA_API_KEY`, Matrix shared secret) | ❌ **kayıp** — yeniden üretilecek |
+| Yüklenen dosyalar ve profil fotoğrafları (`attachment_data`, `avatar_data`) | ❌ **kalıcı kayıp** |
+| Matrix medya deposu ve Synapse imza anahtarı (`matrix_data`) | ❌ **kalıcı kayıp** |
+
+Yani: hesaplar, sunucular, kanallar ve mesaj **metinleri** geri gelir; sohbetlerdeki
+görseller/dosyalar ve avatarlar gelmez, onların mesajları kırık bağlantı gösterir.
+Bir günlük mesaj kaybı olur (26→27 Ağustos).
+
+### Sırların yeniden üretilmesinin sonuçları
+
+- `CORE_API_SECRET_KEY` değişince eski JWT'ler geçersiz olur → herkes bir kez yeniden
+  giriş yapar. Sorun değil.
+- Aynı anahtar `app/platform/crypto.py` üzerinden oyun modüllerinin şifreli durumunu da
+  korur; eski oyun oturumlarının şifreli satırları **çözülemez olur**. Lab modülleri
+  zaten kapalı olduğu için önemsiz.
+- Synapse yeni bir imza anahtarı üretir. Sunucu federasyona kapalı olduğu için bu
+  sorun çıkarmaz, ama `MATRIX_SERVER_NAME` **kesinlikle** `nexus.cekin.gen.tr` kalmalıdır
+  (bkz. §0 kural 8) — değişirse tüm Matrix kullanıcı kimlikleri ve odalar geçersiz olur.
+
+### Adımlar
+
+1. **Sunucuyu hazırla.** Ubuntu 24.04 LTS, `apt update && apt upgrade`, Docker'ı resmi
+   depodan kur, UFW'yi §2'deki port listesiyle aç (22, 80, 443 tcp+udp, 3478 tcp+udp,
+   50000-50040 tcp+udp). UDP'nin gerçekten açık olduğunu sağlayıcıya doğrulat.
+2. **Tailscale kur** ve yeni sunucunun Tailscale IP'sini not et.
+3. **DNS'i çevir.** Cloudflare'de `nexus.cekin.gen.tr` ve `turn.cekin.gen.tr`
+   A kayıtlarını yeni IP'ye al, **gri bulut** (proxy kapalı) kalsın — turuncu bulut
+   TURN'ün UDP'sini taşımaz.
+4. **Depoyu klonla** `/opt/nexus` altına, `cekingen` dalı.
+5. **`.env`'i yeniden üret.** `.env.example`'ı temel al. Yeni değerler gerekenler:
+   `CORE_API_SECRET_KEY`, `POSTGRES_PASSWORD`, `MATRIX_REGISTRATION_SHARED_SECRET`,
+   `TURN_AUTH_SECRET`, `OLLAMA_API_KEY`, `CLOUDFLARE_API_TOKEN` (Cloudflare panelinden
+   yeni token, Zone:DNS:Edit, yalnız `cekin.gen.tr`). `MATRIX_SERVER_NAME` değişmez.
+   AI model ve timeout değerleri için §9'daki tabloyu uygula.
+6. **Veritabanlarını geri yükle** — migration'dan **önce**, boş veritabanlarına:
+   `docs/deployment/BACKUP.md` içindeki "Gerçek felaket kurtarma" bölümü. Uygulama DB'si
+   27 Ağustos, Synapse 26 Ağustos kopyasından. Dökümler alembic `0019`'da olduğu için
+   `migrate` çalıştırıldığında yapacak iş kalmaz; yine de çalıştır ve `0019` gördüğünü
+   doğrula.
+7. **Build ve ayağa kaldır:** `docker compose build backend frontend matrix reverse-proxy
+   media-worker` → `docker compose up -d`. **`media-worker`'ı build listesine yazmayı
+   unutma**, ayrı imajdır (§20).
+8. **Geliştirici makinesini güncelle:**
+   - `scripts/pull-server-backups.ps1` içindeki `$ServerHost` artık **boş**; adres verilmezse
+     hata veriyor. Yeni IP yazılmalı — o zamana kadar zamanlanmış "Nexus - Yedek cekme"
+     görevi bilerek başarısız olur.
+   - `~/.ssh/known_hosts` içindeki eski `45.155.124.254` kaydı **silindi** (Ekim 2026), ek işlem gerekmiyor.
+   - `ai-gateway/.env` içindeki `AI_GATEWAY_ALLOWED_NETWORKS`'e yeni sunucunun Tailscale
+     IP'sini `/32` olarak yaz, eskisini çıkar.
+   - `scripts/server/install-backup-timer.sh`'i yeni sunucuda çalıştır — yedek yoksa
+     aynı şey tekrar yaşanır.
+9. **Doğrula:** §20'deki sağlık kontrolleri, ardından `scripts\windows\check-nexus-health.ps1`
+   bir kez elle.
+
+### Bu sefer tekrarlanmaması gerekenler
+
+- **Fatura.** Sunucu ödeme yapılmadığı için gitti. Sağlayıcıda otomatik ödeme veya
+  takvim hatırlatıcısı kur. Teknik hiçbir önlem bunu telafi etmiyor.
+- **Volume yedeği yok.** Mevcut yedek yalnız PostgreSQL'i kapsıyor; `attachment_data`,
+  `avatar_data` ve `matrix_data` kapsam dışı. Bu yüzden dosyalar kalıcı olarak kayboldu.
+  Yeni kurulumda bunları da yedeğe dahil et (`docs/deployment/BACKUP.md` "Kapsamda
+  olmayanlar").
+- **`.env` kopyası yok.** Sırların güvenli bir yerde (parola yöneticisi) kopyası tutulmalı.
+- **Snapshot.** Yeni pakette varsa aç ve kullan.
 
 ### Geliştirici / AI makinesi
 
@@ -83,7 +189,7 @@ Sunucu ve bu makine **Tailscale** ile bağlıdır:
 | Cihaz | Tailscale IP | Rol |
 |---|---|---|
 | `muter` (Windows) | `100.104.192.122` | Ollama + AI Gateway |
-| `nexus-vds` (Ubuntu) | `100.125.7.124` | Production stack |
+| `nexus-vds` (Ubuntu) | ⛔ kayboldu — yeni sunucuda yeniden kurulacak | Production stack |
 
 ### Domain ve DNS
 
@@ -97,8 +203,8 @@ Nameserver : fiona.ns.cloudflare.com / marty.ns.cloudflare.com
 
 | Kayıt | Hedef | Proxy | Durum |
 |---|---|---|---|
-| `nexus.cekin.gen.tr` | A → 45.155.124.254 | DNS only (gri) | ✅ Canlı |
-| `turn.cekin.gen.tr` | A → 45.155.124.254 | DNS only (gri) | ✅ Canlı |
+| `nexus.cekin.gen.tr` | A → ⛔ eski IP | DNS only (gri) | ⛔ Erişilemez, yeni sunucuya çevrilecek |
+| `turn.cekin.gen.tr` | A → ⛔ eski IP | DNS only (gri) | ⛔ Erişilemez, yeni sunucuya çevrilecek |
 | `cekin.gen.tr` (kök) | CNAME → `*.cfargotunnel.com` | proxied | ⚠️ Ölü kayıt — portal için silinecek |
 
 > **Eski kurulumun akıbeti — KARAR VERİLDİ (5 Ağustos 2026).**
@@ -177,10 +283,16 @@ branch  cekingen
 
 ### Sunucuda çalışan sürüm
 
+**Şu an çalışan sunucu yok** (§2). Son dağıtılan sürüm ve yedeklerin geldiği nokta:
+
 ```text
 0d96b19  Open the four parked game modules to two players and split AI models per feature
 DB revizyonu: 0019_ai_escape_room
 ```
+
+Yeni sunucu `cekingen` dalının güncel ucundan kurulacak. Dallanma sonrası eklenenler:
+Lab modüllerinin tamamının kapatılması, otomatik yedekleme, sağlık izleme ve AI Gateway'in
+otomatik başlatılması.
 
 **6 Ağustos 2026'da dağıtıldı.** Dört AI oyun modülü (`ai_board_game`, `hidden_role_game`,
 `shared_story`, `ai_escape_room`), `0016`–`0019` migration'ları, iki kişilik oyun desteği ve
@@ -366,7 +478,7 @@ Kullanıcı
 Cloudflare DNS (gri bulut — sadece isim çözümleme)
     │
     ▼
-45.155.124.254 : 443
+<yeni sunucu IP> : 443
     │
     ▼
 Caddy reverse-proxy
@@ -509,7 +621,7 @@ Anahtarlar (değerleri buraya yazma):
 | ai-gateway/.env | sunucu /opt/nexus/.env | İlişki |
 |---|---|---|
 | `AI_GATEWAY_API_KEY` | `OLLAMA_API_KEY` | **Aynı olmalı** (64 karakter) |
-| `AI_GATEWAY_ALLOWED_NETWORKS` | — | `100.125.7.124/32` içermeli (sunucunun Tailscale IP'si) |
+| `AI_GATEWAY_ALLOWED_NETWORKS` | — | Yeni sunucunun Tailscale IP'si `/32` olarak. Eski `100.125.7.124/32` geçersizdir, çıkarılmalı |
 | `OLLAMA_BASE_URL=http://127.0.0.1:11434` | `OLLAMA_BASE_URL=http://100.104.192.122:8090` | |
 
 Gateway en az 32 karakterlik API key ve en az bir CIDR ağı ister (`validate_runtime`).
@@ -1426,7 +1538,7 @@ Kabul edilen tasarım:
 
 Yapılacaklar:
 
-1. Kök domain'deki ölü `cfargotunnel` CNAME'ini sil, A kaydı (45.155.124.254, gri bulut) ekle.
+1. Kök domain'deki ölü `cfargotunnel` CNAME'ini sil, A kaydı (yeni sunucu IP, gri bulut) ekle.
    Eski kurulum kapatıldığı için engel yok (bkz. §2).
 2. Caddyfile'a kök domain ve wildcard (`*.cekin.gen.tr`) site bloklarını ekle.
 3. Portal frontend'ini yaz (şimdilik tek kart: Nexus).
@@ -1437,6 +1549,8 @@ Yapılacaklar:
 ## 26. Sonraki adımlar
 
 ### P0
+-1. **Yeni sunucuya taşı (§2b).** Diğer her şeyden önce gelir; şu an çalışan sistem yok.
+    Taşıma bitince `scripts/server/install-backup-timer.sh` ile yedeklemeyi **hemen** kur.
 0. **Lab modüllerini geliştir.** Dokuzu da canlıda kapalı çünkü deneyim yeterince iyi değil.
    Backend, migration ve veri hazır; iş tamamen deneyim tarafında. Bir modül hazır olduğunda
    `frontend/src/lab/released.ts` içindeki kümeye anahtarını eklemek yeterli.
@@ -1547,9 +1661,16 @@ HTTPS_REVERSE_PROXY,DATABASE_SECURITY}.md` · `scripts/`
 - Sertifika Caddy + Cloudflare DNS-01 ile otomatik alınır ve yenilenir.
 - AI, Tailscale üzerinden geliştirici makinesindeki Ollama'ya bağlanır; kapalıysa yalnız AI
   özellikleri pasifleşir.
-- Sunucu DB `0019_ai_escape_room` revizyonundadır ve dört AI oyun modülünün backend'i 6 Ağustos
-  2026'da dağıtıldı. **Ancak Lab modüllerinin dokuzu da production'da kapalıdır** — kod ve veri
-  yerinde, yalnız arayüzde gizli; sebep deneyimin geliştirilmeye ihtiyaç duyması (§3).
+- ⛔ **Sunucu kaybedildi (Ekim 2026).** Fatura ödenmediği için VDS kapatıldı ve IP başkasına
+  verildi. Sıradaki iş tamamen §2b'deki taşımadır. Veritabanı yedekleri elde (uygulama
+  27 Ağustos, Matrix 26 Ağustos); yüklenen dosyalar, avatarlar, Matrix medyası ve `.env`
+  kalıcı olarak kayıp.
+- DB revizyonu `0019_ai_escape_room`'dur ve dört AI oyun modülünün backend'i dağıtılmıştı.
+  **Lab modüllerinin dokuzu da kapalıdır** — kod ve veri yerinde, yalnız arayüzde gizli;
+  sebep deneyimin geliştirilmeye ihtiyaç duyması (§3).
+- **Otomatik yedekleme, sağlık izleme ve AI Gateway otomatik başlatma kuruldu** ve çalıştığı
+  doğrulandı (§20b, `docs/deployment/BACKUP.md`). Yedekleme sayesinde sunucu kaybında veri
+  kurtarıldı; yeni sunucuda **ilk iş** bunu tekrar kurmaktır.
 - Mesajlaşma, sosyal sistem, DM, attachment, bot/plugin, ses, kamera, ekran paylaşımı, soundboard,
   kalite ayarları, dinamik sahne, AI deneyim modülleri ve Electron istemcisi uygulanmıştır.
 - **Ses kaynakları artık dinleyici başına ayrı ayrı ayarlanabilir** (konuşma / soundboard /
