@@ -66,3 +66,24 @@
 http://:8081 {
 	import nexus_routes
 }
+
+# desire.cekin.gen.tr — Nexus'un Caddy'sine eklenecek site bloğu.
+# /opt/nexus/docker/reverse-proxy/Caddyfile dosyasının SONUNA eklenir (bkz. DEPLOY.md).
+# Sertifika, Nexus ile aynı yöntemle (Cloudflare DNS-01) alınır.
+# Caddy WebSocket yükseltmesini kendiliğinden iletir.
+
+desire.cekin.gen.tr {
+	tls {
+		protocols tls1.2 tls1.3
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+	}
+	encode zstd gzip
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+	reverse_proxy desire:3000 {
+		stream_close_delay 5m
+	}
+}
