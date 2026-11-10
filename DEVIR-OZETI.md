@@ -4,17 +4,16 @@
 > Önce bu dosyanın tamamını oku, sonra doğrudan kaynak kodu ve canlı sunucuyu doğrula.
 > Öncelik sırası: **canlı sistem → kaynak kod → bu dosya → `docs/` → eski yol haritaları**.
 
-Son güncelleme: **6 Ağustos 2026** (özellik başına AI modeli, timeout düzeltmesi ve dört oyun
-modülünün iki kişiye açılması)
+Son güncelleme: **4 Ekim 2026** (yeni sunucuya taşıma tamamlandı)
 
 ---
 
 ## 0. Yeni sohbete temel talimat
 
-> 🚨 **ÖNCE BUNU BİL:** Production sunucusu Ekim 2026'da kaybedildi (fatura ödenmedi, IP
-> başkasına verildi). Çalışan bir kurulum **yok**. Sıradaki iş **§2b'deki taşımadır** ve
-> belgenin "canlı sunucu" anlatan kısımları tarihsel referanstır. `45.155.124.254`
-> adresine bağlanma.
+> ℹ️ **ÖNCE BUNU BİL:** Eski production sunucusu Ekim 2026'da kaybedildi (fatura ödenmedi,
+> IP başkasına verildi). **4 Ekim 2026'da yeni sunucuya (`169.40.43.242`) taşındı ve canlıda.**
+> Ayrıntı §2 ve §2b'de. `45.155.124.254` adresine **asla** bağlanma — başka birinin makinesi.
+> Yeni sunucuya erişim: `ssh -i ~/.ssh/nexus_vds_migration_ed25519 root@169.40.43.242`.
 
 1. Bu dosyanın tamamını oku.
 2. `git status --short --branch` ve `git log -1 --oneline` çalıştır. **Çıktıyı `head`/`tail` ile kesme** —
@@ -58,16 +57,15 @@ Temel tasarım kararları:
 > yolları, Hamachi IP'leri (`25.x.x.x`), tunnel token/connector kavramları ve `502 Host Error`
 > bölümü artık geçersizdir.
 
-### ⛔ Production sunucusu KAYBEDİLDİ (Ekim 2026)
+### Eski production sunucusu kaybedildi (Ekim 2026) — yenisine taşındı
 
-**Sunucu ücreti ödenmediği için Keyubu VDS kapatıldı ve geri dönüştürüldü.**
-Şu an Nexus'un çalıştığı bir sunucu **yoktur**; `https://nexus.cekin.gen.tr` erişilemez.
+**Eski sunucunun ücreti ödenmediği için Keyubu VDS kapatıldı ve geri dönüştürüldü.**
+4 Ekim 2026'da yeni sunucuya taşındı (§2b); `https://nexus.cekin.gen.tr` yeniden canlıda.
 
 > 🚨 **`45.155.124.254` adresine bağlanma.** O IP başka bir müşteriye verilmiştir —
 > SSH host anahtarının değiştiği doğrulandı. Oraya anahtar, parola veya `.env` gönderme.
-> Geliştirici makinesindeki `known_hosts` kaydı temizlenmelidir.
 
-Eski kurulumun künyesi (yeni sunucuyu aynı şekilde kurmak için referans):
+Eski kurulumun künyesi (tarihsel referans):
 
 ```text
 OS        : Ubuntu 24.04 LTS
@@ -79,8 +77,21 @@ Docker    : 29.1.3 + Compose 2.40.3 (Docker'ın resmi deposundan, Ubuntu'nun doc
             paketinden değil)
 ```
 
-Yeni sunucu kiralandı; künyesi (IP, Tailscale IP) **doldurulmayı bekliyor**.
-Taşıma adımları için §2b'ye bak — oradan başla.
+**Güncel production sunucusu (4 Ekim 2026'dan beri canlı):**
+
+```text
+Sağlayıcı   : Keyubu (keyubu.com)
+Public IP   : 169.40.43.242
+Tailscale   : 100.72.136.14  (makine adı 169-40-43-242)
+OS          : Ubuntu 24.04.5 LTS
+Donanım     : 6 vCPU / 7.8 GB RAM / 59 GB disk (taşıma sonrası 14 GB dolu)
+Sanallaştırma: KVM; sağlayıcıya göre snapshot destekli (henüz hiç alınmadı)
+Proje yolu  : /opt/nexus   (cekingen dalı)
+Erişim      : root, SSH anahtarı ~/.ssh/nexus_vds_migration_ed25519 (geliştirici makinesinde)
+Docker      : 29.8.2 + Compose v5.6.0; docker.service boot'ta enabled
+UFW         : 22/tcp · 80,443 tcp+udp · 3478 tcp+udp · 50000-50040 tcp+udp
+Kiralama    : 2 Ekim 2026 → 2 Kasım 2026  ⚠️ yenilemeyi kaçırma (eski sunucu böyle gitti)
+```
 
 Seçim gerekçeleri (Ekim 2026'da kararlaştırıldı):
 
@@ -99,9 +110,11 @@ Seçim gerekçeleri (Ekim 2026'da kararlaştırıldı):
 
 ## 2b. Yeni sunucuya taşıma — BURADAN BAŞLA
 
-Bu bölüm Ekim 2026'daki sunucu kaybından sonra yazıldı ve sıradaki işin tamamıdır.
+Bu bölüm Ekim 2026'daki sunucu kaybından sonra yazıldı. **Taşıma 4 Ekim 2026'da
+tamamlandı**; aşağıdaki adımlar artık yapılmış işin kaydı ve bir dahaki felaket için
+tariftir.
 
-### Elimizde ne var, ne yok
+### Elimizde ne vardı, ne yoktu
 
 Kurduğumuz otomatik yedek 7–27 Ağustos arası her gün çalıştı ve kopyalar
 `C:\Users\mahfl\nexus-backups\` altında duruyor.
@@ -131,40 +144,61 @@ Bir günlük mesaj kaybı olur (26→27 Ağustos).
   sorun çıkarmaz, ama `MATRIX_SERVER_NAME` **kesinlikle** `nexus.cekin.gen.tr` kalmalıdır
   (bkz. §0 kural 8) — değişirse tüm Matrix kullanıcı kimlikleri ve odalar geçersiz olur.
 
-### Adımlar
+### Adımlar (hepsi 4 Ekim 2026'da yapıldı ✅)
 
-1. **Sunucuyu hazırla.** Ubuntu 24.04 LTS, `apt update && apt upgrade`, Docker'ı resmi
-   depodan kur, UFW'yi §2'deki port listesiyle aç (22, 80, 443 tcp+udp, 3478 tcp+udp,
-   50000-50040 tcp+udp). UDP'nin gerçekten açık olduğunu sağlayıcıya doğrulat.
-2. **Tailscale kur** ve yeni sunucunun Tailscale IP'sini not et.
-3. **DNS'i çevir.** Cloudflare'de `nexus.cekin.gen.tr` ve `turn.cekin.gen.tr`
-   A kayıtlarını yeni IP'ye al, **gri bulut** (proxy kapalı) kalsın — turuncu bulut
-   TURN'ün UDP'sini taşımaz.
-4. **Depoyu klonla** `/opt/nexus` altına, `cekingen` dalı.
-5. **`.env`'i yeniden üret.** `.env.example`'ı temel al. Yeni değerler gerekenler:
-   `CORE_API_SECRET_KEY`, `POSTGRES_PASSWORD`, `MATRIX_REGISTRATION_SHARED_SECRET`,
-   `TURN_AUTH_SECRET`, `OLLAMA_API_KEY`, `CLOUDFLARE_API_TOKEN` (Cloudflare panelinden
-   yeni token, Zone:DNS:Edit, yalnız `cekin.gen.tr`). `MATRIX_SERVER_NAME` değişmez.
-   AI model ve timeout değerleri için §9'daki tabloyu uygula.
-6. **Veritabanlarını geri yükle** — migration'dan **önce**, boş veritabanlarına:
-   `docs/deployment/BACKUP.md` içindeki "Gerçek felaket kurtarma" bölümü. Uygulama DB'si
-   27 Ağustos, Synapse 26 Ağustos kopyasından. Dökümler alembic `0019`'da olduğu için
-   `migrate` çalıştırıldığında yapacak iş kalmaz; yine de çalıştır ve `0019` gördüğünü
-   doğrula.
-7. **Build ve ayağa kaldır:** `docker compose build backend frontend matrix reverse-proxy
-   media-worker` → `docker compose up -d`. **`media-worker`'ı build listesine yazmayı
-   unutma**, ayrı imajdır (§20).
-8. **Geliştirici makinesini güncelle:**
-   - `scripts/pull-server-backups.ps1` içindeki `$ServerHost` artık **boş**; adres verilmezse
-     hata veriyor. Yeni IP yazılmalı — o zamana kadar zamanlanmış "Nexus - Yedek cekme"
-     görevi bilerek başarısız olur.
-   - `~/.ssh/known_hosts` içindeki eski `45.155.124.254` kaydı **silindi** (Ekim 2026), ek işlem gerekmiyor.
-   - `ai-gateway/.env` içindeki `AI_GATEWAY_ALLOWED_NETWORKS`'e yeni sunucunun Tailscale
-     IP'sini `/32` olarak yaz, eskisini çıkar.
-   - `scripts/server/install-backup-timer.sh`'i yeni sunucuda çalıştır — yedek yoksa
-     aynı şey tekrar yaşanır.
-9. **Doğrula:** §20'deki sağlık kontrolleri, ardından `scripts\windows\check-nexus-health.ps1`
-   bir kez elle.
+1. ✅ **Sunucu hazırlığı.** Ubuntu 24.04.5, Docker resmi depodan, UFW. Teslim edilen
+   kurulumda `50000-50040/udp` **eksikti** (yalnız tcp açıktı) — eklendi. Bir dahakine UFW
+   listesini satır satır kontrol et; bu eksik sesi yalnız NAT arkasındaki kullanıcılarda
+   sessizce bozar.
+2. ✅ **Tailscale:** `100.72.136.14`.
+3. ✅ **DNS:** `nexus` ve `turn` A kayıtları → `169.40.43.242`, gri bulut. Cloudflare
+   panelinden elle değiştirildi.
+4. ✅ **Depo:** `/opt/nexus`, `cekingen` @ `81f94d8`.
+5. ✅ **`.env`:** `.env.example`'dan üretildi; dokuz sırrın (`POSTGRES_ADMIN_PASSWORD`,
+   `POSTGRES_PASSWORD`, `SYNAPSE_POSTGRES_PASSWORD`, `CORE_API_SECRET_KEY`,
+   `MATRIX_REGISTRATION_SHARED_SECRET`, `MATRIX_MACAROON_SECRET_KEY`, `MATRIX_FORM_SECRET`,
+   `PLUGIN_SANDBOX_API_KEY`, `TURN_AUTH_SECRET`) hepsi sunucuda `openssl rand -hex 32` ile
+   üretildi, hiçbiri ekrana basılmadı. `OLLAMA_API_KEY` yerel `ai-gateway/.env`'deki
+   `AI_GATEWAY_API_KEY`'den SSH stdin ile kopyalandı. `TURN_DOMAIN=turn.cekin.gen.tr`,
+   `TURN_EXTERNAL_IP=169.40.43.242`, `OLLAMA_BASE_URL=http://100.104.192.122:8090`.
+   `CLOUDFLARE_API_TOKEN` yeni token (Zone:DNS:Edit + Zone:Zone:Read, yalnız `cekin.gen.tr`),
+   `scripts/windows/set-cloudflare-token.ps1` ile girildi (bkz. aşağıdaki tuzaklar).
+6. ✅ **Geri yükleme:** `postgres` + `postgres-bootstrap` boş DB'leri açtı, dökümler
+   **uygulama kullanıcılarıyla** (`nexus`, `synapse`) `pg_restore --no-owner --no-privileges`
+   ile yüklendi ki tablolar doğru sahipte olsun. Sonuç: alembic `0019_ai_escape_room`,
+   74 tablo, 8 kullanıcı, 5 sunucu; Synapse 173 tablo, 1559 event, 13 Matrix kullanıcısı;
+   yabancı sahipli tablo 0. Hata çıkmadı.
+7. ✅ **Build + up:** beş imaj build edildi, `docker compose up -d`; `migrate` yapacak iş
+   bulmadı (`0019`). Dokuz kalıcı servisin hepsi ayakta, healthcheck'liler `healthy`.
+   Caddy Let's Encrypt sertifikasını DNS-01 ile ilk denemede aldı.
+8. ✅ **Geliştirici makinesi:** `pull-server-backups.ps1` `$ServerHost` =
+   `root@169.40.43.242`; `ai-gateway/.env` `AI_GATEWAY_ALLOWED_NETWORKS` =
+   `127.0.0.1/32,::1/128,100.72.136.14/32` (yedek: `.env.bak.20261004`), gateway yeniden
+   başlatıldı. Sunucuda `install-backup-timer.sh` çalıştırıldı ve ilk yedek alındı.
+   Bilinen bozuk `synapse-20260827T033514Z.dump` yerelde `.dump.bozuk` olarak yeniden
+   adlandırıldı — yoksa çekme script'i sha256 hatasıyla her gün başarısız olur.
+9. ✅ **Doğrulama:** dışarıdan `/healthz` ok, `/api/health` ok, `.well-known/matrix/client`
+   ve `/_matrix/client/versions` doğru, `/` 200 + geçerli TLS; `turn.cekin.gen.tr:3478/udp`
+   STUN isteğine cevap veriyor; sunucudan Gateway `/api/tags` anahtarla üç modeli
+   listeliyor; `check-nexus-health.ps1` → `ayakta`.
+
+**Yapılmayan:** iki gerçek kullanıcıyla ses/kamera/ekran smoke testi ve gerçek AI üretimi
+testi (§26 P0). Sunucuda `/root/restore/` geri yükleme dökümlerini ve yardımcı script'leri
+tutuyor; doğrulama bitince silinebilir. `/etc/systemd/system/nexus.service` yeni sunucuda
+**yok** — gerek de yok: servisler `restart: unless-stopped`, `docker.service` enabled.
+
+### Taşımada öğrenilen tuzaklar
+
+- **Web konsoluna komut yapıştırılamıyor.** Keyubu'nun tarayıcı konsolu panoyu desteklemez.
+  İlk iş geliştirici makinesinin public key'ini `authorized_keys`'e eklemek (parola ile tek
+  bir `ssh` komutu), gerisini SSH'tan yapmak.
+- **`ssh host 'bash -s' < script` ile `docker compose run` birlikte kullanılmaz:**
+  `run` stdin'i yer ve script'in geri kalanı sessizce çalışmaz. Script'i önce `scp` ile
+  kopyala, `bash dosya </dev/null` ile çalıştır.
+- **Cloudflare token doğrulaması:** hesaba ait (account-owned) token'lar
+  `/user/tokens/verify` ucunda geçersiz görünür. `set-cloudflare-token.ps1`'in sunucu
+  tarafı bu yüzden doğrudan zone ve DNS kayıtlarına erişimi dener. Cloudflare mevcut
+  token'ların değerini bir daha göstermez; kayıp token yerine yenisi oluşturulur.
 
 ### Bu sefer tekrarlanmaması gerekenler
 
@@ -189,7 +223,7 @@ Sunucu ve bu makine **Tailscale** ile bağlıdır:
 | Cihaz | Tailscale IP | Rol |
 |---|---|---|
 | `muter` (Windows) | `100.104.192.122` | Ollama + AI Gateway |
-| `nexus-vds` (Ubuntu) | ⛔ kayboldu — yeni sunucuda yeniden kurulacak | Production stack |
+| `169-40-43-242` (Ubuntu, public 169.40.43.242) | `100.72.136.14` | Production stack |
 
 ### Domain ve DNS
 
@@ -203,8 +237,8 @@ Nameserver : fiona.ns.cloudflare.com / marty.ns.cloudflare.com
 
 | Kayıt | Hedef | Proxy | Durum |
 |---|---|---|---|
-| `nexus.cekin.gen.tr` | A → ⛔ eski IP | DNS only (gri) | ⛔ Erişilemez, yeni sunucuya çevrilecek |
-| `turn.cekin.gen.tr` | A → ⛔ eski IP | DNS only (gri) | ⛔ Erişilemez, yeni sunucuya çevrilecek |
+| `nexus.cekin.gen.tr` | A → `169.40.43.242` | DNS only (gri) | ✅ Canlı (4 Ekim 2026) |
+| `turn.cekin.gen.tr` | A → `169.40.43.242` | DNS only (gri) | ✅ Canlı, 3478/udp STUN cevap veriyor |
 | `cekin.gen.tr` (kök) | CNAME → `*.cfargotunnel.com` | proxied | ⚠️ Ölü kayıt — portal için silinecek |
 
 > **Eski kurulumun akıbeti — KARAR VERİLDİ (5 Ağustos 2026).**
@@ -283,16 +317,16 @@ branch  cekingen
 
 ### Sunucuda çalışan sürüm
 
-**Şu an çalışan sunucu yok** (§2). Son dağıtılan sürüm ve yedeklerin geldiği nokta:
+Yeni sunucu (4 Ekim 2026):
 
 ```text
-0d96b19  Open the four parked game modules to two players and split AI models per feature
+81f94d8  Rewrite the handover document for the server loss and the migration ahead
 DB revizyonu: 0019_ai_escape_room
 ```
 
-Yeni sunucu `cekingen` dalının güncel ucundan kurulacak. Dallanma sonrası eklenenler:
-Lab modüllerinin tamamının kapatılması, otomatik yedekleme, sağlık izleme ve AI Gateway'in
-otomatik başlatılması.
+Eski sunucuda son dağıtılan sürüm `0d96b19` idi (yedekler oradan). `81f94d8` ondan sonra
+şunları ekler: Lab modüllerinin tamamının kapatılması, otomatik yedekleme, sağlık izleme,
+AI Gateway'in otomatik başlatılması ve tema değişiklikleri.
 
 **6 Ağustos 2026'da dağıtıldı.** Dört AI oyun modülü (`ai_board_game`, `hidden_role_game`,
 `shared_story`, `ai_escape_room`), `0016`–`0019` migration'ları, iki kişilik oyun desteği ve
@@ -478,7 +512,7 @@ Kullanıcı
 Cloudflare DNS (gri bulut — sadece isim çözümleme)
     │
     ▼
-<yeni sunucu IP> : 443
+169.40.43.242 : 443
     │
     ▼
 Caddy reverse-proxy
@@ -621,7 +655,7 @@ Anahtarlar (değerleri buraya yazma):
 | ai-gateway/.env | sunucu /opt/nexus/.env | İlişki |
 |---|---|---|
 | `AI_GATEWAY_API_KEY` | `OLLAMA_API_KEY` | **Aynı olmalı** (64 karakter) |
-| `AI_GATEWAY_ALLOWED_NETWORKS` | — | Yeni sunucunun Tailscale IP'si `/32` olarak. Eski `100.125.7.124/32` geçersizdir, çıkarılmalı |
+| `AI_GATEWAY_ALLOWED_NETWORKS` | — | `127.0.0.1/32,::1/128,100.72.136.14/32` (sunucunun Tailscale IP'si). Eski `100.125.7.124/32` 4 Ekim 2026'da çıkarıldı |
 | `OLLAMA_BASE_URL=http://127.0.0.1:11434` | `OLLAMA_BASE_URL=http://100.104.192.122:8090` | |
 
 Gateway en az 32 karakterlik API key ve en az bir CIDR ağı ister (`validate_runtime`).
@@ -1451,8 +1485,10 @@ Tam browser E2E paketi yok · çok kullanıcılı gerçek medya testi manuel · 
 WebRTC/TURN matrisi otomatik değil · Electron installer'ın imzalı production doğrulaması yapılmadı
 
 ### ⚠️ Yeni sunucuda henüz yapılmamış doğrulama
-Taşıma sonrası **iki gerçek kullanıcıyla ses/kamera/ekran paylaşımı smoke testi yapılmamıştır.**
-Endpoint'ler ve TLS doğrulandı, ancak gerçek mikrofon/RTP akışı ve TURN relay yolu canlı test edilmedi.
+Ne Ağustos'taki ne de 4 Ekim 2026'daki taşımadan sonra **iki gerçek kullanıcıyla
+ses/kamera/ekran paylaşımı smoke testi yapılmıştır.** Endpoint'ler, TLS ve TURN'ün
+`3478/udp` STUN cevabı doğrulandı; gerçek mikrofon/RTP akışı ve TURN relay yolu canlı test
+edilmedi.
 
 `0d96b19` dağıtımında doğrulananlar (6 Ağustos 2026): `/healthz`, `/api/health`,
 `/_matrix/client/versions`, `/lab` (200), dört yeni modül ucunun 404 değil **401** dönmesi
@@ -1482,7 +1518,7 @@ smoke testinin parçasıdır ve hâlâ açıktır.
 - AI üretimi API process'inden ayrı worker'a taşınmıştır.
 - Docker servislerinde CPU/RAM sınırları vardır.
 
-Sunucu kapasitesi referansı (taşıma sonrası boşta): 13/50 GB disk, ~1.4 GB RAM kullanımda.
+Sunucu kapasitesi referansı (4 Ekim 2026 taşıması sonrası): 14/59 GB disk, 6 vCPU, 7.8 GB RAM.
 
 ---
 
@@ -1549,8 +1585,12 @@ Yapılacaklar:
 ## 26. Sonraki adımlar
 
 ### P0
--1. **Yeni sunucuya taşı (§2b).** Diğer her şeyden önce gelir; şu an çalışan sistem yok.
-    Taşıma bitince `scripts/server/install-backup-timer.sh` ile yedeklemeyi **hemen** kur.
+-2. **Sunucu kirasını yenile — son tarih 2 Kasım 2026.** Eski sunucu ödenmeyen fatura
+    yüzünden gitti. Keyubu'da otomatik ödeme veya takvim hatırlatıcısı kur.
+-1. **Taşıma sonrası güvenlik ağı.** Yeni `.env`'in bir kopyasını parola yöneticisine al
+    (şu an tek kopya sunucuda); Keyubu panelinden ilk snapshot'ı al; `avatar_data`,
+    `attachment_data` ve `matrix_data` volume'larını yedeğe ekle (§2b "tekrarlanmaması
+    gerekenler"). Taşıma ve yedekleme (§2b) **tamamlandı.**
 0. **Lab modüllerini geliştir.** Dokuzu da canlıda kapalı çünkü deneyim yeterince iyi değil.
    Backend, migration ve veri hazır; iş tamamen deneyim tarafında. Bir modül hazır olduğunda
    `frontend/src/lab/released.ts` içindeki kümeye anahtarını eklemek yeterli.
@@ -1562,7 +1602,8 @@ Yapılacaklar:
    A'nın yayın sesini 0'a indirip konuşmasını duymaya devam edebiliyor mu; B, A'nın
    soundboard'ını ayrı kısabiliyor mu; "yayını izleme" kapatılınca yayın sesi kesiliyor mu.
 2. TURN relay yolunun farklı ağlardan gerçekten çalıştığını doğrula.
-3. AI Gateway'i Windows'ta kalıcı hale getir (oturum açılışında otomatik başlayan görev).
+3. Gerçek bir AI özelliğini canlıda uçtan uca dene (sunucu → Gateway → Ollama). Bağlantı ve
+   anahtar 4 Ekim 2026'da doğrulandı, üretim denenmedi.
 4. 1440p/2160p presetlerini gerçek yükleme hızıyla dene; kalabalık odada 1080p'ye dönmek
    gerekip gerekmediğini ölç.
 
@@ -1661,16 +1702,17 @@ HTTPS_REVERSE_PROXY,DATABASE_SECURITY}.md` · `scripts/`
 - Sertifika Caddy + Cloudflare DNS-01 ile otomatik alınır ve yenilenir.
 - AI, Tailscale üzerinden geliştirici makinesindeki Ollama'ya bağlanır; kapalıysa yalnız AI
   özellikleri pasifleşir.
-- ⛔ **Sunucu kaybedildi (Ekim 2026).** Fatura ödenmediği için VDS kapatıldı ve IP başkasına
-  verildi. Sıradaki iş tamamen §2b'deki taşımadır. Veritabanı yedekleri elde (uygulama
-  27 Ağustos, Matrix 26 Ağustos); yüklenen dosyalar, avatarlar, Matrix medyası ve `.env`
-  kalıcı olarak kayıp.
+- **Eski sunucu kaybedildi, yenisine taşındı (4 Ekim 2026).** Fatura ödenmediği için eski
+  VDS kapatıldı. Yeni sunucu `169.40.43.242`; hesaplar, sunucular, kanallar ve mesaj
+  metinleri yedekten geri geldi (uygulama 27 Ağustos, Matrix 26 Ağustos). Yüklenen dosyalar,
+  avatarlar ve Matrix medyası kalıcı olarak kayıp; `.env` yeniden üretildi, herkes bir kez
+  yeniden giriş yapacak (§2b). **Kira son tarihi: 2 Kasım 2026.**
 - DB revizyonu `0019_ai_escape_room`'dur ve dört AI oyun modülünün backend'i dağıtılmıştı.
   **Lab modüllerinin dokuzu da kapalıdır** — kod ve veri yerinde, yalnız arayüzde gizli;
   sebep deneyimin geliştirilmeye ihtiyaç duyması (§3).
 - **Otomatik yedekleme, sağlık izleme ve AI Gateway otomatik başlatma kuruldu** ve çalıştığı
   doğrulandı (§20b, `docs/deployment/BACKUP.md`). Yedekleme sayesinde sunucu kaybında veri
-  kurtarıldı; yeni sunucuda **ilk iş** bunu tekrar kurmaktır.
+  kurtarıldı; yeni sunucuda da kuruldu ve ilk yedek alındı (4 Ekim 2026).
 - Mesajlaşma, sosyal sistem, DM, attachment, bot/plugin, ses, kamera, ekran paylaşımı, soundboard,
   kalite ayarları, dinamik sahne, AI deneyim modülleri ve Electron istemcisi uygulanmıştır.
 - **Ses kaynakları artık dinleyici başına ayrı ayrı ayarlanabilir** (konuşma / soundboard /
@@ -1687,6 +1729,7 @@ HTTPS_REVERSE_PROXY,DATABASE_SECURITY}.md` · `scripts/`
 - **Sıradaki büyük iş:** kök domainde hub/portal + on-demand proje launcher'ı (§25).
 - **En önemli açık risk:** yeni sunucuda gerçek iki kullanıcılı ses/medya smoke testi henüz yapılmadı.
 
+> ℹ️ *Tarihsel (eski sunucu, Ağustos 2026):*
 > ⚠️ **Sunucu yedeği yok.** 6 Ağustos 2026'da Keyubu panelinde snapshot alınmak istendi ancak
 > mevcut hizmet paketi bu özelliği kapsamıyor. Kullanıcı yedeksiz devam etmeyi onayladı.
 > Dört modülün dağıtımı `0016`–`0019` migration'larını çalıştıracaktır; tek koruma dağıtım
