@@ -1099,6 +1099,11 @@ portalında açılır (sidebar overflow/blur tarafından kırpılmaz).
   kaynağını bu yöntemle kapatmaz. Canlı sahne tamamen gizlenebilir; arka plandaki video
   elemanları duraklatılır, ses ayrı audio elemanından devam eder.
 - Fullscreen'de mikrofon, deafen, kamera, ekran paylaşımı, ayrılma ve grid/focus erişimi korunur.
+- **Tam ekranda kontrol çubuğu fare alt şeride (120px) inene kadar gizlidir** (10 Kasım 2026).
+  Gizliyken ona ayrılan alt boşluk sahneye döner: `padding-bottom` 96px → 18px. `VideoStage`
+  sahne köküne `data-controls-hidden` yazar, görünürlüğü `App.css` yürütür. Fare pencereden
+  çıkarsa çubuk gizlenir. Klavyeyle Tab'layan kullanıcı kaybolmuş bir düğmeye düşmesin diye
+  `:focus-within` çubuğu geri getirir — bu yüzden `display:none` değil `opacity:0` kullanılır.
 - Kalite ayarları **Ayarlar → Ses ve Video** içindedir: 480p/720p/1080p/1440p/2160p, 30/60 FPS.
   Presetler `frontend/src/settings.ts` içindeki `VIDEO_QUALITY_PRESETS` tablosundadır ve
   bitrate değerleri **tavan**dır (WebRTC ağ koşuluna göre aşağı iner). Medya sunucudan geçmez,
@@ -1507,6 +1512,27 @@ smoke testinin parçasıdır ve hâlâ açıktır.
 ---
 
 ## 23. Performans ve kaynak tasarrufu
+
+### Pencere odakta değilken (10 Kasım 2026, `ec3b17c` ile canlıda)
+
+Kullanıcı oyun oynarken Nexus ikinci ekranda açık kalıyor ve aynı GPU'yu paylaşıyordu.
+`main.tsx` pencere odağını izleyip kökte `data-window-inactive` taşır; odak başka
+uygulamadayken:
+
+- `App.css` dekoratif **sonsuz** animasyonları duraklatır (13 seçici). Giriş/çıkış
+  animasyonlarına dokunulmaz, yoksa modal/toast yarı görünür kalırdı.
+- `ThemeStage` canvas'ı rAF zincirinden **tamamen çıkar** (kare atlamaz, döngüyü bırakır).
+- Video gönderiminde donanım kodlayıcısı (H.264 → VP9) `mediaCapabilities.encodingInfo`
+  ile `powerEfficient` sorgulanarak seçilir. Chromium varsayılanı VP8'i yazılımla kodlar;
+  bu CPU'yu, dolayısıyla oyunun FPS'ini yiyordu. Codec seçimi `setParameters` ile yapılır,
+  **SDP ve m-line sırası değişmez** (§15'teki m-line kuralı korunur).
+- `setParameters` çağrıları sender başına sıraya alınır; eşzamanlı iki çağrı ikincisini
+  `InvalidStateError` ile düşürüyordu.
+
+> Henüz yapılmadı: `backdrop-filter` (20 kural) odak dışındayken de aktif. Video oynarken
+> bulanıklık her karede yeniden hesaplanır. Kapatmak ölçülebilir kazanç verir ama paneller
+> daha düz/saydam görünür — ikinci ekrandan izlerken fark edilir, o yüzden karar kullanıcıya
+> bırakıldı.
 
 - Gerçek zamanlı payload geldiğinde son 50 mesaj tekrar indirilmez; gateway bağlıyken snapshot seyrekleşir.
 - Sekme arka plandaysa polling dakikalar düzeyinde seyrekleşir, analyser durur, video render duraklatılır.
