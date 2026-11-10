@@ -274,7 +274,105 @@ function buildScreenConstraints(vs: VoiceSettings): MediaTrackConstraints {
   };
 }
 
-async function optimizeVideoSender(
+/**
+ * Donanım kodlayıcısına uygun video codec'leri, tercih sırasıyla.
+ *
+ * Chromium varsayılan olarak VP8'i yazılımla kodlar. 1080p60 oyun yayınında bu hem yayıncının
+ * CPU'sunu (dolayısıyla oyun FPS'ini) yer hem de CPU yetmeyince WebRTC çözünürlüğü düşürür;
+ * yayın bulanıklaşır. GPU kodlayıcısı (NVENC/QSV/AMF) bu yükü CPU'dan alır.
+ *
+ * H.264 her alıcıda donanımla çözülebildiği için öndedir; High/Main profil aynı bitrate'te
+ * Baseline'dan daha net görüntü verir. AV1/H.265 bilinçli olarak listede yok: alıcının GPU'su
+ * desteklemezse yazılımla çözülür ve izleyenin oyununda FPS düşürür.
+ */
+const HARDWARE_VIDEO_CODEC_PREFERENCE: Array<(codec: RTCRtpCodec) => boolean> = [
+  (codec) => isH264(codec, "64"),
+  (codec) => isH264(codec, "4d"),
+  (codec) => isH264(codec, "4200"),
+  (codec) => isH264(codec, "42e0"),
+  (codec) => codec.mimeType.toLowerCase() === "video/vp9" && !/profile-id=[^0]/.test(codec.sdpFmtpLine ?? ""),
+];
+
+function isH264(codec: RTCRtpCodec, profilePrefix: string): boolean {
+  const fmtp = (codec.sdpFmtpLine ?? "").toLowerCase();
+  return (
+    codec.mimeType.toLowerCase() === "video/h264" &&
+    fmtp.includes("packetization-mode=1") &&
+    fmtp.includes(`profile-level-id=${profilePrefix}`)
+  );
+}
+
+const hardwareEncodeSupport = new Map<string, Promise<boolean>>();
+
+/** Codec bu çözünürlük/FPS'te GPU ile kodlanabiliyor mu (`powerEfficient`). */
+function canEncodeInHardware(
+  codec: RTCRtpCodec,
+  width: number,
+  height: number,
+  framerate: number,
+  bitrate: number,
+): Promise<boolean> {
+  const contentType = codec.sdpFmtpLine ? `${codec.mimeType};${codec.sdpFmtpLine}` : codec.mimeType;
+  const key = `${contentType}|${width}x${height}@${framerate}`;
+  const cached = hardwareEncodeSupport.get(key);
+  if (cached) return cached;
+  const capabilities = navigator.mediaCapabilities;
+  if (!capabilities?.encodingInfo) return Promise.resolve(false);
+  const query = capabilities
+    .encodingInfo({
+      type: "webrtc",
+      video: { contentType, width, height, framerate, bitrate },
+    })
+    .then((info) => info.supported && info.powerEfficient)
+    .catch(() => false)
+    .then((efficient) => {
+      // GPU süreci henüz hazır değilken olumsuz dönebilir; yalnız olumlu sonucu sakla.
+      if (!efficient) hardwareEncodeSupport.delete(key);
+      return efficient;
+    });
+  hardwareEncodeSupport.set(key, query);
+  return query;
+}
+
+/**
+ * Bu eşle pazarlığı yapılmış codec'ler arasından donanımla kodlanabilen ilkini seçer.
+ * Hiçbiri uygun değilse `null` döner ve tarayıcının varsayılan codec'i (eski davranış) sürer.
+ */
+async function pickHardwareVideoCodec(
+  sender: RTCRtpSender,
+  width: number,
+  height: number,
+  framerate: number,
+  bitrate: number,
+): Promise<RTCRtpCodec | null> {
+  const negotiated = sender.getParameters().codecs ?? [];
+  if (!negotiated.length) return null;
+  for (const matches of HARDWARE_VIDEO_CODEC_PREFERENCE) {
+    for (const codec of negotiated.filter(matches)) {
+      if (await canEncodeInHardware(codec, width, height, framerate, bitrate)) return codec;
+    }
+  }
+  return null;
+}
+
+type EncodingWithCodec = RTCRtpEncodingParameters & { codec?: RTCRtpCodec };
+
+// Aynı sender'a eşzamanlı iki setParameters, ikincisini InvalidStateError ile düşürür
+// (bağlantı kurulumu ile kalite değişikliği çakışabilir). Çağrılar sender başına sıralanır.
+const videoSenderQueues = new WeakMap<RTCRtpSender, Promise<void>>();
+
+function optimizeVideoSender(
+  sender: RTCRtpSender,
+  kind: Exclude<VideoKind, null>,
+  vs: VoiceSettings,
+): Promise<void> {
+  const previous = videoSenderQueues.get(sender) ?? Promise.resolve();
+  const next = previous.then(() => applyVideoSenderParameters(sender, kind, vs));
+  videoSenderQueues.set(sender, next);
+  return next;
+}
+
+async function applyVideoSenderParameters(
   sender: RTCRtpSender,
   kind: Exclude<VideoKind, null>,
   vs: VoiceSettings,
@@ -284,11 +382,20 @@ async function optimizeVideoSender(
     const baseBitrate = kind === "screen" ? preset.screenBitrate : preset.cameraBitrate;
     const frameRateMultiplier = vs.videoFrameRate === 60 ? 1.5 : 1;
     const motionMultiplier = kind === "screen" && vs.screenShareMode === "motion" ? 1.15 : 1;
+    const maxBitrate = Math.round(baseBitrate * frameRateMultiplier * motionMultiplier);
+    // Pazarlık bitmeden codec listesi boştur; o durumda bağlantı kurulunca tekrar çağrılır.
+    const hardwareCodec = sender.track
+      ? await pickHardwareVideoCodec(
+          sender,
+          preset.width,
+          preset.height,
+          vs.videoFrameRate,
+          maxBitrate,
+        )
+      : null;
     const parameters = sender.getParameters();
     if (!parameters.encodings?.length) parameters.encodings = [{}];
-    parameters.encodings[0].maxBitrate = Math.round(
-      baseBitrate * frameRateMultiplier * motionMultiplier,
-    );
+    parameters.encodings[0].maxBitrate = maxBitrate;
     parameters.encodings[0].maxFramerate = vs.videoFrameRate;
     if (kind === "screen") {
       const source = sender.track?.getSettings();
@@ -306,7 +413,22 @@ async function optimizeVideoSender(
       kind === "screen" && vs.screenShareMode === "motion"
         ? "maintain-framerate"
         : "maintain-resolution";
-    await sender.setParameters(parameters);
+    // Codec seçimi setParameters ile yapılır: SDP, transceiver sırası ve m-line sayısı değişmez.
+    // Seçilen codec yalnız bu eşle zaten pazarlığı yapılmış olanlardan biridir.
+    const encoding = parameters.encodings[0] as EncodingWithCodec;
+    if (hardwareCodec) encoding.codec = hardwareCodec;
+    try {
+      await sender.setParameters(parameters);
+    } catch (error) {
+      if (!hardwareCodec) throw error;
+      // Codec seçimini desteklemeyen tarayıcıda bitrate/FPS ayarları yine uygulansın.
+      const fallback = sender.getParameters();
+      if (!fallback.encodings?.length) fallback.encodings = [{}];
+      Object.assign(fallback.encodings[0], parameters.encodings[0]);
+      delete (fallback.encodings[0] as EncodingWithCodec).codec;
+      fallback.degradationPreference = parameters.degradationPreference;
+      await sender.setParameters(fallback);
+    }
   } catch {
     // Bazı tarayıcılar kodlayıcı parametrelerinin bir kısmını desteklemez; varsayılan uyarlama sürer.
   }
@@ -1301,6 +1423,13 @@ export function useVoiceChannel(channelId: number | null, voiceSettings: VoiceSe
           void resumeAudioContext(microphoneGraphRef.current?.context).catch(() => {});
           void syncOutgoingAudioSender(peerId, peer).catch(() => {});
           void resumeRemoteAudioPlayback(peerId).catch(() => {});
+          // Codec listesi ancak pazarlık bitince dolar; donanım kodlayıcısı seçimi burada yapılır.
+          if (cameraTrackRef.current && peer.cameraTransceiver) {
+            void optimizeVideoSender(peer.cameraTransceiver.sender, "camera", voiceSettingsRef.current);
+          }
+          if (screenTrackRef.current && peer.screenTransceiver) {
+            void optimizeVideoSender(peer.screenTransceiver.sender, "screen", voiceSettingsRef.current);
+          }
           setError((current) =>
             current === "Medya bağlantısı yeniden kuruluyor…" ? microphoneError : current,
           );

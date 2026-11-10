@@ -29,9 +29,10 @@ const DEPTH = 1400;
  * perspektif izdüşümü ve additive blending'i 2B canvas'ta doğrudan yazılabilir;
  * görsel sonuç aynı, bağımlılık ve GPU baskısı yok.
  *
- * PERFORMANS SÖZLEŞMESİ: döngü şu üç durumda tamamen bırakılır (kare atlamak
+ * PERFORMANS SÖZLEŞMESİ: döngü şu dört durumda tamamen bırakılır (kare atlamak
  * değil, rAF zincirinden çıkmak): sesli görüşme aktifken, sekme arka plandayken,
- * hareket azaltma tercihi verildiğinde. Sonuncusunda canvas gizlenir ve CSS
+ * pencere odakta değilken (ör. oyun ön planda, Nexus ikinci ekranda), hareket
+ * azaltma tercihi verildiğinde. Sonuncusunda canvas gizlenir ve CSS
  * statik nebula yedeği devreye girer.
  */
 export function ThemeStage({ theme, callActive }: ThemeStageProps) {
@@ -152,7 +153,8 @@ export function ThemeStage({ theme, callActive }: ThemeStageProps) {
       ctx!.globalCompositeOperation = "source-over";
     }
 
-    const idle = () => document.hidden || callActiveRef.current || reduced.matches;
+    const idle = () =>
+      document.hidden || !document.hasFocus() || callActiveRef.current || reduced.matches;
 
     function frame() {
       if (idle()) {
@@ -184,6 +186,7 @@ export function ThemeStage({ theme, callActive }: ThemeStageProps) {
     wake();
 
     window.addEventListener("resize", handleResize);
+    window.addEventListener("focus", wake);
     document.addEventListener("visibilitychange", wake);
     reduced.addEventListener("change", wake);
 
@@ -191,6 +194,7 @@ export function ThemeStage({ theme, callActive }: ThemeStageProps) {
       cancelAnimationFrame(frameId);
       running = false;
       window.removeEventListener("resize", handleResize);
+      window.removeEventListener("focus", wake);
       document.removeEventListener("visibilitychange", wake);
       reduced.removeEventListener("change", wake);
     };

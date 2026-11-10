@@ -10047,6 +10047,59 @@ time,
   line-height: 1.6;
 }
 
+/* ---- Pencere odakta değilken dekoratif döngüler durur ----
+   Kullanıcı oyundayken Nexus ikinci ekranda açık kalabiliyor. Sonsuz bir animasyon
+   tarayıcıyı ekran yenileme hızında kare üretmeye zorlar; zemin ışığı ise .app-main'in
+   backdrop-filter bulanıklığını her karede yeniden hesaplatır. Bu GPU yükü oyunla
+   paylaşılır ve FPS düşürür. Yalnız sonsuz döngüler duraklatılır: giriş/çıkış
+   animasyonları (modal, toast) normal sürer, böylece hiçbir öğe yarı görünür kalmaz.
+   `data-window-inactive` main.tsx tarafından yazılır. */
+:root[data-window-inactive] body::before,
+:root[data-window-inactive] .connection-pill__dot,
+:root[data-window-inactive] .video-stage__live-dot,
+:root[data-window-inactive] .voice-avatar--speaking,
+:root[data-window-inactive] .call-modal__avatar,
+:root[data-window-inactive] .call-toast__pulse,
+:root[data-window-inactive] .chat-area__typing > span,
+:root[data-window-inactive] .soundboard-panel__library-heading > small span,
+:root[data-window-inactive] .login-visual__orb--one,
+:root[data-window-inactive] .login-visual__orb--two,
+:root[data-window-inactive] .login-visual__orb--three,
+:root[data-window-inactive] .server-icon {
+  animation-play-state: paused !important;
+}
+
+/* ---- Tam ekranda kontroller fare alta inince gelir ----
+   Tam ekran sahnede kontrol çubuğu sürekli duruyordu ve altında sahneye 96px'lik bir
+   şerit ayrılıyordu. Fare alt şeride inmediği sürece çubuk gizlenir ve o şerit sahneye
+   geri verilir; görüntü tam ekranın tamamını kullanır. `data-controls-hidden`
+   VideoStage tarafından yazılır. Yalnız tam ekranda geçerlidir — küçük sahnede çubuk
+   zaten gösterilmiyor (bkz. `.video-stage:not(:fullscreen)` kuralı). */
+.video-stage:fullscreen .video-stage__overlay-controls {
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.video-stage:fullscreen[data-controls-hidden] .video-stage__overlay-controls {
+  opacity: 0;
+  transform: translateX(-50%) translateY(12px);
+  pointer-events: none;
+}
+
+/* Klavye odağı çubuğa girdiğinde görünür kalsın; `opacity: 0` öğeyi odaklanabilir
+   bırakır, bu yüzden Tab ile gelen kullanıcı kaybolmuş bir düğmeye düşmez. */
+.video-stage:fullscreen[data-controls-hidden] .video-stage__overlay-controls:focus-within {
+  opacity: 1;
+  transform: translateX(-50%);
+  pointer-events: auto;
+}
+
+/* Çubuk gizliyken ona ayrılan alt boşluk sahneye döner. */
+.video-stage:fullscreen[data-controls-hidden] .broadcast-layout,
+.video-stage:fullscreen[data-controls-hidden] .voice-focus-layout,
+.video-stage:fullscreen[data-controls-hidden] .voice-grid {
+  padding-bottom: 18px;
+}
+
 /* ---- Hareket azaltma tercihi mutlaktır ---- */
 @media (prefers-reduced-motion: reduce) {
   body::before,

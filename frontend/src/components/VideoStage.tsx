@@ -131,6 +131,15 @@ function MediaTile({
   );
 }
 
+/**
+ * Tam ekranda kontrol çubuğunun açılacağı alt şerit yüksekliği (piksel).
+ *
+ * Çubuğun kendisi alttan ~22px yukarıda ve ~60px yüksekliğinde duruyor; 120px, fare
+ * çubuğa doğru inerken çubuk görünür hâle gelip altına varıldığında zaten açık olmasını
+ * sağlar. Daha dar bir şerit "fare tam kenara değmeden açılmıyor" hissi verirdi.
+ */
+const CONTROLS_REVEAL_ZONE_PX = 120;
+
 export function VideoStage({
   currentUser,
   participants,
@@ -146,6 +155,8 @@ export function VideoStage({
 }) {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // Tam ekranda kontroller fare alt şeride inene kadar gizli durur.
+  const [controlsRevealed, setControlsRevealed] = useState(false);
   const [focusedTileKey, setFocusedTileKey] = useState<string | null>(null);
   const remotes = useMemo(() => [...voice.remoteStreams.values()], [voice.remoteStreams]);
   const streamFor = (userId: number, kind: "camera" | "screen") =>
@@ -226,6 +237,19 @@ export function VideoStage({
     return () => document.removeEventListener("fullscreenchange", handler);
   }, []);
 
+  // Tam ekrandan çıkınca bir sonraki girişte kontroller yine gizli başlasın.
+  useEffect(() => {
+    if (!isFullscreen) setControlsRevealed(false);
+  }, [isFullscreen]);
+
+  function updateControlsFromPointer(clientY: number) {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const near = clientY >= stage.getBoundingClientRect().bottom - CONTROLS_REVEAL_ZONE_PX;
+    // Aynı değere tekrar set etmek her fare hareketinde yeniden render tetiklerdi.
+    setControlsRevealed((current) => (current === near ? current : near));
+  }
+
   async function toggleFullscreen() {
     if (!stageRef.current) return;
     if (document.fullscreenElement) await document.exitFullscreen();
@@ -274,6 +298,9 @@ export function VideoStage({
         focusedTile ? "video-stage--focused" : "",
       ].filter(Boolean).join(" ")}
       ref={stageRef}
+      onPointerMove={isFullscreen ? (event) => updateControlsFromPointer(event.clientY) : undefined}
+      onPointerLeave={isFullscreen ? () => setControlsRevealed(false) : undefined}
+      data-controls-hidden={isFullscreen && !controlsRevealed ? "" : undefined}
     >
       {toolbarTarget
         ? createPortal(
@@ -294,6 +321,8 @@ export function VideoStage({
           className="video-stage__overlay-controls video-stage__overlay-controls--full"
           aria-label="Sahne kontrolleri"
           onClick={(event) => event.stopPropagation()}
+          // Klavyeyle (Tab) gelindiğinde de açılsın: fare şartı erişilebilirliği kırmasın.
+          onFocusCapture={() => setControlsRevealed(true)}
         >
           <div className="video-stage__control-group" aria-label="Ses ve medya kontrolleri">
             <button className={voice.muted ? "stage-control stage-control--danger" : "stage-control"} onClick={voice.toggleMute} title={voice.muted ? "Sesi aç" : "Sustur"}><Icon name={voice.muted ? "micOff" : "mic"} /><span>{voice.muted ? "Sesi aç" : "Sustur"}</span></button>
